@@ -78,6 +78,9 @@ importers:
       '@harness-dock/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
       json-rpc-2.0:
         specifier: 1.8.1
         version: 1.8.1

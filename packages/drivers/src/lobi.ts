@@ -1,31 +1,17 @@
 import { ExecaError } from "execa";
-import { raceWithSignalAndTimeout } from "./protocol-operation.ts";
+import { probeAcpSession } from "./acp-probe.ts";
 import {
   PROTOCOL_VERSION,
-  type NewSessionResponse,
-  type NewSessionRequest,
   type SetSessionConfigOptionResponse,
   type SetSessionConfigOptionRequest,
-  client as createAcpClientApp,
   methods,
-  ndJsonStream,
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
-  Readable as NodeReadable,
-  Writable as NodeWritable,
-} from "node:stream";
-import {
-  startProtocolProcess,
   runBoundedCommand,
-  closeProtocolProcess,
 } from "./process-command.ts";
 import {
   AcpProbeError,
-  ACP_PROBE_TOOLS,
   type ProbeCommand,
   type AcpExecutor,
   type AcpExecutionInput,
@@ -33,7 +19,6 @@ import {
   type AcpInspection,
 } from "./acp-types.ts";
 import { runAcpSession } from "./acp-session.ts";
-import { createMcpBridge } from "./mcp-bridge.ts";
 
 const LOBI_ACP_ARGS = ["acp", "--scene", "work"] as const;
 const MINIMUM_CODEWIZ_VERSION = [0, 1, 95] as const;
@@ -73,114 +58,11 @@ async function defaultProbeAcp(
   signal: AbortSignal,
   env: NodeJS.ProcessEnv,
 ): Promise<AcpProbeResult> {
-  const probeDirectory = await mkdtemp(
-    join(tmpdir(), "harness-dock-lobi-probe-"),
-  );
-  const bridge = await createMcpBridge({
-    tools: ACP_PROBE_TOOLS,
-    signal,
-    invocation: {
-      signal,
-      onToolCall: async () => ({
-        isError: true,
-        content: { code: "PROBE_DATA_ONLY" },
-      }),
-    },
+  return probeAcpSession({ executable, signal, env, label: 'Lobi CodeWiz', args: cwd => [...LOBI_ACP_ARGS, '--cwd', cwd] }, ({ session }) => {
+    const modelOption = findConfigOption(session.configOptions, 'model', 'model');
+    if (modelOption?.type !== 'select') throw new Error('Lobi CodeWiz did not report a selectable model option during probe');
+    return { models: [...new Set(optionValues(modelOption))], modes: [...new Set(session.modes?.availableModes.map(mode => mode.id) ?? [])] };
   });
-  const child = startProtocolProcess(
-    executable,
-    [...LOBI_ACP_ARGS, "--cwd", probeDirectory],
-    {
-      cwd: probeDirectory,
-      env,
-    },
-  );
-  child.stderr.resume();
-  const exitPromise = child.exited;
-  const clientApp = createAcpClientApp({
-    name: "harness-dock-runtime-daemon-probe",
-  });
-  const connection = clientApp.connect(
-    ndJsonStream(
-      NodeWritable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-      NodeReadable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    ),
-  );
-  try {
-    const initialized = await raceWithSignalAndTimeout(
-      Promise.race([
-        connection.agent.request(methods.agent.initialize, {
-          protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: {},
-          clientInfo: {
-            name: "harness-dock-runtime-daemon-probe",
-            version: "0.1.0",
-          },
-        }),
-        connection.closed.then(() => {
-          throw new Error("Lobi CodeWiz ACP probe connection closed");
-        }),
-        exitPromise.then((code) => {
-          throw new Error(`Lobi CodeWiz exited during ACP probe (${code})`);
-        }),
-      ]),
-      { signal, label: "Lobi CodeWiz ACP initialize" },
-    );
-    const session = await raceWithSignalAndTimeout(
-      Promise.race([
-        connection.agent.request<NewSessionResponse, NewSessionRequest>(
-          methods.agent.session.new,
-          {
-            cwd: probeDirectory,
-            mcpServers: [bridge.descriptor],
-          },
-        ),
-        connection.closed.then(() => {
-          throw new Error("Lobi CodeWiz ACP probe connection closed");
-        }),
-        exitPromise.then((code) => {
-          throw new Error(
-            `Lobi CodeWiz exited during ACP session probe (${code})`,
-          );
-        }),
-      ]),
-      { signal, label: "Lobi CodeWiz ACP session" },
-    );
-    const modelOption = findConfigOption(
-      session.configOptions,
-      "model",
-      "model",
-    );
-    if (modelOption?.type !== "select")
-      throw new Error(
-        "Lobi CodeWiz did not report a selectable model option during probe",
-      );
-    const mcpTools = await raceWithSignalAndTimeout(bridge.ready, {
-      signal,
-      timeoutMs: 3_000,
-      label: "Lobi MCP tool discovery",
-    }).then(
-      () => true,
-      () => false,
-    );
-    signal.throwIfAborted();
-    return {
-      protocolVersion: initialized.protocolVersion,
-      loadSession: initialized.agentCapabilities?.loadSession === true,
-      resumeSession:
-        initialized.agentCapabilities?.sessionCapabilities?.resume !==
-        undefined,
-      models: [...new Set(optionValues(modelOption))],
-      modes: [
-        ...new Set(session.modes?.availableModes.map((mode) => mode.id) ?? []),
-      ],
-      mcpTools,
-    };
-  } finally {
-    await closeProtocolProcess(child);
-    await bridge.close();
-    await rm(probeDirectory, { recursive: true, force: true });
-  }
 }
 
 function assertSupportedVersion(version: string): void {

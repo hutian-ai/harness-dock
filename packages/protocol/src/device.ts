@@ -1,4 +1,4 @@
-/** Device control is separate from the original single-session demo protocol. */
+/** Device connection identity is pinned independently of each execution. */
 export const DEVICE_PROTOCOL_VERSION = 2;
 export const DEVICE_PROTOCOL_HEADER = 'x-dock-device-version';
 

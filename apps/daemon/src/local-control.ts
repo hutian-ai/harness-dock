@@ -3,19 +3,19 @@ import { createServer, request } from 'node:http';
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { NodeConfig } from './config.ts';
+import type { DeviceConfig } from './config.ts';
 
 export interface LocalStatus {
   nodeId: string; daemonId: string; pid: number; connected: boolean; endpoint: string;
 }
-function socketPath(config: NodeConfig, daemonId: string): string {
+function socketPath(config: DeviceConfig, daemonId: string): string {
   const key = createHash('sha256').update(`${resolve(config.stateDir)}:${daemonId}`).digest('hex').slice(0, 32);
   return join(tmpdir(), `hd-${process.getuid?.() ?? 'user'}`, `${key}.sock`);
 }
-const descriptor = (config: NodeConfig) => join(config.stateDir, 'control.json');
+const descriptor = (config: DeviceConfig) => join(config.stateDir, 'control.json');
 
-/** Called only after Engine has acquired the state directory's SQLite lock. */
-export async function serveControl(config: NodeConfig, status: () => LocalStatus, shutdown: () => Promise<void>) {
+/** Called only after DeviceHost has acquired the state directory's SQLite lock. */
+export async function serveControl(config: DeviceConfig, status: () => LocalStatus, shutdown: () => Promise<void>) {
   if (process.platform === 'win32') throw new Error('Local daemon management currently requires macOS or Linux');
   const path = socketPath(config, status().daemonId);
   const directory = join(tmpdir(), `hd-${process.getuid!()}`);
@@ -57,7 +57,7 @@ export async function serveControl(config: NodeConfig, status: () => LocalStatus
   return () => new Promise<void>((done) => server.close(() => done()));
 }
 
-export async function control(config: NodeConfig, method: 'status' | 'stop'): Promise<LocalStatus & { stopped?: boolean; } | null> {
+export async function control(config: DeviceConfig, method: 'status' | 'stop'): Promise<LocalStatus & { stopped?: boolean; } | null> {
   let info: LocalStatus;
   try { info = JSON.parse(await readFile(descriptor(config), 'utf8')); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }

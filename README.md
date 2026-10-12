@@ -14,7 +14,7 @@
 - Daemon 拥有 Provider 登录、进程、会话、执行证据和本机文件。安装发现与实际协议就绪分别报告。
 - 调用方应用 拥有 World、成员、任务、授权及业务结果，只依赖 client SDK。
 - 连接断开不重发 prompt、审批或工具。响应丢失保持未知，通过原执行身份查询。
-- 不需要 Docker，不新增账号或 SSO。公网使用校验证书的 WSS，WS 仅允许回环地址。
+- 设备执行不需要 Docker，不新增账号或 SSO。公网使用校验证书的 WSS，WS 仅允许回环地址。
 
 源码按职责组织 server、daemon、client、protocol、drivers，全部是私有 workspace package。server 可独立运行；daemon 是设备上的命令行程序。
 
@@ -35,7 +35,7 @@ pnpm daemon start .local/device/config.json
 pnpm demo:devices .local/control/client.json
 ```
 
-`init` 生成互相独立的设备和应用凭据，文件权限为 0600；不要提交或输出凭据。server 前台运行，正式服务器由系统服务管理器管理其进程。
+`init` 生成互相独立的设备和应用凭据，文件权限为 0600；不要提交或输出凭据。server 前台运行，云端 server 由 Docker Compose 管理其进程。
 
 控制台命令：`nodes`、`inventory`、`run codex 回复 hello`、`run zcode 回复 hello`、`status`、`allow <审批 ID>`、`deny <审批 ID>`、`cancel`、`quit`。多设备时用 `use <nodeId>` 选择设备。
 
@@ -68,7 +68,7 @@ const inventory = await peer.request('inventory');
 // await client.close();
 ```
 
-`request(method, params, timeoutMs)` 不自动重试。节点方法为 `inventory / prepare / execute / getExecution / events / reconcile / cancel / steer / collect / release / forgetSession`。设备协议 v2，server-client 协议 v1，版本不符明确拒绝。`DeviceController` 是 server 内部的设备入口，直接连接示例属于前序实验。
+`request(method, params, timeoutMs)` 不自动重试。节点方法为 `inventory / prepare / execute / getExecution / events / reconcile / cancel / steer / collect / release / forgetSession`。设备协议 v2，server-client 协议 v1，版本不符明确拒绝。`DeviceController` 是 server 内部的设备入口，也可用于不经过中继的局部集成。
 
 Skill 字节通过 `prepare` 传到设备，结果文件通过 `collect` 回传；`release` 只删除该次输出。`forgetSession` 仅在引用该会话的执行均安全释放后删除托管会话目录，保留执行去重身份。
 
@@ -111,13 +111,15 @@ npm install --offline --install-links=false --ignore-scripts --no-audit --no-fun
 
 ```sh
 pnpm check
+# 需要已登录的真实模型；只操作隔离实验目录
+pnpm accept:codex
+pnpm accept:zcode
+node --import tsx scripts/accept-bundle.ts /absolute/new-output-directory
 ```
-
-测试与真实模型证据见 [验证记录](docs/validation.md)。当前家用跨网络连接、云服务器部署和原生 Windows 安装尚未实测。macOS 本机结果不能代替这些验收；Linux 是目标平台。
 
 这不是完整桌面远控软件：鼠标、屏幕及应用操作依赖 Provider 自身工具与操作系统权限。ZCode 桌面 UI 也不是 harness-dock 控制端；当前方向是 Daemon 调用 ZCode Agent。
 
-早期单会话 `DockClient`、`demo:controller` 与 drivers 嵌入 API 暂保留用于既有实验和验证，见 [嵌入说明](docs/embedded-driver.md)；设备模式是本次控制端接入方向。Docker/Podman 保留实验代码并后置，不作为家用安装门禁。
+正式执行链只保留设备 Daemon 和 ServerClient；Driver 是 Daemon 内部的执行模块，见 [Driver 边界](docs/embedded-driver.md)。Provider Docker/Podman 保留实验代码并后置，不作为家用安装门禁。
 
 ## 云端部署
 

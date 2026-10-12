@@ -10,15 +10,15 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json"
   },
   "dependencies": {
     "@harness-dock/protocol": "workspace:*",
-    "ws": "8.22.0",
-    "json-rpc-2.0": "1.8.1"
+    "@types/ws": "8.18.2",
+    "json-rpc-2.0": "1.8.1",
+    "ws": "8.22.0"
   },
   "bin": {
-    "harness-dock-console": "dist/console.js",
     "harness-dock-devices": "dist/device-console.js"
   },
   "files": [
