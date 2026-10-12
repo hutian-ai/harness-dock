@@ -1,0 +1,35 @@
+# Linux server behind the host's existing TLS reverse proxy.
+# The application enforces loopback-only plaintext; host networking preserves that boundary.
+services:
+  server:
+    image: harness-dock-server:${DOCK_IMAGE_TAG:?Set DOCK_IMAGE_TAG}
+    network_mode: host
+    user: "${DOCK_UID:?Set DOCK_UID}:${DOCK_GID:?Set DOCK_GID}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    pids_limit: 64
+    stop_grace_period: 20s
+    ulimits:
+      nofile: {soft: 4096, hard: 4096}
+    volumes:
+      - type: bind
+        source: ${DOCK_CONFIG_FILE:?Set DOCK_CONFIG_FILE}
+        target: /run/harness-dock/server.json
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    logging:
+      driver: local
+      options: {max-size: "10m", max-file: "3"}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:48519/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
