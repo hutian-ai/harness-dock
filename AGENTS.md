@@ -18,4 +18,4 @@ Independent device execution: control plane SDK ↔ device Daemon → provider D
 - Docker/Podman is deferred by the user; retain existing experimental code and evidence without running it as a v1 gate.
 - Local daemon management must address the owning daemon through a protected local socket, never signal a process from a saved PID.
 - Remote connections require verified TLS and the configured node identity; plaintext is loopback-only.
-- Consumers use the connection SDK only. Provider discovery, processes, local files and credentials belong to the independently running device Daemon. Keep application business types and governance out of this repository; actual cloud deployment and npm publishing remain deferred.
+- Consumers use the connection SDK only. Provider discovery, processes, local files and credentials belong to the independently running device Daemon. Keep application business types and governance out of this repository. npm publishing remains deferred. Keep cloud credentials and pairing files outside Git.
