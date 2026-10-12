@@ -208,3 +208,46 @@ test('a released ZCode warm session explicitly rejects resume without starting a
   assert.deepEqual(expired, { state: 'failed', error: 'zcode_session_unavailable' });
   assert.equal(await readFile(audit, 'utf8'), before);
 });
+
+test('device admission and approval fences survive duplicate requests, cancellation races and detached callbacks', { timeout: 10000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'dock-control-'));
+  let current!: CodexHostInput<unknown>, finish!: (result: CodexEvidence) => void, starts = 0;
+  const host = new DeviceHost({ mode: 'device', nodeId: 'control-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
+    providers: { codex: { home: root }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } }, {
+    inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: true } }),
+    execute: async input => { starts++; current = input; await input.onReady('thread'); return new Promise(resolve => { finish = resolve; }); },
+    close: async () => {}, reconcile: async () => null,
+  });
+  t.after(async () => { finish?.({ runId: current.runId, fingerprint: 'synthetic', state: 'cancelled', messages: [] }); await host.close(); await rm(root, { recursive: true, force: true }); });
+  let decide!: (value: string) => void;
+  host.bind(async (_method, value) => (value as { kind: string }).kind === 'permission' ? new Promise(resolve => { decide = resolve; }) : null);
+  await host.inventory(); await host.prepare({ runId: 'first' });
+  const input = { provider: 'codex', runId: 'first', model: 'synthetic', prompt: 'synthetic' };
+  const run = host.execute(input);
+  for (let i = 0; i < 100 && !finish; i++) await delay(5);
+  const duplicate = host.execute(input);
+  await assert.rejects(host.execute({ ...input, prompt: 'different' }), /identity_conflict/);
+  await assert.rejects(host.execute({ ...input, runId: 'second' }), /busy/);
+  assert.equal(starts, 1);
+  const request = { id: 'permission', title: 'synthetic', details: {}, canAllow: true };
+  const pending = current.permission!(request, current.signal, Promise.resolve());
+  await host.cancel('first');
+  assert.equal(host.getExecution('first')?.state, 'running'); // Requesting cancel is not terminal evidence.
+  decide('allow'); assert.equal(await pending, 'deny');
+  finish({ runId: 'first', fingerprint: 'synthetic', state: 'completed', messages: [] });
+  assert.deepEqual(await duplicate, await run);
+  assert.equal(host.getExecution('first')?.state, 'completed');
+  const oldCallback = current.permission!;
+  await host.prepare({ runId: 'second' });
+  const second = host.execute({ ...input, runId: 'second' });
+  for (let i = 0; i < 100 && starts < 2; i++) await delay(5);
+  assert.equal(await oldCallback(request, new AbortController().signal, Promise.resolve()), 'deny');
+  const unbind = host.bind(async () => { throw new Error('connection lost'); });
+  assert.equal(await current.permission!(request, current.signal, Promise.resolve()), 'deny');
+  unbind();
+  assert.equal(await current.permission!(request, current.signal, Promise.resolve()), 'deny');
+  host.bind(async () => 'allow');
+  assert.equal(await current.permission!({ ...request, canAllow: false }, current.signal, Promise.resolve()), 'deny');
+  assert.equal(await current.permission!(request, current.signal, Promise.resolve()), 'allow');
+  finish({ runId: 'second', fingerprint: 'synthetic', state: 'completed', messages: [] }); await second;
+});

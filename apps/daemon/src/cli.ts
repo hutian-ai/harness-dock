@@ -5,23 +5,22 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import { initialize, initializeDevice, readConfig } from './config.ts';
+import { initializeDevice, readConfig } from './config.ts';
 import { control } from './local-control.ts';
 
 process.umask(0o077);
 try {
   const { positionals: [command, argument], values } = parseArgs({ allowPositionals: true, options: {
-    home: { type: 'string' }, cwd: { type: 'string' }, endpoint: { type: 'string' }, 'auth-from': { type: 'string' },
-    mode: { type: 'string' }, pairing: { type: 'string' }, 'node-id': { type: 'string' }, token: { type: 'string' }, 'ca-file': { type: 'string' }, provider: { type: 'string' }, 'zcode-home': { type: 'string' }, 'zcode-bin': { type: 'string' },
+    home: { type: 'string' }, cwd: { type: 'string' }, endpoint: { type: 'string' },
+    mode: { type: 'string' }, pairing: { type: 'string' }, 'node-id': { type: 'string' }, token: { type: 'string' }, 'ca-file': { type: 'string' },
     help: { type: 'boolean', short: 'h' }, 'background-log': { type: 'boolean' },
   } });
   if (!command || values.help || command === 'help') {
-    console.log('harness-dock-daemon init --mode device --cwd <directory> [--home .local/device] [--endpoint wss://controller.example/] [--pairing <device-pairing.json>]\nharness-dock-daemon init --cwd <directory> --auth-from <Codex auth.json> [--home .local/node] [--endpoint ws://127.0.0.1:48517/]\nharness-dock-daemon init --provider zcode --cwd <directory> --zcode-home <directory> --zcode-bin <CLI path> [--home .local/node]\nharness-dock-daemon <run|start|status|stop|logs> [config.json]\nDefault config: .local/node/config.json. start runs in the background; run stays in the foreground.');
+    console.log('harness-dock-daemon init --cwd <directory> [--home .local/device] [--endpoint wss://controller.example/] [--pairing <device-pairing.json>]\nharness-dock-daemon <run|start|status|stop|logs> [config.json]\nDefault config: .local/device/config.json. start runs in the background; run stays in the foreground.');
   } else if (command === 'init') {
     if (!values.cwd) throw new Error('init requires --cwd');
     if (values.mode && values.mode !== 'device') throw new Error('unsupported_mode');
-    if (values.mode === 'device') {
-      if (values.provider || values['auth-from'] || values['zcode-home'] || values['zcode-bin']) throw new Error('Device mode discovers providers automatically');
+    {
       let pairing: { nodeId?: string; token?: string; endpoint?: string } = {};
       if (values.pairing) {
         if (values['node-id'] || values.token || values.endpoint) throw new Error('pairing_conflicts_with_identity_flags');
@@ -32,23 +31,17 @@ try {
           || typeof pairing.nodeId !== 'string' || typeof pairing.token !== 'string' || typeof pairing.endpoint !== 'string') throw new Error('invalid_device_pairing');
       }
       console.log(JSON.stringify(await initializeDevice({ home: values.home ?? '.local/device', cwd: values.cwd, endpoint: pairing.endpoint ?? values.endpoint, nodeId: pairing.nodeId ?? values['node-id'], token: pairing.token ?? values.token, caFile: values['ca-file'] }), null, 2));
-    } else {
-    if (values.provider && values.provider !== 'codex' && values.provider !== 'zcode') throw new Error('unsupported_provider');
-    console.log(JSON.stringify(await initialize({ home: values.home ?? '.local/node', cwd: values.cwd,
-      authFrom: values['auth-from'], endpoint: values.endpoint, provider: values.provider as 'codex' | 'zcode' | undefined,
-      zcodeHome: values['zcode-home'], zcodeBin: values['zcode-bin'] }), null, 2));
     }
   } else {
     if (!['run', 'start', 'status', 'stop', 'logs'].includes(command)) throw new Error(`Unknown command: ${command}`);
-    const path = resolve(argument ?? '.local/node/config.json');
+    const path = resolve(argument ?? '.local/device/config.json');
     const config = await readConfig(path);
     if (command === 'run') {
       if (values['background-log']) {
         await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
         (await import('./rotating-log.ts')).installBackgroundLog(config.stateDir);
       }
-      if ('mode' in config && config.mode === 'device') await (await import('./device-main.ts')).runDeviceDaemon(config);
-      else await (await import('./main.ts')).runDaemon(config as import('./config.ts').ProviderNodeConfig);
+      await (await import('./device-main.ts')).runDeviceDaemon(config);
     }
     else if (command === 'status' || command === 'stop') {
       const result = await control(config, command);

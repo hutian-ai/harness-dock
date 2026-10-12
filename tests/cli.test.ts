@@ -12,22 +12,20 @@ const exec = promisify(execFile);
 test('local CLI preserves node identity, authenticates stop and ignores stale PID metadata', async (t) => {
   await mkdir('.local', { recursive: true });
   const root = await mkdtemp(resolve('.local/cli-'));
-  const home = join(root, 'node'), cwd = join(root, 'work'), auth = join(root, 'synthetic-auth.json');
+  const home = join(root, 'node'), cwd = join(root, 'work');
   await mkdir(cwd);
-  await writeFile(auth, '{"synthetic":true}', { mode: 0o600 });
   const cli = async (...args: string[]) => (await exec(process.execPath,
     [resolve('apps/daemon/dist/cli.js'), ...args], { timeout: 15_000 })).stdout;
-  const paths = JSON.parse(await cli('init', '--home', home, '--cwd', cwd, '--auth-from', auth,
+  const paths = JSON.parse(await cli('init', '--home', home, '--cwd', cwd,
     '--endpoint', 'ws://127.0.0.1:1/'));
   const config = await readConfig(paths.configPath);
-  if ('mode' in config) throw new Error('Expected single-provider configuration');
-  assert.notEqual(config.provider, 'zcode');
-  if (config.provider === 'zcode') throw new Error('Expected Codex configuration');
+  config.providers = Object.fromEntries(['codex', 'lobi', 'deepseek-harness', 'zcode'].map(key => [key, { disabled: true }]));
+  await writeFile(paths.configPath, JSON.stringify(config));
   t.after(async () => { await control(config, 'stop'); await rm(root, { recursive: true, force: true }); });
   const original = await readFile(paths.configPath, 'utf8');
-  await assert.rejects(cli('init', '--home', home, '--cwd', cwd, '--auth-from', auth), /EEXIST/);
+  await assert.rejects(cli('init', '--home', home, '--cwd', cwd), /EEXIST/);
   assert.equal(await readFile(paths.configPath, 'utf8'), original);
-  assert.equal((await stat(join(config.codexHome, 'auth.json'))).mode & 0o777, 0o600);
+  assert.equal((await stat(paths.configPath)).mode & 0o777, 0o600);
   assert.equal((await stat(home)).mode & 0o777, 0o700);
   const first = JSON.parse(await cli('start', paths.configPath));
   assert.equal(first.connected, false);
@@ -42,7 +40,7 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   // A stale/recycled PID must never become a signal target. The test process stays alive.
   await writeFile(join(config.stateDir, 'control.json'), JSON.stringify({ ...first, pid: process.pid }));
   assert.equal((await control(config, 'status'))?.pid, first.pid);
-  assert.match(await cli('logs', paths.configPath), /Daemon .* connecting/);
+  assert.match(await cli('logs', paths.configPath), /Device .* connecting/);
   await rm(cwd, { recursive: true }); // Lost work files must not prevent managing/stopping the owner.
   assert.equal(JSON.parse(await cli('stop', paths.configPath)).stopped, true);
   for (let i = 0; i < 20 && await control(config, 'status'); i++) await delay(50);
@@ -52,13 +50,6 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   assert.notEqual(restarted.daemonId, first.daemonId);
   assert.equal(restarted.nodeId, first.nodeId);
   assert.equal(JSON.parse(await cli('stop', paths.configPath)).stopped, true);
-  const zcode = JSON.parse(await cli('init', '--provider', 'zcode', '--home', join(root, 'zcode-node'),
-    '--cwd', cwd, '--zcode-home', home, '--zcode-bin', process.execPath));
-  const zcodeConfig = await readConfig(zcode.configPath);
-  if ('mode' in zcodeConfig) throw new Error('Expected single-provider configuration');
-  assert.equal(zcodeConfig.provider, 'zcode');
-  assert.ok(!('codexHome' in zcodeConfig));
-  if (zcodeConfig.provider === 'zcode') assert.equal(zcodeConfig.zcodeBin, process.execPath);
   const { initializeServer } = await import('../apps/server/src/setup.ts');
   const serverFiles = await initializeServer({ home: join(root, 'server') });
   const serverPairing = JSON.parse(await readFile(serverFiles.devicePairingPath, 'utf8'));

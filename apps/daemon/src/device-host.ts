@@ -318,7 +318,7 @@ export class DeviceHost {
           onToolResultDelivery: async delivery => { await this.#call(input.runId, 'toolDelivery', delivery); },
         };
         const permission = async (request: { id: string; title: string; details: unknown; canAllow: boolean }, nativeSignal: AbortSignal, responseSent?: Promise<void>): Promise<'allow' | 'deny'> => {
-          if (pendingPermissions + reports.size >= 32) return 'deny';
+          if (this.#active !== active || signal.aborted || nativeSignal.aborted || pendingPermissions + reports.size >= 32) return 'deny';
           pendingPermissions++;
           let decision: unknown;
           try { decision = await withSignal(this.#call(input.runId, 'permission', request, 30 * 60_000), AbortSignal.any([signal, nativeSignal])); } catch { /* Fail closed. */ }
