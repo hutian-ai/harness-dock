@@ -1,0 +1,15 @@
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!patches
+!patches/*.patch
+!packages
+!packages/protocol
+!packages/protocol/package.json
+!packages/drivers
+!packages/drivers/package.json
+!scripts
+!scripts/demo-mcp.mjs
+!containers
+!containers/Containerfile

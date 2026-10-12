@@ -1,0 +1,14 @@
+ARG NODE_IMAGE=node:22.22.2-bookworm-slim
+FROM ${NODE_IMAGE}
+RUN npm install --global pnpm@11.9.0
+WORKDIR /opt/harness-dock
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
+COPY packages/protocol/package.json ./packages/protocol/package.json
+COPY packages/drivers/package.json ./packages/drivers/package.json
+RUN pnpm install --filter @harness-dock/drivers... --prod --frozen-lockfile --ignore-scripts --fetch-timeout=600000
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN node -e 'const {createRequire}=require("node:module"); const r=createRequire(require("node:fs").realpathSync("packages/drivers/node_modules/@agentclientprotocol/codex-acp/dist/index.js")); require("node:child_process").execFileSync(process.execPath,[r.resolve("@openai/codex/bin/codex.js"),"--version"],{stdio:"inherit"});'
+COPY scripts/demo-mcp.mjs ./demo-mcp.mjs
+WORKDIR /opt/harness-dock/packages/drivers
+ENTRYPOINT ["node", "/opt/harness-dock/packages/drivers/node_modules/@agentclientprotocol/codex-acp/dist/index.js"]

@@ -1,0 +1,25 @@
+node_modules/
+dist/
+.local/
+.env
+*.log
+.DS_Store
+coverage/
+
+# Local credentials and node state must never be published.
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+**/auth.json
+**/credentials.json
+**/server.json
+**/client.json
+**/device-pairing.json
+**/controller.json

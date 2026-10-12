@@ -1,0 +1,27 @@
+{
+  "name": "@harness-dock/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@harness-dock/protocol": "workspace:*",
+    "ws": "8.22.0",
+    "json-rpc-2.0": "1.8.1"
+  },
+  "bin": {
+    "harness-dock-console": "dist/console.js",
+    "harness-dock-devices": "dist/device-console.js"
+  },
+  "files": [
+    "dist"
+  ]
+}

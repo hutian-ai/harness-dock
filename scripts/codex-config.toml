@@ -1,0 +1,7 @@
+# Keep the experiment's tool set independent of account plugins and host skills.
+[features]
+plugins = false
+remote_plugin = false
+apps = false
+skip_host_skill_discovery = true
+skill_mcp_dependency_install = false
