@@ -1,0 +1,35 @@
+{
+  "name": "harness-dock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "node --test --import tsx tests/*.test.ts",
+    "check": "pnpm build && tsc -p tsconfig.tests.json && pnpm test",
+    "demo:controller": "node --import tsx packages/client/src/console.ts",
+    "demo:devices": "node --import tsx packages/client/src/device-console.ts",
+    "daemon": "node --import tsx apps/daemon/src/cli.ts",
+    "dev:daemon": "node --import tsx apps/daemon/src/cli.ts run .local/config.json",
+    "demo:setup": "node --import tsx scripts/setup.ts",
+    "accept:codex": "pnpm build && node --import tsx scripts/accept-codex.ts",
+    "accept:zcode": "pnpm build && node --import tsx scripts/accept-zcode.ts",
+    "bundle": "pnpm build && node --import tsx scripts/bundle.ts",
+    "server": "node --import tsx apps/server/src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.0",
+    "acpx": "0.19.4",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "ws": "8.22.0",
+    "@modelcontextprotocol/client": "2.1.0",
+    "@agentclientprotocol/sdk": "1.4.0",
+    "execa": "10.0.1"
+  }
+}

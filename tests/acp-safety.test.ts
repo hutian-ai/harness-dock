@@ -1,0 +1,274 @@
+import assert from "node:assert/strict";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { DeepSeekAcpExecutor } from "../packages/drivers/src/deepseek.ts";
+import { LobiAcpExecutor } from "../packages/drivers/src/lobi.ts";
+import type { AcpExecutor } from "../packages/drivers/src/acp-types.ts";
+
+type DriverKey = "deepseek-harness" | "lobi";
+type Scenario =
+  | "spawn_failed"
+  | "setup_cancel"
+  | "unconfirmed"
+  | "cancelled"
+  | "completed"
+  | "permission"
+  | "permission_default"
+  | "permission_error"
+  | "permission_once"
+  | "permission_after_cancel"
+  | "permission_callback_cancel";
+
+async function runScenario(key: DriverKey, scenario: Scenario) {
+  const directory = await mkdtemp(join(tmpdir(), "dock-driver-safety-"));
+  const executable = join(directory, "provider");
+  const logPath = join(directory, "observations.jsonl");
+  await writeFile(logPath, "");
+  await writeFile(
+    executable,
+    `#!/usr/bin/env node
+const readline = require("node:readline");
+const fs = require("node:fs");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const record = (value) => fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(value) + "\\n");
+const key = ${JSON.stringify(key)};
+const scenario = ${JSON.stringify(scenario)};
+record({controlVariables: Object.keys(process.env).filter(key => key.startsWith("APP_CONTROL_"))});
+let promptId;
+const requestPermission = () => send({jsonrpc:"2.0",id:900,method:"session/request_permission",params:{sessionId:"session-1",toolCall:{toolCallId:"tool-1",title:"Write",kind:"edit",status:"pending"},options:scenario === "permission"?[{optionId:"always",name:"Always allow",kind:"allow_always"}]:[{optionId:"once",name:"Allow once",kind:"allow_once"}]}});
+const finish = (cancelled) => {
+  send({jsonrpc:"2.0",id:promptId,result:{stopReason:cancelled?"cancelled":"end_turn"}});
+};
+const lines = readline.createInterface({input:process.stdin});
+lines.on("line", line => {
+ const request=JSON.parse(line);
+ if(request.method) record({method:request.method});
+ if(scenario === "setup_cancel") return;
+ const reply = result => send({jsonrpc:"2.0",id:request.id,result});
+ if(request.method === "initialize") reply({protocolVersion:1,agentCapabilities:{loadSession:true},userAgent:"fake"});
+ if(request.method === "session/new") reply({sessionId:"session-1",configOptions:[{id:"model",name:"Model",category:"model",type:"select",currentValue:"test-model",options:[{value:"test-model",name:"Test"}]}],modes:{availableModes:[{id:"build",name:"Build"}]}});
+ if(request.method === "session/set_mode") reply({});
+ if(request.method === "session/prompt") {
+  promptId = request.id;
+  if(["permission", "permission_default", "permission_error", "permission_once", "permission_callback_cancel"].includes(scenario)) requestPermission();
+  else send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"session-1",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"test-active"}}}});
+ }
+ if(request.method === "session/cancel") {
+  if(scenario === "permission_after_cancel") requestPermission();
+  else if(scenario !== "unconfirmed" && scenario !== "permission_callback_cancel") setTimeout(()=>finish(scenario === "cancelled"),25);
+ }
+ if(request.id === 900 && request.result) {record({permissionResult:request.result});finish(false)}
+});
+lines.on("close",()=>process.exit(0));
+`,
+  );
+  await chmod(executable, 0o755);
+  const command =
+    scenario === "spawn_failed"
+      ? join(directory, "missing-provider")
+      : executable;
+  let driver: AcpExecutor;
+  if (key === "deepseek-harness")
+    driver = new DeepSeekAcpExecutor({
+      env: process.env,
+      executable: command,
+      models: ["test-model"],
+    });
+  else {
+    driver = new LobiAcpExecutor({
+      env: process.env,
+      executable: command,
+      probeCommand: async () => ({ exitCode: 0, stdout: "0.1.95", stderr: "" }),
+      probeAcp: async () => ({
+        protocolVersion: 1,
+        loadSession: true,
+        resumeSession: true,
+        models: ["test-model"],
+        modes: ["plan", "build"],
+      }),
+    });
+    await driver.probe(new AbortController().signal);
+  }
+  const controller = new AbortController();
+  let abortedAt: number | undefined;
+  controller.signal.addEventListener(
+    "abort",
+    () => (abortedAt = performance.now()),
+    {
+      once: true,
+    },
+  );
+  const previousToken = process.env.APP_CONTROL_RUNTIME_CONNECTION_TOKEN;
+  const previousDatabase = process.env.APP_CONTROL_DATABASE_URL;
+  process.env.APP_CONTROL_RUNTIME_CONNECTION_TOKEN = "test-only-control-token";
+  process.env.APP_CONTROL_DATABASE_URL = "test-only-database-token";
+  let cancelTimer: NodeJS.Timeout | undefined;
+  let permissionProgressCount = 0;
+  let starts = 0;
+  const permissionDeliveries: Promise<boolean>[] = [];
+  try {
+    const result = await driver.execute({
+      runId: "018f47f2-4f15-7c86-a8d9-9e38115d9030",
+      allowSessionResume: true,
+      model: "test-model",
+      config: {},
+      prompt: "test",
+      cwd: directory,
+      signal: controller.signal,
+      callbacks: {
+        permission:
+          scenario === "permission_default"
+            ? undefined
+            : async (_request, _signal, responseSent) => {
+                permissionDeliveries.push(responseSent.then(() => true, () => false));
+                if (scenario === "permission_error")
+                  throw new Error("permission unavailable");
+                return "allow";
+              },
+        onStarted: async () => {
+          starts += 1;
+          if (scenario === "setup_cancel")
+            cancelTimer = setTimeout(
+              () => controller.abort("cancel_requested"),
+              25,
+            );
+        },
+        onProgress: async (payload) => {
+          if (payload.permission) {
+            permissionProgressCount += 1;
+            if (scenario === "permission_callback_cancel") {
+              await new Promise<void>((resolve) => {
+                queueMicrotask(() => {
+                  controller.abort("daemon_shutdown");
+                  resolve();
+                });
+              });
+            }
+          }
+          const active =
+            (payload.update as { sessionUpdate?: string } | undefined)
+              ?.sessionUpdate === "agent_message_chunk";
+          if (active && !cancelTimer)
+            cancelTimer = setTimeout(
+              () => controller.abort("cancel_requested"),
+              15,
+            );
+        },
+      },
+    });
+    const observations = (await readFile(logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    return {
+      result,
+      observations,
+      permissionProgressCount,
+      permissionDeliveries: await Promise.all(permissionDeliveries),
+      starts,
+      abortToFinishMs:
+        abortedAt === undefined ? undefined : performance.now() - abortedAt,
+    };
+  } finally {
+    if (cancelTimer) clearTimeout(cancelTimer);
+    if (previousToken === undefined)
+      delete process.env.APP_CONTROL_RUNTIME_CONNECTION_TOKEN;
+    else process.env.APP_CONTROL_RUNTIME_CONNECTION_TOKEN = previousToken;
+    if (previousDatabase === undefined)
+      delete process.env.APP_CONTROL_DATABASE_URL;
+    else process.env.APP_CONTROL_DATABASE_URL = previousDatabase;
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+for (const key of ["deepseek-harness", "lobi"] as const) {
+  test(`${key} turns a spawn failure into one failed terminal`, async () => {
+    const { result, starts } = await runScenario(key, "spawn_failed");
+    assert.equal(starts, 1);
+    assert.equal(result.state, "failed");
+    assert.equal(
+      result.errorCode,
+      {
+        "deepseek-harness": "deepseek_harness_acp_start_failed",
+        lobi: "lobi_codewiz_acp_start_failed",
+      }[key],
+    );
+  });
+  test(`${key} accepts Provider cancellation confirmation and excludes control credentials`, async () => {
+    const { result, observations } = await runScenario(key, "cancelled");
+    assert.equal(result.state, "cancelled");
+    assert.deepEqual(observations[0]?.controlVariables, []);
+  });
+  // Shared ACP policies run through Lobi; every Provider retains the integration checks above.
+  if (key === "deepseek-harness") continue;
+  test(
+    `${key} cancels during setup without dispatching a prompt`,
+    { timeout: 3_000 },
+    async () => {
+      const { result, observations } = await runScenario(key, "setup_cancel");
+      assert.equal(result.state, "cancelled");
+      assert.ok(
+        !observations.some(({ method }) => method === "session/prompt"),
+      );
+    },
+  );
+  test(
+    `${key} keeps an unconfirmed cancellation outcome unknown`,
+    { timeout: 10_000 },
+    async () => {
+      const { result, observations } = await runScenario(key, "unconfirmed");
+      assert.equal(result.state, "unknown");
+      if (key === "lobi") assert.equal(result.sessionId, "session-1");
+      assert.ok(
+        observations.some((entry) => entry.method === "session/cancel"),
+      );
+    },
+  );
+  test(`${key} preserves a completed Provider result that races cancellation`, async () => {
+    const { result } = await runScenario(key, "completed");
+    assert.equal(result.state, "completed");
+  });
+  {
+    test(`${key} grants an available one-time permission while active`, async () => {
+      const { result, observations, permissionDeliveries } = await runScenario(
+        key,
+        "permission_once",
+      );
+      assert.equal(result.state, "completed");
+      assert.deepEqual(permissionDeliveries, [true]);
+      assert.deepEqual(
+        observations.find((entry) => entry.permissionResult)?.permissionResult,
+        {
+          outcome: { outcome: "selected", optionId: "once" },
+        },
+      );
+    });
+    for (const scenario of [
+      "permission",
+      "permission_default",
+      "permission_error",
+      "permission_after_cancel",
+      "permission_callback_cancel",
+    ] as const) {
+      test(`ACP denies tool permission: ${scenario}`, async () => {
+        const { result, observations, permissionProgressCount } =
+          await runScenario(key, scenario);
+        assert.equal(result.state, "completed");
+        assert.deepEqual(
+          observations.find((entry) => entry.permissionResult)
+            ?.permissionResult,
+          {
+            outcome: { outcome: "cancelled" },
+          },
+        );
+        assert.equal(
+          permissionProgressCount,
+          scenario === "permission_after_cancel" ? 0 : 1,
+        );
+      });
+    }
+  }
+}

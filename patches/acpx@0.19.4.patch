@@ -1,0 +1,271 @@
+diff --git a/dist/queue-owner-runtime-C0wIYowh.js b/dist/queue-owner-runtime-C0wIYowh.js
+index 84c5dd2296885e3c2830e842ef1f76d29e61a95d..b5fd9af312510f1fc746fc00d22bb43a656d1081 100644
+--- a/dist/queue-owner-runtime-C0wIYowh.js
++++ b/dist/queue-owner-runtime-C0wIYowh.js
+@@ -1331,7 +1331,9 @@ function validateAgentProcessEnv(agentProcessEnv) {
+ }
+ function buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv) {
+ 	validateAgentProcessEnv(agentProcessEnv);
+-	const env = { ...process.env };
++	// Embedding must not leak the host application's credentials into the agent.
++  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
++    ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "SHELL", "USER", "LOGNAME", "SYSTEMROOT"].includes(key.toUpperCase())));
+ 	const protectedAuthEnvKeys = promotePrefixedAuthEnvironment(env);
+ 	if (authCredentials) for (const [methodId, credential] of Object.entries(authCredentials)) {
+ 		addAuthCredentialEnvKeys(protectedAuthEnvKeys, methodId, credential);
+@@ -1819,6 +1821,7 @@ function observeAcpStream(base, options) {
+ 			} finally {
+ 				writer.releaseLock();
+ 			}
++      options.onMessageWritten?.(message);
+ 			if (activePrompt && promptOwner) options.onPromptRequestWritten(activePrompt, promptOwner);
+ 		} })
+ 	};
+@@ -2498,6 +2501,7 @@ var AcpClient = class {
+ 	initResult;
+ 	loadedSessionId;
+ 	eventHandlers;
++  permissionResponseWrites = new Map();
+ 	permissionStats = {
+ 		requested: 0,
+ 		approved: 0,
+@@ -2901,8 +2905,8 @@ var AcpClient = class {
+ 	createConnection(stream, launch, capabilities) {
+ 		const app = client({ name: "acpx" }).onNotification(methods.client.session.update, async ({ params }) => {
+ 			await this.handleSessionUpdate(params);
+-		}).onNotification(methods.client.elicitation.complete, async () => {}).onRequest(methods.client.session.requestPermission, async ({ params, signal }) => {
+-			return await this.handlePermissionRequest(params, signal);
++		}).onNotification(methods.client.elicitation.complete, async () => {}).onRequest(methods.client.session.requestPermission, async ({ params, signal, requestId }) => {
++			return await this.handlePermissionRequest(params, signal, requestId);
+ 		}).onRequest(methods.client.elicitation.create, async ({ params, requestId, signal }) => {
+ 			return await this.handleElicitationRequest(params, requestId, signal);
+ 		});
+@@ -2971,6 +2975,10 @@ var AcpClient = class {
+ 			suppressReplaySessionUpdates: () => this.suppressReplaySessionUpdateMessages,
+ 			bindPromptOwner: (owner) => this.bindPromptOwner(owner),
+ 			assertPromptActive: (active) => this.assertPromptActive(active),
++      onMessageWritten: (message) => {
++        const id = responseId(message);
++        if (id !== void 0) this.permissionResponseWrites.get(id)?.resolve();
++      },
+ 			onPromptRequestWritten: (active, owner) => this.onPromptRequestWritten(active, owner)
+ 		});
+ 	}
+@@ -3397,6 +3405,9 @@ var AcpClient = class {
+ 			agent.unref();
+ 		} catch {}
+ 	}
++	dockControl(params, authority) {
++    return this.runConnectionRequest(() => this.getConnection().agent.request("_harness-dock/control", params), authority);
++  }
+ 	getConnection() {
+ 		if (!this.connection) throw new Error("ACP client not started");
+ 		return this.connection;
+@@ -3539,8 +3550,20 @@ var AcpClient = class {
+ 		await connection.agent.request(methods.agent.authenticate, { methodId: selected.methodId });
+ 		this.log(`authenticated with method ${selected.methodId} (${selected.source})`);
+ 	}
+-	async handlePermissionRequest(params, requestSignal) {
++	async handlePermissionRequest(params, requestSignal, requestId) {
+ 		const owner = this.captureDelegatedRequestOwner(params.sessionId, requestSignal);
++    let rejectWrite;
++    owner.responseSent = new Promise((resolve, reject) => {
++      rejectWrite = reject;
++      this.permissionResponseWrites.set(requestId, { resolve, reject });
++    });
++    const abortWrite = () => rejectWrite(new Error("Permission response transport is no longer active"));
++    owner.signal.addEventListener("abort", abortWrite, { once: true });
++    if (owner.signal.aborted) abortWrite();
++    void owner.responseSent.finally(() => {
++      owner.signal.removeEventListener("abort", abortWrite);
++      this.permissionResponseWrites.delete(requestId);
++    }).catch(() => {});
+ 		if (!this.isDelegatedRequestActive(owner)) return cancelledPermissionResponse();
+ 		if (!this.hasPermissionOwner(params.sessionId)) return this.finishPermissionRequest(params, owner, cancelledPermissionResponse());
+ 		if (this.initResult?.agentInfo?.name === "antigravity-acp" && params.toolCall.toolCallId.startsWith("interaction_")) {
+@@ -3642,7 +3665,7 @@ var AcpClient = class {
+ 				sessionId: params.sessionId,
+ 				raw: params,
+ 				inferredKind: inferToolKind(params)
+-			}, { signal }));
++			}, { signal, responseSent: owner.responseSent }));
+ 			return this.hostPermissionDecisionResponse(params, owner, decision);
+ 		} catch (error) {
+ 			return this.hostPermissionErrorResponse(owner, error);
+diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
+index 2077d43b17ae8a66a8630aaa76b80ded031f0e35..db7a601af9be11eef66eade70d87ff89c0b619ce 100644
+--- a/dist/runtime.d.ts
++++ b/dist/runtime.d.ts
+@@ -215,6 +215,12 @@ type AcpTextDeltaOriginMeta = {
+   source?: string;
+ };
+ type AcpRuntimeEvent = {
++  type: "codex_event";
++  threadId: string;
++  turnId: string;
++} & ({ kind: "turn_started" } | { kind: "item"; stage: "started" | "completed"; item: Record<string, unknown> } | { kind: "diff"; diff: string | null } | {
++  kind: "usage"; total: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number };
++}) | {
+   type: "text_delta";
+   text: string;
+   stream?: "output" | "thought";
+@@ -228,6 +234,8 @@ type AcpRuntimeEvent = {
+    * producer message when the adapter includes an id.
+    */
+   messageId?: string;
++  /** harness-dock local extension; absent when the source phase is unknown. */
++  phase?: "commentary" | "final_answer";
+   /**
+    * Allowlisted origin fields from the ACP update `_meta`.
+    * Only the documented string keys `origin`, `kind`, and `source` are
+@@ -238,6 +246,13 @@ type AcpRuntimeEvent = {
+    * as an authorization boundary.
+    */
+   meta?: AcpTextDeltaOriginMeta;
++} | {
++  /** Complete root-session message, separate from streamed deltas and turn result. */
++  type: "message_completed";
++  messageId: string;
++  providerTurnId: string;
++  phase: "commentary" | "final_answer" | null;
++  text: string;
+ } | {
+   type: "status";
+   text: string;
+@@ -789,6 +804,13 @@ export declare class AcpxRuntime implements AcpxRuntimeLike {
+   isHealthy(): boolean;
+   probeAvailability(): Promise<void>;
+   doctor(): Promise<AcpRuntimeDoctorReport>;
++  dockControl(input: {
++    handle?: AcpRuntimeHandle;
++    requestId?: string;
++    signal?: AbortSignal;
++    assertActive?: () => void;
++    command: { operation: "inspect" } | { operation: "read_turn"; threadId: string; turnId: string } | { operation: "steer"; threadId: string; turnId: string; text: string };
++  }): Promise<unknown>;
+   private resolveSessionIdentity;
+   findSession(input: {
+     sessionKey: string;
+diff --git a/dist/runtime.js b/dist/runtime.js
+index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..3369afdfbd382d85a47fa7a30158745b43ada0a3 100644
+--- a/dist/runtime.js
++++ b/dist/runtime.js
+@@ -202,11 +202,49 @@ const ORIGIN_META_KEYS = [
+ function extractTextDeltaOrigin(payload) {
+ 	const messageId = asOptionalString(payload.messageId);
+ 	const meta = sanitizeOriginMeta(payload._meta);
++	const phase = messagePhase(dockMessageMeta(payload)?.phase);
+ 	return {
+ 		...messageId ? { messageId } : {},
++		...phase ? { phase } : {},
+ 		...meta ? { meta } : {}
+ 	};
+ }
++function dockMessageMeta(payload) {
++	const extension = isRecord(payload._meta) ? payload._meta["harness-dock"] : void 0;
++	return isRecord(extension) && extension.version === 1 ? extension : void 0;
++}
++function messagePhase(value) {
++	return value === "commentary" || value === "final_answer" ? value : null;
++}
++function dockProviderEvent(payload) {
++  const event = dockMessageMeta(payload)?.event;
++  if (!isRecord(event) || typeof event.threadId !== "string" || typeof event.turnId !== "string") return null;
++  const base = { type: "codex_event", threadId: event.threadId, turnId: event.turnId };
++  if (event.kind === "turn_started") return { ...base, kind: event.kind };
++  if (event.kind === "item" && ["started", "completed"].includes(event.stage) && isRecord(event.item) &&
++      typeof event.item.id === "string" && ["commandExecution", "mcpToolCall", "dynamicToolCall", "webSearch", "fileChange", "reasoning"].includes(event.item.type)) {
++    return { ...base, kind: "item", stage: event.stage, item: event.item };
++  }
++  if (event.kind === "diff" && (event.diff === null || typeof event.diff === "string")) return { ...base, kind: event.kind, diff: event.diff };
++  if (event.kind === "usage" && isRecord(event.total)) {
++    const total = {};
++    for (const key of ["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]) {
++      const n = event.total[key];
++      if (!Number.isSafeInteger(n) || n < 0) return null;
++      total[key] = n;
++    }
++    return { ...base, kind: event.kind, total };
++  }
++  return null;
++}
++function completedMessageEvent(payload) {
++	const message = dockMessageMeta(payload)?.messageCompleted;
++	if (!isRecord(message)) return null;
++	const messageId = asOptionalString(message.messageId);
++	const providerTurnId = asOptionalString(message.providerTurnId);
++	if (!messageId || !providerTurnId || typeof message.text !== "string") return null;
++	return { type: "message_completed", messageId, providerTurnId, phase: messagePhase(message.phase), text: message.text };
++}
+ /**
+ * Copy only allowlisted string origin keys from wire `_meta`.
+ * Nested objects, arrays, non-strings, and unknown keys are dropped.
+@@ -448,7 +486,7 @@ const PROMPT_EVENT_PARSERS = {
+ 	available_commands_update: availableCommandsUpdateEvent,
+ 	current_mode_update: (payload) => statusUpdateEvent("current_mode_update", payload),
+ 	config_option_update: (payload) => statusUpdateEvent("config_option_update", payload),
+-	session_info_update: (payload) => statusUpdateEvent("session_info_update", payload),
++	session_info_update: (payload) => dockProviderEvent(payload) ?? completedMessageEvent(payload) ?? statusUpdateEvent("session_info_update", payload),
+ 	plan: planUpdateEvent,
+ 	client_operation: clientOperationEvent,
+ 	update: updateStatusEvent,
+@@ -1031,6 +1069,24 @@ var AcpRuntimeManager = class {
+ 		this.liveClients.add(client);
+ 		return client;
+ 	}
++	dockControl(input, handle) {
++    this.assertOpen();
++    return this.trackTask((async () => {
++      if (input.command.operation === "steer") {
++        const controller = handle && this.activeControllers.get(handle.acpxRecordId);
++        return controller ? await controller.dockControl(input) : { accepted: false };
++      }
++      if (!["inspect", "read_turn"].includes(input.command.operation)) throw new Error("Unsupported dock control");
++      const command = normalizeAgentCommandInput(this.options.agentRegistry.resolve("codex"));
++      const client = createProbeClient({ ...this.options, mcpServers: [] }, "codex", command, {
++        clientFactory: (options) => this.createClient(options)
++      });
++      try {
++        await client.start(input);
++        return await client.dockControl(input.command, input);
++      } finally { await this.closeClient(client); }
++    })());
++  }
+ 	async probe() {
+ 		let client;
+ 		try {
+@@ -1848,6 +1904,10 @@ var AcpRuntimeManager = class {
+ 	}
+ 	buildRuntimeTurnController(task, turn) {
+ 		return {
++      dockControl: async (input) => {
++        if (!task.state.turnActive || input.requestId !== task.input.requestId || input.command.threadId !== turn.activeSessionId) return { accepted: false };
++        return await turn.client.dockControl(input.command, input);
++      },
+ 			hasActivePrompt: () => turn.client.hasActivePrompt(),
+ 			requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
+ 			setSessionMode: async (modeId, authority) => {
+@@ -2765,6 +2825,10 @@ var AcpxRuntime = class {
+ 			onPermissionRequest: input.onPermissionRequest
+ 		});
+ 	}
++	async dockControl(input) {
++    const handle = input.handle ? this.resolveManagerHandle(input.handle).handle : void 0;
++    return await (await this.getManager()).dockControl(input, handle);
++  }
+ 	async getCapabilities(input) {
+ 		if (!input?.handle) return capabilitiesFromRecord(void 0);
+ 		const { handle } = this.resolveManagerHandle(input.handle);
+diff --git a/dist/session-options-X7LhX9BF.d.ts b/dist/session-options-X7LhX9BF.d.ts
+index a8293348cdd5ad67d054d8e5503b845cc1452397..ce8182a8553a74cf4608c75ab015798745159bba 100644
+--- a/dist/session-options-X7LhX9BF.d.ts
++++ b/dist/session-options-X7LhX9BF.d.ts
+@@ -21,6 +21,8 @@ type AcpPermissionDecision = {
+ };
+ type AcpPermissionHandler = (request: AcpPermissionRequest, context: {
+   signal: AbortSignal;
++  /** Resolves only after the permission response has been written to the agent transport. */
++  responseSent: Promise<void>;
+ }) => Promise<AcpPermissionDecision | undefined>;
+ declare const ACP_ELICITATION_MODES: readonly ["form", "url"];
+ type AcpElicitationMode = (typeof ACP_ELICITATION_MODES)[number];

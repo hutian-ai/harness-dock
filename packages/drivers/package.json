@@ -1,0 +1,27 @@
+{
+  "name": "@harness-dock/drivers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agentclientprotocol/codex-acp": "2.1.1",
+    "@agentclientprotocol/sdk": "1.4.0",
+    "@modelcontextprotocol/server": "2.1.0",
+    "acpx": "0.19.4",
+    "diff": "8.0.2",
+    "execa": "10.0.1",
+    "zcode-acp-server": "0.68.2"
+  },
+  "files": [
+    "dist"
+  ]
+}
