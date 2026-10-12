@@ -121,4 +121,4 @@ pnpm check
 
 ## 云端部署
 
-server 可单独部署在 Linux ECS 上，由 systemd 管理，Nginx 提供 HTTPS/WSS。设备与应用都主动连接公网入口；Provider 登录和执行仍留在设备本地。部署、证书续期、检查与回退方式见 [ECS 部署](docs/ecs-deployment.md)。
+server 可单独部署在 Linux ECS 上，由 Docker Compose 管理，Nginx 提供 HTTPS/WSS。设备与应用都主动连接公网入口；Provider 登录和执行仍留在设备本地。部署、证书续期、检查与回退方式见 [ECS 部署](docs/ecs-deployment.md)。

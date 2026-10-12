@@ -15,7 +15,7 @@ Independent device execution: control plane SDK ↔ device Daemon → provider D
 - Record real Provider evidence separately from mocked tests in `docs/validation.md`.
 - The independent v1 scope and acceptance criteria are in docs/standalone-v1.md.
 - The v1 delivery uses host execution and a local CLI for initialization, start/stop, status and logs.
-- Docker/Podman is deferred by the user; retain existing experimental code and evidence without running it as a v1 gate.
+- Provider execution in Docker/Podman remains deferred; retain its experiments without running them as a v1 gate. Use Docker Compose for the Linux cloud server only; see docs/server-docker.md.
 - Local daemon management must address the owning daemon through a protected local socket, never signal a process from a saved PID.
 - Remote connections require verified TLS and the configured node identity; plaintext is loopback-only.
 - Consumers use the connection SDK only. Provider discovery, processes, local files and credentials belong to the independently running device Daemon. Keep application business types and governance out of this repository. npm publishing remains deferred. Keep cloud credentials and pairing files outside Git.
