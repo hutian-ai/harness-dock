@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { copyFile, lstat, mkdir, readdir, rename } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readdir, rename, symlink, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { dirname, relative, resolve, join } from 'node:path';
 
 // An existing destination is rejected by pnpm; no recursive deletion of user files.
 const root = resolve(process.argv[2] ?? '.local/bundle');
@@ -9,6 +9,12 @@ await mkdir(root, { recursive: true, mode: 0o700 });
 try {
   for (const [name, target] of [['@harness-dock/daemon', 'daemon'], ['@harness-dock/client', 'controller'], ['@harness-dock/server', 'server']]) {
     execFileSync('pnpm', ['--filter', name!, 'deploy', '--legacy', '--prod', join(root, target!)], { stdio: 'inherit' });
+    // Legacy deploy can leave the package's self-reference pointing back to the source checkout.
+    const self = join(root, target!, 'node_modules/.pnpm/node_modules', name!);
+    if (await lstat(self).then(entry => entry.isSymbolicLink(), () => false)) {
+      await unlink(self);
+      await symlink(relative(dirname(self), join(root, target!)), self);
+    }
   }
 } finally {
   // pnpm 11 legacy deploy changes the source workspace install-state metadata.
