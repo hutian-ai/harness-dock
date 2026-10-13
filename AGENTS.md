@@ -10,6 +10,7 @@ Independent device execution: control plane SDK ↔ device Daemon → provider D
 - Connection recovery must never automatically resubmit prompts or permission decisions.
 - Missing completion evidence is unknown, not success or confirmed cancellation.
 - Keep credentials, logs, provider sessions and experiment output under ignored `.local/`.
+- Keep real service addresses, deployment inventories, pairing status and personal identifiers in ignored `.local/` records. Use example domains and configurable paths in tracked documentation; secret scans alone do not establish privacy sanitization. Use a repository-scoped maintainer identity without a personal email for Git commits.
 - Use TypeScript ESM, explicit relative extensions and type-only imports.
 - Use `pnpm check`; keep deterministic tests focused on behavior at control boundaries.
 - Record real Provider evidence separately from mocked tests in `docs/validation.md`.
