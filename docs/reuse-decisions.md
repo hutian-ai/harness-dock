@@ -36,3 +36,11 @@ Lobi 要在新会话上验证可选模式再设置 build/plan；DeepSeek 要逐�
 ## 进程管理
 
 云端 Docker Compose 已负责重启策略、健康检查、日志轮转和资源限额；不叠加 PM2。设备需要直接调用宿主 Provider 和本机文件，保留宿主 Daemon CLI。Provider 容器执行继续后置。
+
+## 2026-10-13：进一步复用现有依赖
+
+- 配置结构校验统一使用已有 Zod 4.6.5，设备和 server 显式声明同一固定依赖。server/配对文件仍拒绝未知字段，设备配置保留原扩展字段与可选输入兼容；Token 唯一性、完整设备授权、TLS、文件权限和资源关系继续由原边界检查负责。
+- ACP 能力探测使用固定 SDK 1.4.0 的 `connectWith` 明确关闭连接；保留协议版本、模型/模式和续接 metadata、超时/abort/Provider exit 竞态，以及 Daemon 的 Provider/MCP/临时目录清理。没有引入 `withSession` 的额外 update queue，也没有把 Lobi/DeepSeek 执行器整体迁到 ACPX。
+- 采用 pnpm 11.9.0 的现代 `deploy`，启用 workspace 注入与 build 后同步；移除 legacy 自引用软链修补及源安装状态恢复。保留交付文件 hardlink detach，不能用注入本身替代产物不可变性。隔离实验及最终产物均通过仓库外使用、依赖隔离与重建后不变检查；外部依赖锁定版本没有升级。
+
+本轮没有新增日志框架、状态机、ORM 或网络协议。源码、合成回归、真实 Provider 探测与交付证据分别见 [验证记录](validation.md)。

@@ -3,6 +3,7 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  injectWorkspacePackages: true
 
 overrides:
   zcode-acp-server@0.68.2>zcode-acp-martty: '-'
@@ -57,6 +58,9 @@ importers:
       ws:
         specifier: 8.22.0
         version: 8.22.0
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   apps/server:
     dependencies:
@@ -72,6 +76,9 @@ importers:
       ws:
         specifier: 8.22.0
         version: 8.22.0
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/client:
     dependencies:
