@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import { initializeDevice, readConfig } from './config.ts';
+import { initializeDevice, parseDevicePairing, readConfig } from './config.ts';
 import { control } from './local-control.ts';
 
 process.umask(0o077);
@@ -26,9 +26,7 @@ try {
         if (values['node-id'] || values.token || values.endpoint) throw new Error('pairing_conflicts_with_identity_flags');
         const file = await stat(values.pairing);
         if (!file.isFile() || file.size > 16_384 || process.platform !== 'win32' && (file.mode & 0o077)) throw new Error('invalid_pairing_file_permissions');
-        pairing = JSON.parse(await readFile(values.pairing, 'utf8'));
-        if (!pairing || Object.keys(pairing).some(key => !['nodeId', 'token', 'endpoint'].includes(key))
-          || typeof pairing.nodeId !== 'string' || typeof pairing.token !== 'string' || typeof pairing.endpoint !== 'string') throw new Error('invalid_device_pairing');
+        pairing = parseDevicePairing(JSON.parse(await readFile(values.pairing, 'utf8')));
       }
       console.log(JSON.stringify(await initializeDevice({ home: values.home ?? '.local/device', cwd: values.cwd, endpoint: pairing.endpoint ?? values.endpoint, nodeId: pairing.nodeId ?? values['node-id'], token: pairing.token ?? values.token, caFile: values['ca-file'] }), null, 2));
     }

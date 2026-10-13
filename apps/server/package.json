@@ -22,6 +22,7 @@
     "@harness-dock/client": "workspace:*",
     "@harness-dock/protocol": "workspace:*",
     "ws": "8.22.0",
-    "json-rpc-2.0": "1.8.1"
+    "json-rpc-2.0": "1.8.1",
+    "zod": "4.6.5"
   }
 }

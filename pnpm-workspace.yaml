@@ -1,6 +1,9 @@
 packages:
   - apps/*
   - packages/*
+injectWorkspacePackages: true
+syncInjectedDepsAfterScripts:
+  - build
 allowBuilds:
   esbuild: true
   zcode-acp-server: false
