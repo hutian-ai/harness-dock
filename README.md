@@ -10,6 +10,8 @@
                          Codex / ZCode…      Lobi / DeepSeek…
 ```
 
+查看 [架构总览图](docs/architecture.html)：当前调用链、设备职责，以及暂缓实施的 dockui 候选。
+
 - server 拥有设备配对、调用方访问范围和连接转发；每台设备绑定一个控制方。
 - Daemon 拥有 Provider 登录、进程、会话、执行证据和本机文件。安装发现与实际协议就绪分别报告。
 - 调用方应用 拥有 World、成员、任务、授权及业务结果，只依赖 client SDK。
