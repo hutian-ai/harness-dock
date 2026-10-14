@@ -86,8 +86,9 @@ export class CodexHost<TDelivery = unknown> {
     let bridge: Awaited<ReturnType<typeof createMcpBridge<TDelivery>>> | null = null;
     try {
       signal.throwIfAborted();
+      const { serviceTier, ...environment } = input.environment;
       const key = createHash('sha256').update(JSON.stringify({
-        environment: input.environment, model: input.model, effort: input.effort,
+        environment,
         tools: input.tools.definitions, name: input.tools.name,
       })).digest('hex');
       if (this.#session?.key !== key) {
@@ -110,7 +111,7 @@ export class CodexHost<TDelivery = unknown> {
           return input.tools.invocation.onToolCall(call);
         },
       });
-      const evidence = await this.#session.executor.execute({ ...input, signal,
+      const evidence = await this.#session.executor.execute({ ...input, serviceTier, signal,
         onReady: async threadId => {
           await input.onReady(threadId);
           signal.throwIfAborted();
