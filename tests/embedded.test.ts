@@ -59,9 +59,9 @@ test('embedded owner reuses one backend, fences each turn and releases it on fai
 import {appendFileSync} from 'node:fs';
 const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
 let turn = 0;
-const configOptions = [{id:'model',name:'Model',category:'model',type:'select',currentValue:'synthetic',options:[{value:'synthetic',name:'Synthetic'}]}];
+const configOptions = [{id:'model',name:'Model',category:'model',type:'select',currentValue:'synthetic',options:[{value:'synthetic',name:'Synthetic'},{value:'second-model',name:'Second'}]}, {id:'reasoning_effort',name:'Effort',category:'thought_level',type:'select',currentValue:'low',options:[{value:'low',name:'Low'},{value:'high',name:'High'}]}, {id:'fast-mode',name:'Fast',type:'select',currentValue:'off',options:[{value:'on',name:'On'},{value:'off',name:'Off'}]}];
 for await (const line of createInterface({input:process.stdin})) {
- const q=JSON.parse(line); appendFileSync(${JSON.stringify(log)},JSON.stringify({method:q.method,pid:process.pid})+'\\n');
+ const q=JSON.parse(line); appendFileSync(${JSON.stringify(log)},JSON.stringify({method:q.method,pid:process.pid,params:q.params})+'\\n');
  if(q.id===undefined)continue;
  let result={};
  if(q.method==='initialize')result={protocolVersion:1,agentCapabilities:{loadSession:true},authMethods:[]};
@@ -79,7 +79,7 @@ for await (const line of createInterface({input:process.stdin})) {
 }`);
   const executor = new CodexExecutor({ cwd: root, codexHome: root, stateDir: root }, config => createCodexRuntime(config, [process.execPath, fixture]));
   const { readFile } = await import('node:fs/promises');
-  const calls = async () => (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as {method:string;pid:number});
+  const calls = async () => (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as {method:string;pid:number;params?:{configId?:string;value?:string}});
   let ready = 0;
   const input = { model: 'synthetic', prompt: 'synthetic', signal: AbortSignal.timeout(10000), onReady: async () => { ready++; }, onEvent: async () => {} };
   try {
@@ -89,7 +89,7 @@ for await (const line of createInterface({input:process.stdin})) {
     // Inspect uses the configured ACP peer and releases its separate process.
     await writeFile(log, '');
     const first = await executor.execute({ ...input, runId: 'first' });
-    const second = await executor.execute({ ...input, runId: 'second', resumeThreadId: first.threadId, previousRunId: first.runId });
+    const second = await executor.execute({ ...input, runId: 'second', model: 'second-model', effort: 'high', serviceTier: 'priority', resumeThreadId: first.threadId, previousRunId: first.runId });
     assert.equal(first.state, 'completed');
     assert.equal(second.state, 'completed');
     assert.notEqual(first.turnId, second.turnId);
@@ -100,6 +100,8 @@ for await (const line of createInterface({input:process.stdin})) {
     assert.equal(observed.filter(call => call.method === 'session/new').length, 1);
     assert.equal(observed.filter(call => call.method === 'session/load').length, 0);
     assert.equal(observed.filter(call => call.method === 'session/prompt').length, 2);
+    for (const [configId, value] of [['model','second-model'], ['reasoning_effort','high'], ['fast-mode','on']])
+      assert.ok(observed.some(call => call.method === 'session/set_config_option' && call.params?.configId === configId && call.params?.value === value));
     await assert.rejects(executor.execute({ ...input, runId: 'wrong', resumeThreadId: 'another-thread' }), /identity_mismatch/);
     await assert.rejects(executor.execute({ ...input, runId: 'third', resumeThreadId: first.threadId, onReady: async () => { throw new Error('fence-rejected'); } }), /fence-rejected/);
     assert.equal((await calls()).filter(call => call.method === 'session/prompt').length, 2);

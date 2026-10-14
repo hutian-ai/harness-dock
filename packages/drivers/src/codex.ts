@@ -38,6 +38,7 @@ export interface CodexEvidence {
 export interface CodexExecutionInput extends HarnessExecutionInput {
   model?: string;
   effort?: string;
+  serviceTier?: string;
   onSteeringReady?(steer: ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | null): void;
 }
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -142,7 +143,7 @@ export class CodexExecutor {
     const streamed = new AnswerBudget(), final = new AnswerBudget();
     try {
       await mkdir(join(this.config.stateDir, 'runs'), { recursive: true, mode: 0o700 });
-      const evidence: CodexEvidence = { runId: input.runId, fingerprint: hash(JSON.stringify({ prompt: input.prompt, model: input.model, effort: input.effort, resume: input.resumeThreadId, cwd: this.config.cwd, home: this.config.codexHome })), state: 'unknown', messages: [] };
+      const evidence: CodexEvidence = { runId: input.runId, fingerprint: hash(JSON.stringify({ prompt: input.prompt, model: input.model, effort: input.effort, serviceTier: input.serviceTier, resume: input.resumeThreadId, cwd: this.config.cwd, home: this.config.codexHome })), state: 'unknown', messages: [] };
       // Exclusive creation also protects against a second owner or a caller retry after restart.
       await writeFile(this.path(input.runId), JSON.stringify(evidence), { flag: 'wx', mode: 0o600 });
       const runtime = this.runtime ??= this.runtimeFactory(this.config);
@@ -157,6 +158,7 @@ export class CodexExecutor {
         await this.save(evidence);
         if (input.model) await runtime.setModel({ handle, model: input.model, signal });
         if (input.effort) await runtime.setConfigOption({ handle, key: 'reasoning_effort', value: input.effort, signal });
+        await runtime.setConfigOption({ handle, key: 'fast-mode', value: input.serviceTier === 'priority' ? 'on' : 'off', signal });
         await input.onReady(threadId);
         input.signal.throwIfAborted();
         active = true;
