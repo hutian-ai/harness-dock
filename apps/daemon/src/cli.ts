@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { setTimeout as delay } from 'node:timers/promises';
 import { initializeDevice, parseDevicePairing, readConfig } from './config.ts';
 import { control } from './local-control.ts';
+import { installationRoot, manageInstallation, readInstallation, startInstalled } from './installation.ts';
+import { startBackground } from './process-management.ts';
 
 process.umask(0o077);
 try {
@@ -14,9 +14,10 @@ try {
     home: { type: 'string' }, cwd: { type: 'string' }, endpoint: { type: 'string' },
     mode: { type: 'string' }, pairing: { type: 'string' }, 'node-id': { type: 'string' }, token: { type: 'string' }, 'ca-file': { type: 'string' },
     help: { type: 'boolean', short: 'h' }, 'background-log': { type: 'boolean' },
+    bundle: { type: 'string' }, 'install-dir': { type: 'string' }, node: { type: 'string' }, disable: { type: 'boolean' },
   } });
   if (!command || values.help || command === 'help') {
-    console.log('harness-dock-daemon init --cwd <directory> [--home .local/device] [--endpoint wss://controller.example/] [--pairing <device-pairing.json>]\nharness-dock-daemon <run|start|status|stop|logs> [config.json]\nDefault config: .local/device/config.json. start runs in the background; run stays in the foreground.');
+    console.log('harness-dock-daemon init --cwd <directory> [--home .local/device] [--endpoint wss://controller.example/] [--pairing <device-pairing.json>]\nharness-dock-daemon <run|start|status|stop|logs> [config.json]\nharness-dock-daemon <install|upgrade> [config.json] --bundle <daemon-bundle> [--node <node>] [--install-dir <directory>]\nharness-dock-daemon rollback [config.json] [--install-dir <directory>]\nharness-dock-daemon autostart [config.json] [--disable] [--install-dir <directory>]\nDefault config: .local/device/config.json. start runs in the background; run stays in the foreground.\nManaged installs keep releases separate from device state. autostart enables a macOS user LaunchAgent and starts it; --disable stops and unregisters it.');
   } else if (command === 'init') {
     if (!values.cwd) throw new Error('init requires --cwd');
     if (values.mode && values.mode !== 'device') throw new Error('unsupported_mode');
@@ -31,10 +32,13 @@ try {
       console.log(JSON.stringify(await initializeDevice({ home: values.home ?? '.local/device', cwd: values.cwd, endpoint: pairing.endpoint ?? values.endpoint, nodeId: pairing.nodeId ?? values['node-id'], token: pairing.token ?? values.token, caFile: values['ca-file'] }), null, 2));
     }
   } else {
-    if (!['run', 'start', 'status', 'stop', 'logs'].includes(command)) throw new Error(`Unknown command: ${command}`);
-    const path = resolve(argument ?? '.local/device/config.json');
+    if (!['run', 'start', 'status', 'stop', 'logs', 'install', 'upgrade', 'rollback', 'autostart'].includes(command)) throw new Error(`Unknown command: ${command}`);
+    const path = resolve(argument ?? process.env.HARNESS_DOCK_INSTALLED_CONFIG ?? '.local/device/config.json');
+    const root = installationRoot(path, values['install-dir'] ?? process.env.HARNESS_DOCK_INSTALL_DIR);
     const config = await readConfig(path);
-    if (command === 'run') {
+    if (command === 'install' || command === 'upgrade' || command === 'rollback' || command === 'autostart') {
+      console.log(JSON.stringify(await manageInstallation(command, { config: path, root, bundle: values.bundle, runtime: values.node, disable: values.disable }), null, 2));
+    } else if (command === 'run') {
       if (values['background-log']) {
         await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
         (await import('./rotating-log.ts')).installBackgroundLog(config.stateDir);
@@ -43,7 +47,9 @@ try {
     }
     else if (command === 'status' || command === 'stop') {
       const result = await control(config, command);
-      console.log(JSON.stringify(result ?? { nodeId: config.nodeId, available: false }, null, 2));
+      const installation = command === 'status' ? await readInstallation(root, path) : undefined;
+      console.log(JSON.stringify({ ...(result ?? { nodeId: config.nodeId, available: false }),
+        ...(installation ? { installation: { root, current: installation.current, previous: installation.previous, autostart: installation.autostart } } : {}) }, null, 2));
     } else if (command === 'logs') {
       const file = await open(join(config.stateDir, 'daemon.log'), 'r');
       try {
@@ -53,26 +59,8 @@ try {
         process.stdout.write(data);
       } finally { await file.close(); }
     } else {
-      const existing = await control(config, 'status');
-      if (existing) console.log(JSON.stringify({ ...existing, alreadyRunning: true }, null, 2));
-      else {
-        await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
-        const child = spawn(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url), 'run', path, '--background-log'], {
-          detached: true, stdio: 'ignore',
-        });
-        let error: Error | undefined;
-        child.on('error', value => { error = value; });
-        child.unref();
-        let ready = false;
-        for (let i = 0; i < 50; i++) {
-          if (error) throw error;
-          if (child.exitCode !== null || child.signalCode !== null) throw new Error('Daemon exited during startup; inspect logs');
-          const result = await control(config, 'status');
-          if (result) { console.log(JSON.stringify(result, null, 2)); ready = true; break; }
-          await delay(100);
-        }
-        if (!ready) throw new Error('Startup unconfirmed; query status and logs before retrying');
-      }
+      const result = await startInstalled(path, root) ?? await startBackground(config, path, fileURLToPath(import.meta.url), process.execPath, process.execArgv);
+      console.log(JSON.stringify(result, null, 2));
     }
   }
 } catch (error) {

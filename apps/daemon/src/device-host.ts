@@ -151,6 +151,14 @@ export class DeviceHost {
       throw new Error('resource_exhausted:managed_state_bytes');
   }
   get activeRunId(): string | undefined { return this.#active?.runId; }
+  maintenanceStatus() { return { activeRunId: this.activeRunId, unresolvedRunIds: this.#store.unresolved() }; }
+  /** Reserve shutdown synchronously so admission cannot race an installation change. */
+  closeIfIdle(): Promise<void> {
+    this.#assertOpen();
+    if (this.#active || this.#maintenance || this.#probing) throw new Error('device_busy');
+    if (this.#store.unresolved().length) throw new Error('unresolved_execution');
+    return this.close();
+  }
   bind(callback: DeviceCallback): () => void {
     this.#callback = callback;
     return () => { if (this.#callback === callback) this.#callback = undefined; };

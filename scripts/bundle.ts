@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, lstat, mkdir, readdir, rename } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { writeReleaseManifest } from '../apps/daemon/src/release-manifest.ts';
 
 // An existing destination is rejected by pnpm; no recursive deletion of user files.
 const root = resolve(process.argv[2] ?? '.local/bundle');
@@ -22,4 +23,10 @@ async function detach(path: string): Promise<void> {
   }
 }
 await detach(root);
+let revision: string | undefined;
+try {
+  revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  if (execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()) revision += '+dirty';
+} catch { /* Source archives have no Git metadata. */ }
+await writeReleaseManifest(join(root, 'daemon'), revision);
 console.log(`Local bundles ready: ${root}. Use node <daemon>/dist/cli.js help or node <server>/dist/cli.js run <server.json>, or node <controller>/dist/device-console.js <client.json>.`);

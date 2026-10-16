@@ -163,6 +163,27 @@ test('device admission is durable and restart leaves interrupted executions unkn
   assert.throws(() => new DeviceStore(randomUUID(), root), /state_node_mismatch/);
 });
 
+test('maintenance shutdown refuses a pending admission or unknown result and reserves close before yielding', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'dock-maintenance-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const config = { mode: 'device' as const, nodeId: randomUUID(), token: 'x'.repeat(32),
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state') };
+  const host = new DeviceHost(config);
+  const preparing = host.prepare({ runId: 'prepared' });
+  assert.throws(() => host.closeIfIdle(), /device_busy/);
+  await preparing;
+  const closing = host.closeIfIdle();
+  await assert.rejects(host.prepare({ runId: 'too-late' }), /device_stopping/);
+  await closing;
+  const store = new DeviceStore(config.nodeId, config.stateDir);
+  store.admit({ runId: 'unknown', provider: 'codex', input: 'identity', state: 'unknown' }); store.close();
+  const recovered = new DeviceHost(config);
+  try {
+    assert.throws(() => recovered.closeIfIdle(), /unresolved_execution/);
+    assert.deepEqual(recovered.maintenanceStatus().unresolvedRunIds, ['unknown']);
+  } finally { await recovered.close(); }
+});
+
 
 test('ACP probes preserve base environment and exclude inherited control secrets', async t => {
   const root = await mkdtemp(join(tmpdir(), 'dock-device-env-'));

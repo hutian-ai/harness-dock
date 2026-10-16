@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { delimiter, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { JSONRPCClient, JSONRPCServer, JSONRPCServerAndClient } from 'json-rpc-2.0';
 import { assertEndpoint, DEVICE_PROTOCOL_HEADER, DEVICE_PROTOCOL_VERSION, DeviceInboundBudget, DeviceTransport } from '@harness-dock/protocol';
@@ -98,7 +99,13 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
   let closeControl: (() => Promise<void>) | undefined;
   try {
     closeControl = await serveControl(config, () => ({ nodeId: config.nodeId, daemonId: host.daemonId,
-      pid: process.pid, connected: connection.connected, endpoint: config.endpoint }), stop);
+      pid: process.pid, connected: connection.connected, endpoint: config.endpoint,
+      entrypoint: fileURLToPath(new URL('./cli.js', import.meta.url)), runtime: process.execPath,
+      ...host.maintenanceStatus() }), stop, () => {
+        const closing = host.closeIfIdle();
+        connection.stop(); stopping = closing;
+        return closing;
+      });
     connection.connect();
   } catch (error) { await stop().catch(() => {}); await closeControl?.(); throw error; }
   console.log(`Device ${config.nodeId} connecting to ${config.endpoint}`);
