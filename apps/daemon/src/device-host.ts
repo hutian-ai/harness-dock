@@ -6,12 +6,13 @@ import {
   CodexHost, LobiAcpExecutor, DeepSeekAcpExecutor, ZCodeExecutor, discoverProviders,
   AnswerBudget, boundedObservation,
   type AcpExecutor, type CodexHostEnvironment, type DiscoveredProvider, type McpInvocation,
-  type McpToolDefinition, type ProviderKey,
+  type McpToolDefinition, type ProviderKey, type NativePermissionRequest, type NativePermissionDecision,
 } from '@harness-dock/drivers';
 import type { DeviceConfig } from './config.ts';
 import { collectFiles, digest, prepareDirectories, releaseDirectories, verifySkillFiles, managedStateBytes, forgetSessionDirectories, type DeviceFile } from './device-files.ts';
 import { DeviceStore, type StoredExecution } from './device-store.ts';
 import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
+import { ObservationWriter } from './observation-writer.ts';
 
 export type DeviceCallback = (method: string, params: unknown, timeoutMs?: number) => Promise<unknown>;
 export interface DeviceExecuteInput {
@@ -175,8 +176,8 @@ export class DeviceHost {
   }
   #environment(provider: DiscoveredProvider, sessionKey: string, cwd: string, config: Record<string, unknown> = {}, skillDirectory?: string): CodexHostEnvironment {
     const home = join(this.config.stateDir, 'providers', 'codex', digest(sessionKey));
-    return { cwd, codexHome: home, stateDir: join(home, 'execution'), authFile: join(provider.home!, 'auth.json'),
-      sandbox: 'workspace-write', approvalPolicy: 'on-request',
+    return { cwd, codexHome: provider.home!, codexBin: provider.executable!, stateDir: join(home, 'execution'),
+      sandbox: 'workspace-write',
       serviceTier: typeof config.serviceTier === 'string' ? config.serviceTier : undefined, skillDirectory };
   }
   async inventory(refresh = false): Promise<unknown> {
@@ -197,8 +198,8 @@ export class DeviceHost {
         if (provider.status !== 'installed') { item.error = provider.reason; continue; }
         try {
           if (provider.key === 'codex') {
-            const inspection = await this.#codex.inspect(this.#environment(provider, 'probe', this.config.cwd), signal);
-            if (!inspection.config.nativeMemoryDisabled || inspection.config.sandbox !== 'workspace-write' || inspection.config.approvalPolicy !== 'on-request') throw new Error('execution_policy_unconfirmed');
+            const environment = this.#environment(provider, 'probe', this.config.cwd);
+            const inspection = await this.#codex.inspect(environment, signal);
             item.inspection = inspection; item.models = inspection.models.map(model => model.id);
           } else if (provider.key === 'zcode') {
             // The bridge's lazy handshake alone does not validate the login. Require local credentials too.
@@ -287,14 +288,18 @@ export class DeviceHost {
       if (input.model && !available.models.includes(input.model)) throw new Error('model_unavailable');
       const config = input.config ?? {};
       if (input.provider === 'codex') {
-        if (Object.keys(config).some(key => !['effort', 'serviceTier', 'sandbox'].includes(key)) || config.sandbox && config.sandbox !== 'workspace-write') throw new Error('unsupported_config');
+        if (Object.keys(config).some(key => !['effort', 'serviceTier', 'mode'].includes(key))) throw new Error('unsupported_config');
         const inspection = available.inspection as { models: { id: string; efforts: string[]; serviceTiers: string[] }[] };
         const model = inspection.models.find(model => model.id === input.model);
         if (config.effort && !model?.efforts.includes(String(config.effort)) || config.serviceTier && !model?.serviceTiers.includes(String(config.serviceTier))) throw new Error('configuration_unavailable');
       } else if (input.provider === 'zcode') {
-        if (Object.keys(config).some(key => key !== 'effort')) throw new Error('zcode_config_unsupported');
+        if (Object.keys(config).some(key => !['effort', 'mode'].includes(key))) throw new Error('zcode_config_unsupported');
         const inspection = available.inspection as { reasoningEffortsByModel: Record<string, string[]> };
         if (config.effort && !inspection.reasoningEffortsByModel[input.model ?? '']?.includes(String(config.effort))) throw new Error('configuration_unavailable');
+      }
+      if ((input.provider === 'codex' || input.provider === 'zcode') && config.mode !== undefined) {
+        const inspection = available.inspection as { permissionModes?: { value: string }[] };
+        if (typeof config.mode !== 'string' || !inspection.permissionModes?.some(mode => mode.value === config.mode)) throw new Error('permission_mode_unavailable');
       }
       const controller = new AbortController();
       const environment = input.provider === 'codex' ? this.#environment(provider, prepared.sessionKey, prepared.directories.workdir, config, prepared.directories.skillDirectory) : undefined;
@@ -304,6 +309,7 @@ export class DeviceHost {
       this.#active = active;
       active.promise = (async () => {
         const signal = AbortSignal.any([controller.signal, this.#lifetime.signal]);
+        const observations = new ObservationWriter((kind, payload) => this.#observe(input.runId, kind, payload), signal);
         const reports = new Set<Promise<unknown>>();
         let pendingPermissions = 0;
         let started = false;
@@ -313,18 +319,28 @@ export class DeviceHost {
         const invocation: McpInvocation = { signal,
           onToolCall: async call => {
             signal.throwIfAborted();
+            observations.seal();
             return await withSignal(this.#call(input.runId, 'toolCall', call, 5 * 60_000), signal) as Awaited<ReturnType<McpInvocation['onToolCall']>>;
           },
           onToolResultDelivery: async delivery => { await this.#call(input.runId, 'toolDelivery', delivery); },
         };
-        const permission = async (request: { id: string; title: string; details: unknown; canAllow: boolean }, nativeSignal: AbortSignal, responseSent?: Promise<void>): Promise<'allow' | 'deny'> => {
+        const permission = async (request: NativePermissionRequest, nativeSignal: AbortSignal, responseSent?: Promise<void>): Promise<NativePermissionDecision> => {
           if (this.#active !== active || signal.aborted || nativeSignal.aborted || pendingPermissions + reports.size >= 32) return 'deny';
+          observations.seal();
           pendingPermissions++;
           let decision: unknown;
           try { decision = await withSignal(this.#call(input.runId, 'permission', request, 30 * 60_000), AbortSignal.any([signal, nativeSignal])); } catch { /* Fail closed. */ }
           finally { pendingPermissions--; }
-          const effective = decision === 'allow' && request.canAllow && !signal.aborted && !nativeSignal.aborted && this.#active === active ? 'allow' : 'deny';
-          const confirmed = (decision === 'allow' || decision === 'deny') && decision === effective;
+          let effective: NativePermissionDecision = request.form ? { action: 'cancel' } : 'deny';
+          if (!signal.aborted && !nativeSignal.aborted && this.#active === active) {
+            if (request.options && decision && typeof decision === 'object' && 'optionId' in decision
+              && request.options.some(option => option.optionId === decision.optionId)) effective = { optionId: String(decision.optionId) };
+            else if (request.form && decision && typeof decision === 'object' && 'action' in decision
+              && ['accept', 'decline', 'cancel'].includes(String(decision.action)) && Buffer.byteLength(JSON.stringify(decision)) <= 32768)
+              effective = decision as NativePermissionDecision;
+            else if (!request.options && !request.form && (decision === 'deny' || decision === 'allow' && request.canAllow)) effective = decision;
+          }
+          const confirmed = decision !== undefined && canonical(decision) === canonical(effective);
           if (responseSent) {
             const reporting = withSignal(responseSent, AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(30_000)])).then(
               () => this.#call(input.runId, 'permissionDelivered', { id: request.id, decision: effective, success: confirmed && !signal.aborted && !nativeSignal.aborted }),
@@ -339,11 +355,11 @@ export class DeviceHost {
           let result: unknown;
           if (input.provider === 'codex') {
             result = await this.#codex.execute({ environment: environment!, runId: input.runId, prompt: input.prompt,
-              model: input.model, effort: typeof config.effort === 'string' ? config.effort : undefined,
+              model: input.model, mode: typeof config.mode === 'string' ? config.mode : undefined, effort: typeof config.effort === 'string' ? config.effort : undefined,
               resumeThreadId: input.resumeSessionId, previousRunId: input.previousRunId, retainSession: input.retainSession ?? false,
               signal, tools: { name: input.tools?.name ?? 'controller', definitions: input.tools?.definitions ?? [], invocation },
               onReady: ready,
-              onEvent: async event => { await this.#observe(input.runId, 'event', event); },
+              onEvent: async event => { await observations.write('event', event); },
               onSteeringReady: steer => { active.steer = steer ?? undefined; void this.#call(input.runId, 'steering', { available: Boolean(steer) }).catch(() => {}); },
               permission,
             });
@@ -355,12 +371,12 @@ export class DeviceHost {
             let text = '', sessionId: string | undefined;
             const textBudget = new AnswerBudget();
             const terminal = await executor.execute({ runId: input.runId, prompt: input.prompt, resumeThreadId: input.resumeSessionId, signal,
-              model: input.model, effort: typeof config.effort === 'string' ? config.effort : undefined,
+              model: input.model, mode: typeof config.mode === 'string' ? config.mode : undefined, effort: typeof config.effort === 'string' ? config.effort : undefined,
               tools: { name: input.tools?.name ?? 'controller', definitions: input.tools?.definitions ?? [], invocation },
               onReady: async value => { sessionId = value; await ready(value); },
               onEvent: async event => {
                 if (event.type === 'text_delta' && event.stream !== 'thought') { textBudget.add(event.text); text += event.text; }
-                await this.#observe(input.runId, 'event', event);
+                await observations.write('event', event);
               }, permission });
             result = { ...terminal, text, sessionId, resumable: terminal.state === 'completed' && input.retainSession === true,
               sessionResumeMode: 'warm', warmSessionIdleTimeoutMs: this.#limits.idleTimeoutMs,
@@ -374,12 +390,13 @@ export class DeviceHost {
               cancellationRequested: () => active.cancellationRequested,
               callbacks: {
                 onStarted: async () => { await ready(); },
-                onProgress: async payload => { await this.#observe(input.runId, 'progress', payload); },
-                onFileChanges: async event => { await this.#observe(input.runId, 'fileChanges', event); },
-                permission: async (request, nativeSignal, responseSent) => permission({ id: request.id, title: `${input.provider} permission`, details: request.toolCall, canAllow: request.canAllow }, nativeSignal, responseSent),
+                onProgress: async payload => { await observations.write('progress', payload); },
+                onFileChanges: async event => { await observations.write('fileChanges', event); },
+                permission: async (request, nativeSignal, responseSent) => await permission({ id: request.id, title: `${input.provider} permission`, details: request.toolCall, canAllow: request.canAllow }, nativeSignal, responseSent) === 'allow' ? 'allow' : 'deny',
               },
             });
           }
+          await observations.finish();
           const state = object(result).state;
           record.state = ['completed', 'failed', 'cancelled'].includes(String(state)) ? state as StoredExecution['state'] : 'unknown';
           record.result = result;
@@ -387,6 +404,7 @@ export class DeviceHost {
           record.state = started ? 'unknown' : 'failed';
           record.result = { state: record.state, error: error instanceof Error ? error.message : String(error) };
         } finally {
+          observations.close();
           try {
             try { this.#store.save(record); }
             catch (error) {

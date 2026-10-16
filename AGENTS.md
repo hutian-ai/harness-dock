@@ -2,10 +2,13 @@
 
 Independent device execution: control plane SDK ↔ device Daemon → provider Driver. Devices connect outward to a paired local or remote controller.
 
-- The independent Daemon discovers Codex, Lobi, DeepSeek and ZCode locally. It supports ZCode through pinned zcode-acp-server and ACPX. Keep its build permission mode, disabled bridge Hub, honest final-answer limitations, and real-vs-synthetic evidence boundary described in docs/zcode-driver.md.
+- Product scope is local Agent access infrastructure. Humans use the embedding application or native harness client; local CLI/app entry points serve installation, pairing, permission guidance and diagnostics. Canonical scope, current gaps and deferred work are in docs/standalone-v1.md; do not build a standalone chat/IDE/plugin-management product.
+
+- The independent Daemon discovers Codex, Lobi, DeepSeek and ZCode locally. It supports ZCode through pinned zcode-acp-server and ACPX. Keep its default build permission mode and apply only explicitly selected native modes, disabled bridge Hub, honest final-answer limitations, and real-vs-synthetic evidence boundary described in docs/zcode-driver.md.
 
 - Keep packages private. Use a private repository by default. Do not publish npm packages or upload sibling repositories, credentials, runtime data, or experiment artifacts.
-- Codex uses only the fixed ACPX backend; do not add a native Codex fallback. The Lobi/DeepSeek ACP adapters use the generic drivers module; their governance remains with the embedding caller.
+- Use ACP as the default harness protocol with named thin adapters for installation/environment selection, native host dependencies, callbacks and event/session differences. The current Codex backend remains fixed ACPX/Codex ACP; do not add a parallel native fallback. Native tools, MCP, plugins, skills and memory remain harness-owned; do not register each new plugin in a dock-specific tool catalog.
+- Native-environment reuse is the confirmed target. Codex now selects the installed binary/home without rewriting configuration or authentication; caller skills use the named additive skill root. Preserve user configuration and locally selected policy, keep dock state separate, and report missing host dependencies. Codex precise options/questions and the provided desktop host have named Local evidence; installation/runtime/application host discovery and endpoint rediscovery after actual isolated restart are verified; independent LaunchAgent desktop access is rejected by native ancestry policy, and same-thread restart continuation, all plugin functions and ZCode native Browser Use remain unaccepted. See docs/validation.md.
 - Keep provider processes and pending approvals owned by the Daemon, not the connection.
 - Connection recovery must never automatically resubmit prompts or permission decisions.
 - Missing completion evidence is unknown, not success or confirmed cancellation.

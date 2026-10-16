@@ -18,7 +18,8 @@ await controller.ready;
 const initialNodes = controller.listNodes();
 let selectedNode = initialNodes.length === 1 ? initialNodes[0]!.nodeId : undefined;
 const runs = new Map<string, { runId: string; pending: boolean }>();
-const permissions = new Map<string, { nodeId: string; runId: string; canAllow: boolean; decide(value: 'allow' | 'deny'): void }>();
+type NativeReply = {optionId:string} | {action:'accept'|'decline'|'cancel';content?:Record<string,unknown>};
+const permissions = new Map<string, { nodeId: string; runId: string; canAllow: boolean; native:boolean; decide(value: 'allow' | 'deny' | NativeReply): void }>();
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 for (const node of controller.listNodes()) {
   const peer = controller.node(node.nodeId)!;
@@ -31,15 +32,15 @@ for (const node of controller.listNodes()) {
       const permissionId = randomUUID();
       console.log(`\n审批 ${permissionId}，节点 ${node.nodeId}，执行 ${runId}`);
       console.dir(payload, { depth: 4 });
-      console.log(`allow ${permissionId} / deny ${permissionId}`);
-      return await new Promise<'allow' | 'deny'>(resolve => {
-        const finish = (decision: 'allow' | 'deny') => {
+      console.log(payload.options || payload.form ? `reply ${permissionId} <原生回答 JSON> / deny ${permissionId}` : `allow ${permissionId} / deny ${permissionId}`);
+      return await new Promise<'allow' | 'deny' | NativeReply>(resolve => {
+        const finish = (decision: 'allow' | 'deny' | NativeReply) => {
           if (!permissions.delete(permissionId)) return;
           context.signal.removeEventListener('abort', abort);
           resolve(decision);
         };
         const abort = () => finish('deny');
-        permissions.set(permissionId, { nodeId: node.nodeId, runId, canAllow: payload.canAllow === true, decide: finish });
+        permissions.set(permissionId, { nodeId: node.nodeId, runId, canAllow: payload.canAllow === true, native:!!(payload.options||payload.form), decide: finish });
         context.signal.addEventListener('abort', abort, { once: true });
         if (context.signal.aborted) abort();
       });
@@ -51,7 +52,7 @@ for (const node of controller.listNodes()) {
   });
 }
 controller.onConnection(node => console.log(`\n节点 ${node.label ?? node.nodeId}: ${node.connected ? '已连接' : '离线'}`));
-console.log(`设备控制端: ${config.endpoint}\n命令: nodes | use <nodeId> | inventory | run <provider> <prompt> | status [runId] | allow <id> | deny <id> | cancel | quit`);
+console.log(`设备控制端: ${config.endpoint}\n命令: nodes | use <nodeId> | inventory | run <provider> <prompt> | status [runId] | allow <id> | deny <id> | reply <id> <JSON> | cancel | quit`);
 console.table(controller.listNodes());
 function selected(): ServerPeer {
   const peer = selectedNode ? controller.node(selectedNode) : undefined;
@@ -110,8 +111,14 @@ for await (const line of readline) {
     } else if (command === 'allow' || command === 'deny') {
       const pending = permissions.get(args[0] ?? '');
       if (!pending) throw new Error('审批已失效或不存在');
-      if (command === 'allow' && !pending.canAllow) throw new Error('此请求不支持单次允许');
+      if (command === 'allow' && (!pending.canAllow || pending.native)) throw new Error('原生请求请用 reply 提交精确 optionId 或 action/content');
       pending.decide(command);
+    } else if (command === 'reply') {
+      const pending = permissions.get(args[0] ?? '');
+      if (!pending?.native) throw new Error('原生请求已失效或不存在');
+      const value = JSON.parse(args.slice(1).join(' ')) as NativeReply;
+      if (!value || typeof value !== 'object' || !('optionId' in value || 'action' in value)) throw new Error('需要 optionId 或 action/content');
+      pending.decide(value);
     } else if (command === 'cancel') {
       const peer = selected(), runId = runs.get(peer.nodeId)?.runId;
       if (!runId) throw new Error('没有执行身份');

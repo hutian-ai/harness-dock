@@ -8,6 +8,84 @@ import { DeviceHost } from '../apps/daemon/src/device-host.ts';
 import { managedStateBytes, forgetSessionDirectories } from '../apps/daemon/src/device-files.ts';
 import { RotatingLog } from '../apps/daemon/src/rotating-log.ts';
 import { DeviceStore } from '../apps/daemon/src/device-store.ts';
+import { ObservationWriter } from '../apps/daemon/src/observation-writer.ts';
+
+const nextTurn = () => new Promise<void>(resolve => setImmediate(resolve));
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+};
+const textDelta = (text: string, phase = 'final_answer') => ({ type: 'text_delta', messageId: 'message', stream: 'output', phase, text });
+
+test('observation streaming sends the first fragment immediately and merges a burst before its receipt', { timeout: 5000 }, async t => {
+  const receipt = deferred(), sent: Record<string, unknown>[] = [];
+  const writer = new ObservationWriter(async (_kind, payload) => {
+    sent.push(payload as Record<string, unknown>);
+    if (sent.length === 1) await receipt.promise;
+  }, new AbortController().signal);
+  t.after(() => { writer.close(); receipt.resolve(); });
+  const chunks = Array.from({ length: 179 }, (_, i) => i < 126 ? '你好' : '你');
+  for (const text of chunks) await writer.write('event', textDelta(text));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.text, chunks[0]);
+  let completed = false;
+  const completion = writer.finish().then(() => { completed = true; });
+  await nextTurn();
+  assert.equal(completed, false);
+  receipt.resolve(); await completion;
+  assert.equal(sent.length, 2);
+  assert.equal(sent.map(part => part.text).join(''), chunks.join(''));
+});
+
+test('observation streaming flushes on time and preserves message, phase and tool boundaries', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const sent: Record<string, unknown>[] = [];
+  const writer = new ObservationWriter(async (_kind, payload) => { sent.push(payload as Record<string, unknown>); }, new AbortController().signal);
+  t.after(() => writer.close());
+  await writer.write('event', textDelta('a', 'commentary'));
+  await writer.write('event', textDelta('b', 'commentary'));
+  await writer.write('event', textDelta('c', 'commentary'));
+  t.mock.timers.tick(99); await nextTurn();
+  assert.deepEqual(sent.map(part => part.text), ['a']);
+  t.mock.timers.tick(1); await nextTurn();
+  assert.deepEqual(sent.map(part => part.text), ['a', 'bc']);
+  await writer.write('event', textDelta('d', 'commentary'));
+  await writer.write('event', textDelta('e'));
+  await writer.write('event', textDelta('f'));
+  await writer.write('event', { type: 'tool_call', id: 'tool' });
+  await writer.write('event', { ...textDelta('g'), messageId: 'second' });
+  await writer.write('event', { type: 'text_delta', text: 'no-id' });
+  await writer.finish();
+  assert.deepEqual(sent.map(part => part.text ?? part.type), ['a', 'bc', 'd', 'e', 'f', 'tool_call', 'g', 'no-id']);
+  assert.deepEqual(sent.filter(part => part.text === 'd' || part.text === 'e').map(part => part.phase), ['commentary', 'final_answer']);
+});
+
+test('observation streaming applies bounded backpressure and cancellation stops queued sends', { timeout: 5000 }, async t => {
+  const receipt = deferred(), controller = new AbortController();
+  let sends = 0;
+  const writer = new ObservationWriter(async () => { sends++; await receipt.promise; }, controller.signal);
+  t.after(() => { writer.close(); receipt.resolve(); });
+  for (let n = 0; n < 16; n++) await writer.write('event', textDelta('x'.repeat(4096)));
+  let accepted = false;
+  const blocked = writer.write('event', textDelta('tail')).then(() => { accepted = true; });
+  await nextTurn();
+  assert.equal(accepted, false);
+  assert.equal(sends, 1);
+  controller.abort();
+  await blocked; await writer.finish();
+  receipt.resolve(); await nextTurn();
+  assert.equal(sends, 1);
+});
+
+test('observation streaming never treats a failed local observation write as confirmed completion', async t => {
+  const failure = new Error('disk full');
+  const writer = new ObservationWriter(async () => { throw failure; }, new AbortController().signal);
+  t.after(() => writer.close());
+  await writer.write('event', textDelta('a'));
+  await assert.rejects(writer.finish(), error => error === failure);
+  await assert.rejects(writer.write('event', textDelta('b')), error => error === failure);
+});
 
 test('device preparation preserves identity and stable skills, and output publication rejects links', async t => {
   const root = await mkdtemp(join(tmpdir(), 'dock-device-test-'));

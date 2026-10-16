@@ -9,8 +9,8 @@ overrides:
   zcode-acp-server@0.68.2>zcode-acp-martty: '-'
 
 patchedDependencies:
-  '@agentclientprotocol/codex-acp@2.1.1': e892d2cb32116404b9aecb29e7ffad469147c2d23e10d0da05a34010bc59b710
-  acpx@0.19.4: 2c2b5c659e1ceffd15f74511f720b31372952754c4f5667aabefd59a5ba8de61
+  '@agentclientprotocol/codex-acp@2.1.1': d06a9fea6a21bbc9ff9f6486b179c8efa19fa21ed95d7317bcb7634677a31771
+  acpx@0.19.4: 50ea9176d436e05505783b0b774af264bcf122430b7491a6a3554ad40e5a460e
 
 importers:
 
@@ -30,7 +30,7 @@ importers:
         version: 8.18.2
       acpx:
         specifier: 0.19.4
-        version: 0.19.4(patch_hash=2c2b5c659e1ceffd15f74511f720b31372952754c4f5667aabefd59a5ba8de61)
+        version: 0.19.4(patch_hash=50ea9176d436e05505783b0b774af264bcf122430b7491a6a3554ad40e5a460e)
       execa:
         specifier: 10.0.1
         version: 10.0.1
@@ -99,7 +99,7 @@ importers:
     dependencies:
       '@agentclientprotocol/codex-acp':
         specifier: 2.1.1
-        version: 2.1.1(patch_hash=e892d2cb32116404b9aecb29e7ffad469147c2d23e10d0da05a34010bc59b710)
+        version: 2.1.1(patch_hash=d06a9fea6a21bbc9ff9f6486b179c8efa19fa21ed95d7317bcb7634677a31771)
       '@agentclientprotocol/sdk':
         specifier: 1.4.0
         version: 1.4.0(zod@4.6.5)
@@ -108,7 +108,7 @@ importers:
         version: 2.1.0
       acpx:
         specifier: 0.19.4
-        version: 0.19.4(patch_hash=2c2b5c659e1ceffd15f74511f720b31372952754c4f5667aabefd59a5ba8de61)
+        version: 0.19.4(patch_hash=50ea9176d436e05505783b0b774af264bcf122430b7491a6a3554ad40e5a460e)
       diff:
         specifier: 8.0.2
         version: 8.0.2
@@ -765,7 +765,7 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/codex-acp@2.1.1(patch_hash=e892d2cb32116404b9aecb29e7ffad469147c2d23e10d0da05a34010bc59b710)':
+  '@agentclientprotocol/codex-acp@2.1.1(patch_hash=d06a9fea6a21bbc9ff9f6486b179c8efa19fa21ed95d7317bcb7634677a31771)':
     dependencies:
       '@agentclientprotocol/sdk': 1.7.0(zod@4.6.5)
       '@openai/codex': 0.159.3
@@ -962,7 +962,7 @@ snapshots:
     dependencies:
       '@types/node': 22.20.5
 
-  acpx@0.19.4(patch_hash=2c2b5c659e1ceffd15f74511f720b31372952754c4f5667aabefd59a5ba8de61):
+  acpx@0.19.4(patch_hash=50ea9176d436e05505783b0b774af264bcf122430b7491a6a3554ad40e5a460e):
     dependencies:
       '@agentclientprotocol/sdk': 1.7.0(zod@4.6.5)
       '@openclaw/fs-safe': 0.21.3

@@ -3,7 +3,8 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const send = value => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
-let session = 'synthetic-zcode-session', turn, permission;
+let session = 'synthetic-zcode-session', turn, permission, currentMode = 'build';
+const modeOptions = [{value:'build',name:'Ask'}, {value:'native-mode',name:'Harness choice',description:'Native description'}];
 const update = value => send({ method: 'session/update', params: { sessionId: session, update: value } });
 const finish = stopReason => { if (turn) send({ id: turn.id, result: { stopReason } }); turn = undefined; };
 createInterface({ input: process.stdin }).on('line', line => {
@@ -18,10 +19,13 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   const { id, method, params } = message;
   if (method === 'initialize') send({ id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, agentInfo: { name: 'synthetic-zcode', version: '1' } } });
-  else if (method === 'session/new' || method === 'session/load') send({ id, result: { sessionId: session, modes: { currentModeId: 'build', availableModes: [{ id: 'build', name: 'Approval required' }] } } });
+  else if (method === 'session/new' || method === 'session/load') send({ id, result: { sessionId: session, modes: { currentModeId: 'build', availableModes: modeOptions.map(option => ({id:option.value,name:option.name})) }, configOptions:[{id:'mode',category:'mode',name:'Mode',type:'select',currentValue:currentMode,options:modeOptions}] } });
   else if (method === 'session/set_mode') {
-    if (process.env.DOCK_REJECT_MODE || params.modeId !== 'build') send({ id, error: { code: -32602, message: 'mode rejected' } });
-    else send({ id, result: {} });
+    if (process.env.DOCK_REJECT_MODE || !modeOptions.some(option => option.value === params.modeId)) send({ id, error: { code: -32602, message: 'mode rejected' } });
+    else { currentMode=params.modeId; appendFileSync(process.env.DOCK_AUDIT, 'mode:'+currentMode+'\n'); update({sessionUpdate:'config_option_update',configOptions:[{id:'mode',category:'mode',name:'Mode',type:'select',currentValue:currentMode,options:modeOptions}]}); send({ id, result: {} }); }
+  } else if (method === 'session/set_config_option') {
+    if (process.env.DOCK_REJECT_MODE || params.configId !== 'mode' || !modeOptions.some(option=>option.value === params.value)) send({id,error:{code:-32602,message:'mode rejected'}});
+    else { currentMode=params.value; appendFileSync(process.env.DOCK_AUDIT,'mode:'+currentMode+'\n'); send({id,result:{configOptions:[{id:'mode',category:'mode',name:'Mode',type:'select',currentValue:currentMode,options:modeOptions}]}}); }
   } else if (method === 'session/prompt') {
     turn = message;
     const text = params.prompt[0].text;

@@ -1,17 +1,13 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readlink, symlink, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { CodexExecutor, type CodexEvidence, type CodexExecutionConfig, type CodexExecutionInput } from './codex.ts';
-import { prepareCodexHome } from './codex-home.ts';
+import { access, stat } from 'node:fs/promises';
+import { isAbsolute, relative, sep } from 'node:path';
+import { CodexExecutor, type CodexEvidence, type CodexInspection, type CodexExecutionConfig, type CodexExecutionInput } from './codex.ts';
+import { resolveCodexEnvironment } from './codex-environment.ts';
 import { createMcpBridge, type McpInvocation, type McpToolDefinition } from './mcp-bridge.ts';
 
 /** Frozen provider environment. The caller owns the identity used to choose this home. */
 export interface CodexHostEnvironment extends Omit<CodexExecutionConfig, 'mcpServers'> {
-  authFile: string;
-  approvalPolicy: string;
   serviceTier?: string;
-  skillDirectory?: string;
-  skillBindingName?: string;
 }
 export interface CodexHostInput<TDelivery> extends CodexExecutionInput {
   environment: CodexHostEnvironment;
@@ -26,27 +22,19 @@ export function hasCodexFinalAnswer(evidence: CodexEvidence): boolean {
 }
 
 export async function prepareCodexEnvironment(environment: CodexHostEnvironment): Promise<void> {
-  if (environment.sandbox !== 'workspace-write' || environment.approvalPolicy !== 'on-request')
-    throw new Error('dock_execution_policy_unverified');
-  await prepareCodexHome(environment);
-  const home = environment.codexHome;
-  await writeFile(join(home, 'config.toml'),
-    'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n'
-    + (environment.serviceTier ? `service_tier = ${JSON.stringify(environment.serviceTier)}\n` : '')
-    + '[features]\nmemories = false\nplugins = false\nremote_plugin = false\napps = false\nskip_host_skill_discovery = true\nskill_mcp_dependency_install = false\n[memories]\ngenerate_memories = false\nuse_memories = false\n',
-    { mode: 0o600 });
-  await mkdir(join(home, 'skills'), { recursive: true, mode: 0o700 });
-  const name = environment.skillBindingName ?? 'authorized';
-  if (!/^[a-zA-Z0-9_-]+$/u.test(name)) throw new Error('dock_skill_binding_invalid');
-  const path = join(home, 'skills', name);
-  try {
-    if (!(await lstat(path)).isSymbolicLink()) throw new Error('dock_skill_binding_conflict');
-    if (environment.skillDirectory && await readlink(path) === environment.skillDirectory) return;
-    await unlink(path);
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+  for (const path of [environment.codexHome, environment.stateDir, environment.cwd])
+    if (!isAbsolute(path)) throw new Error('codex_paths_must_be_absolute');
+  const rel = relative(environment.codexHome, environment.stateDir);
+  if (!rel || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) throw new Error('codex_state_must_be_separate');
+  if (!(await stat(environment.codexHome)).isDirectory()) throw new Error('codex_home_unavailable');
+  if (environment.desktopHost) {
+    const { pipePath, nodePath } = environment.desktopHost;
+    if (!isAbsolute(pipePath) || !isAbsolute(nodePath)) throw new Error('codex_desktop_host_paths_invalid');
+    if (!(await stat(pipePath)).isSocket()) throw new Error('codex_desktop_host_pipe_unavailable');
+    await access(nodePath, 1);
   }
-  if (environment.skillDirectory) await symlink(environment.skillDirectory, path, 'dir');
+  if (environment.skillDirectory && !(await stat(environment.skillDirectory)).isDirectory())
+    throw new Error('codex_skill_root_unavailable');
 }
 
 /** One embedded session slot; transport lifetime and per-turn authority are separate. */
@@ -69,12 +57,15 @@ export class CodexHost<TDelivery = unknown> {
     if (this.#running) throw new Error('dock_driver_busy');
     await this.#release();
   }
-  async inspect(environment: CodexHostEnvironment, signal: AbortSignal) {
-    await prepareCodexEnvironment(environment);
-    return new CodexExecutor(environment).inspect(signal);
+  async inspect(environment: CodexHostEnvironment, signal: AbortSignal): Promise<CodexInspection> {
+    const resolved = await resolveCodexEnvironment(environment, signal);
+    await prepareCodexEnvironment(resolved);
+    const inspection = await new CodexExecutor(resolved).inspect(signal);
+    return { ...inspection, nativeEnvironment: { ...resolved.nativeEnvironment, desktopHost: inspection.desktopHostState ?? resolved.nativeEnvironment.desktopHost } };
   }
   async reconcile(environment: CodexHostEnvironment, runId: string, signal: AbortSignal) {
-    return new CodexExecutor(environment).reconcile(runId, signal);
+    const resolved = await resolveCodexEnvironment(environment, signal);
+    return new CodexExecutor(resolved).reconcile(runId, signal);
   }
   async execute(input: CodexHostInput<TDelivery>): Promise<CodexEvidence> {
     if (this.#running) throw new Error('dock_driver_busy');
@@ -86,21 +77,22 @@ export class CodexHost<TDelivery = unknown> {
     let bridge: Awaited<ReturnType<typeof createMcpBridge<TDelivery>>> | null = null;
     try {
       signal.throwIfAborted();
-      const { serviceTier, ...environment } = input.environment;
+      const resolved = await resolveCodexEnvironment(input.environment, signal);
+      const { serviceTier, ...environment } = resolved;
       const key = createHash('sha256').update(JSON.stringify({
         environment,
         tools: input.tools.definitions, name: input.tools.name,
       })).digest('hex');
       if (this.#session?.key !== key) {
         await this.#release();
-        await prepareCodexEnvironment(input.environment);
+        await prepareCodexEnvironment(environment);
         const lifetime = new AbortController();
         const endpoint = input.tools.definitions.length ? await createMcpBridge<TDelivery>({
           signal: lifetime.signal, name: input.tools.name, tools: input.tools.definitions,
         }) : null;
         this.#session = {
           key, lifetime, bridge: endpoint,
-          executor: new CodexExecutor({ ...input.environment, mcpServers: endpoint ? [endpoint.descriptor] : [] }),
+          executor: new CodexExecutor({ ...environment, mcpServers: endpoint ? [endpoint.descriptor] : [] }),
         };
       }
       bridge = this.#session.bridge;

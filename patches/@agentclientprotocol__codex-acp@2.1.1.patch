@@ -1,8 +1,23 @@
 diff --git a/dist/index.js b/dist/index.js
-index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b3fd0e0af 100755
+index 16daa15df86bfa40062889c8bec02c8881354a18..dcb68a71a40726d0f0551f592228d73bfe48f062 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -28921,10 +28921,13 @@ function webSearchTitle(item) {
+@@ -27302,9 +27302,13 @@ var LineSplitter = class {
+ // src/CodexJsonRpcConnection.ts
+ function startCodexConnection(codexPath, env) {
+   const spawnEnv = env ?? process.env;
++  // Mirror the installed desktop bootstrap only when its application-wide host is provided.
++  const desktopArgs = process.platform === "darwin" && spawnEnv.HARNESS_DOCK_CODEX_DESKTOP_HOST === "1"
++    ? ["-c", "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true",
++       "-c", "plugins.code-review@openai-bundled.mcp_servers.code-review.enabled=true"] : [];
+   let codex;
+   if (codexPath) {
+-    codex = process.platform === "win32" ? spawn(`"${codexPath}" app-server`, { shell: true, env: spawnEnv }) : spawn(codexPath, ["app-server"], { env: spawnEnv });
++    codex = process.platform === "win32" ? spawn(`"${codexPath}" app-server`, { shell: true, env: spawnEnv }) : spawn(codexPath, ["app-server", ...desktopArgs], { env: spawnEnv });
+   } else {
+     const bundledCodexPath = createRequire(import.meta.url).resolve("@openai/codex/bin/codex.js");
+     codex = spawn(process.execPath, [bundledCodexPath, "app-server"], { env: spawnEnv });
+@@ -28921,10 +28925,13 @@ function webSearchTitle(item) {
  
  // src/ContentChunks.ts
  function createMessagePhaseMeta(phase, airClient) {
@@ -18,7 +33,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
  }
  function createUserMessageChunk(content, messageId, meta3) {
    if (messageId) {
-@@ -30316,6 +30319,13 @@ var CodexEventHandler = class {
+@@ -30316,6 +30323,13 @@ var CodexEventHandler = class {
      if (updateEvent) {
        await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
      }
@@ -32,7 +47,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
    }
    async waitForNativeSubagentSession(childThreadId) {
      return await this.subagents.waitForMaterializedSession(childThreadId);
-@@ -30408,21 +30418,31 @@ var CodexEventHandler = class {
+@@ -30408,21 +30422,31 @@ var CodexEventHandler = class {
              }
            }
          }
@@ -68,7 +83,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
        case "thread/name/updated":
          this.sessionState.sessionTitle = notification.params.threadName ?? null;
          this.sessionState.sessionTitleSource = notification.params.threadName == null ? "unset" : "explicit";
-@@ -30484,8 +30504,7 @@ var CodexEventHandler = class {
+@@ -30484,8 +30508,7 @@ var CodexEventHandler = class {
          this.completeRetryIncidentOnTurnProgress();
          return this.createReasoningDeltaEvent(notification.params);
        case "item/reasoning/textDelta":
@@ -78,7 +93,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
        case "item/reasoning/summaryPartAdded":
          this.completeRetryIncidentOnTurnProgress();
          return this.createReasoningSectionBreakEvent(notification.params);
-@@ -30720,7 +30739,21 @@ ${event.details}` : event.summary;
+@@ -30720,7 +30743,21 @@ ${event.details}` : event.summary;
          return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
        case "agentMessage":
          this.rememberAgentMessagePhase(event.item);
@@ -101,7 +116,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
        case "plan":
          return await this.createCompletedPlanEvent(event.item);
        case "exitedReviewMode":
-@@ -30746,7 +30779,7 @@ ${event.details}` : event.summary;
+@@ -30746,7 +30783,7 @@ ${event.details}` : event.summary;
      this.agentMessagePhases.set(item.id, item.phase);
    }
    createCompletedReasoningEvent(item) {
@@ -110,7 +125,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
      const text = parts.filter((part) => part.length > 0).join("\n\n");
      if (text.length === 0) {
        return null;
-@@ -30977,6 +31010,41 @@ ${event.details}` : event.summary;
+@@ -30977,6 +31014,41 @@ ${event.details}` : event.summary;
      }
      return data;
    }
@@ -152,7 +167,17 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
    handleTokenUsageUpdated(params) {
      this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
      this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
-@@ -34348,7 +34416,7 @@ var CodexAcpClient = class {
+@@ -34247,7 +34319,8 @@ var CodexAcpClient = class {
+     if (!cwd) {
+       return;
+     }
+-    const skillExtraRoots = additionalRoots.map((root) => path7.join(root, ".agents", "skills"));
++    const skillExtraRoots = [...additionalRoots.map((root) => path7.join(root, ".agents", "skills")),
++      ...(process.env.HARNESS_DOCK_SKILL_ROOT ? [process.env.HARNESS_DOCK_SKILL_ROOT] : [])];
+     if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
+       await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
+       this.skillExtraRoots = skillExtraRoots;
+@@ -34348,7 +34421,7 @@ var CodexAcpClient = class {
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
        sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
@@ -161,7 +186,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
        effort,
        model: modelId.model,
        serviceTier
-@@ -37489,6 +37557,47 @@ var CodexAcpServer = class {
+@@ -37489,6 +37562,57 @@ var CodexAcpServer = class {
        }
      };
    }
@@ -170,11 +195,21 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
 +    return await this.runWithProcessCheck(async () => {
 +      const client = this.codexAcpClient.appServerClient;
 +      if (params.operation === "inspect") {
++        let nativeHost;
++        if (params.hostStatus === true) {
++          if (typeof params.threadId !== "string" || !this.sessions.has(params.threadId)) throw RequestError.invalidParams();
++          nativeHost = { status: "unavailable" };
++          try {
++            const status = await client.listMcpServerStatus({ threadId: params.threadId, limit: 100, detail: "toolsAndAuthOnly" });
++            const server = status.data.find(server => server.name === "codex_app");
++            nativeHost.status = !server ? "disabled" : server.runtimeStatus === "connected" && !server.toolsError ? "connected" : "unavailable";
++          } catch { /* Optional desktop MCP diagnostics do not disable the harness. */ }
++        }
 +        const [{ config }, models] = await Promise.all([
 +          client.configRead({ includeLayers: false, cwd: process.cwd() }),
 +          this.codexAcpClient.fetchAvailableModels()
 +        ]);
-+        return { models, config: {
++        return { models, nativeHost, config: {
 +          approvalPolicy: config.approval_policy,
 +          sandbox: config.sandbox_mode,
 +          nativeMemoryDisabled: config.features?.memories === false &&
@@ -209,7 +244,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..b01b2ed90c88ba6fd44025ea36f8fd4b
    async extMethod(method, params) {
      const methodRequest = { method, params };
      if (!isExtMethodRequest(methodRequest)) {
-@@ -40358,5 +40467,5 @@ function startAcpServer() {
+@@ -40358,5 +40482,5 @@ function startAcpServer() {
          codexAcpServer = null;
        }
      });

@@ -10,7 +10,7 @@ import type { DeviceExecuteInput } from '../apps/daemon/src/device-host.ts';
 
 interface Result { provider: string; result: { state: string; threadId?: string; sessionId?: string; turnId?: string; text?: string; exactFinalAnswer?: boolean; messages?: { phase: string | null; text: string }[] } }
 interface Inventory { providers: { key: string; status: string; models: string[]; error?: string }[] }
-interface Callback { runId: string; kind: string; payload?: { type?: string; id?: string; name?: string; canAllow?: boolean; success?: boolean } }
+interface Callback { runId: string; kind: string; payload?: { type?: string; id?: string; name?: string; canAllow?: boolean; success?: boolean; options?: {optionId:string;kind:string}[] } }
 export async function until(check: () => boolean | Promise<boolean>, label: string, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   while (!await check()) { if (Date.now() >= deadline) throw new Error(`timeout:${label}`); await delay(50); }
@@ -68,7 +68,7 @@ export async function acceptDevice(provider: 'codex' | 'zcode', paths = {
       assert.equal(callback.runId, activeRun);
       trace.push({ runId: callback.runId, kind: callback.kind, payload: { type: callback.payload?.type, success: callback.payload?.success } });
       if (callback.kind === 'ready') ready++;
-      if (callback.kind === 'permission') { decisions++; return callback.payload?.canAllow ? 'allow' : 'deny'; }
+      if (callback.kind === 'permission') { decisions++; const options = callback.payload?.options; const once = options?.filter(option => option.kind === 'allow_once'); return options ? once?.length === 1 ? {optionId:once[0]!.optionId} : 'deny' : callback.payload?.canAllow ? 'allow' : 'deny'; }
       if (callback.kind === 'toolCall') {
         assert.equal(callback.payload?.name, 'synthetic_marker'); tools++;
         return { content: { marker: toolMarker }, isError: false, deliveryContext: ['synthetic-acceptance'] };

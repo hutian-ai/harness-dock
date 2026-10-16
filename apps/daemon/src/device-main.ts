@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
+import { delimiter, dirname } from 'node:path';
 import WebSocket from 'ws';
 import { JSONRPCClient, JSONRPCServer, JSONRPCServerAndClient } from 'json-rpc-2.0';
 import { assertEndpoint, DEVICE_PROTOCOL_HEADER, DEVICE_PROTOCOL_VERSION, DeviceInboundBudget, DeviceTransport } from '@harness-dock/protocol';
@@ -83,7 +84,11 @@ export class DeviceConnection {
 
 export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
   if (!(await stat(config.cwd)).isDirectory()) throw new Error('Working directory must be a directory');
-  const permitted = new Set(['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT', 'CODEX_HOME', 'DSH_HOME', 'ZCODE_HOME', 'ZCODE_BIN']);
+  // LaunchAgent/system-service PATH can omit Node even though this daemon has a valid runtime.
+  const runtimeDirectory = dirname(process.execPath);
+  const searchPath = process.env.PATH;
+  if (!searchPath?.split(delimiter).includes(runtimeDirectory)) process.env.PATH = searchPath ? `${searchPath}${delimiter}${runtimeDirectory}` : runtimeDirectory;
+  const permitted = new Set(['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT', 'CODEX_HOME', 'CODEX_CLI_PATH', 'DSH_HOME', 'ZCODE_HOME', 'ZCODE_BIN']);
   for (const key of Object.keys(process.env)) if (!permitted.has(key)) delete process.env[key];
   const host = new DeviceHost(config);
   const ca = config.caFile ? await readFile(config.caFile, 'utf8') : undefined;
