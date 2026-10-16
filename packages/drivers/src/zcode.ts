@@ -7,6 +7,7 @@ import { createAgentRegistry } from 'acpx/agent-registry';
 import type { HarnessExecutionInput, HarnessExecutionResult, HarnessExecutor } from './execution.ts';
 import { createMcpBridge, type McpBridge, type McpInvocation, type McpToolDefinition } from './mcp-bridge.ts';
 import { AnswerBudget } from './output-limits.ts';
+import { applyNativePermissionMode, nativePermissionModes } from './native-permission-modes.ts';
 
 export interface ZCodeExecutionConfig {
   cwd: string;
@@ -18,6 +19,7 @@ export interface ZCodeExecutionConfig {
 }
 export interface ZCodeExecutionInput<TDelivery = unknown> extends HarnessExecutionInput {
   model?: string;
+  mode?: string;
   effort?: string;
   tools?: { name: string; definitions: McpToolDefinition[]; invocation: McpInvocation<TDelivery> };
 }
@@ -78,7 +80,7 @@ export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
       const currentModel = status.models?.currentModelId;
       return { provider: 'zcode', adapter: 'zcode-acp-server@0.68.2', configuredPermissionMode: 'build',
         sandbox: null, readiness: 'acp_session_created', modelExecutionVerified: false,
-        models, currentModel, reasoningEffortsByModel: currentModel ? { [currentModel]: reasoningEfforts } : {},
+        models, currentModel, ...nativePermissionModes(options), defaultPermissionMode: 'build', reasoningEffortsByModel: currentModel ? { [currentModel]: reasoningEfforts } : {},
         mcpTools: true, mcpExecutionVerified: false, exactFinalAnswer: false, status };
     } finally { await runtime.shutdown(); }
   }
@@ -129,8 +131,7 @@ export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
       const handle = await runtime.ensureSession({ sessionKey: this.sessionKey, agent: 'zcode', mode: 'persistent', cwd: this.config.cwd });
       const sessionId = handle.backendSessionId;
       if (!sessionId || (input.resumeThreadId && input.resumeThreadId !== sessionId)) throw new Error('zcode_resume_identity_mismatch');
-      // A successful mode RPC is required before any prompt; never inherit yolo.
-      await runtime.setMode({ handle, mode: 'build', signal });
+      await applyNativePermissionMode(runtime, handle, input.mode ?? 'build', signal, 'session-mode');
       if (input.model) await runtime.setConfigOption({ handle, key: 'model', value: input.model, signal });
       if (input.effort) await runtime.setConfigOption({ handle, key: 'thought', value: input.effort, signal });
       this.sessionId = sessionId;
@@ -142,7 +143,7 @@ export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
         onPermissionRequest: async (request, context) => {
           const canAllow = request.raw.options.some(option => option.kind === 'allow_once');
           let decision: 'allow' | 'deny' = 'deny';
-          try { decision = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'ZCode permission', details: request.raw.toolCall, canAllow }, context.signal, context.responseSent) ?? 'deny'; }
+          try { const answer = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'ZCode permission', details: request.raw.toolCall, canAllow }, context.signal, context.responseSent); decision = answer === 'allow' ? 'allow' : 'deny'; }
           catch { /* Permission transport/callback failure cannot grant access. */ }
           return { outcome: decision === 'allow' && canAllow && !signal.aborted && !context.signal.aborted ? 'allow_once' : 'reject_once' };
         },
@@ -156,7 +157,7 @@ export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
         }
         if (event.type === 'tool_call') this.bridge?.acknowledgeToolUpdate({ ...event, sessionUpdate: event.tag });
         // ZCode ACP does not supply authoritative final-message boundaries.
-        if (event.type !== 'message_completed' && event.type !== 'codex_event') await input.onEvent(event);
+        if (event.type !== 'session_update') await input.onEvent(event);
       }
       const result = await turn.result;
       completed = result.status === 'completed' && result.stopReason === 'end_turn' && !signal.aborted;

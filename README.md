@@ -1,6 +1,6 @@
 # harness-dock
 
-每台执行设备运行独立 Daemon，自动探测本机支持的引擎。独立 server 管理连接与配对；调用方应用 或其他中台通过 client SDK 连接 server。三者可在同一台电脑，也可分别部署。当前为私有源码/构建产物，没有发布 npm 或托管云服务。
+harness-dock 是供 调用方应用 等应用调用的本地 Agent 接入基础设施。每台执行设备运行独立 Daemon，server 管理连接与配对，调用方使用 client SDK；三者可同机或分别部署。人日常使用调用方应用或原生客户端，dock 的本机入口用于安装、配对、权限引导和诊断。当前为私有源码/构建产物，没有发布 npm 或托管云服务。
 
 ```text
 调用方应用 / 其他中台 ── ServerClient ──→ harness-dock server
@@ -10,7 +10,7 @@
                          Codex / ZCode…      Lobi / DeepSeek…
 ```
 
-查看 [架构总览图](docs/architecture.html)：当前调用链、设备职责，以及暂缓实施的 dockui 候选。
+正式定位、当前实现、必改项和暂不做的内容见 [独立设备执行范围](docs/standalone-v1.md)。[历史架构图](docs/architecture.html) 保留旧 dockui 候选的背景；该候选已退出本轮产品范围。
 
 - server 拥有设备配对、调用方访问范围和连接转发；每台设备绑定一个控制方。
 - Daemon 拥有 Provider 登录、进程、会话、执行证据和本机文件。安装发现与实际协议就绪分别报告。
@@ -39,7 +39,7 @@ pnpm demo:devices .local/control/client.json
 
 `init` 生成互相独立的设备和应用凭据，文件权限为 0600；不要提交或输出凭据。server 前台运行，云端 server 由 Docker Compose 管理其进程。
 
-控制台命令：`nodes`、`inventory`、`run codex 回复 hello`、`run zcode 回复 hello`、`status`、`allow <审批 ID>`、`deny <审批 ID>`、`cancel`、`quit`。多设备时用 `use <nodeId>` 选择设备。
+控制台命令：`nodes`、`inventory`、`run codex 回复 hello`、`run zcode 回复 hello`、`status`、`allow <审批 ID>`、`deny <审批 ID>`、`reply <审批 ID> <JSON>`、`cancel`、`quit`。多设备时用 `use <nodeId>` 选择设备。原生审批用 `reply <ID> {"optionId":"原始 ID"}`，原生提问用 `reply <ID> {"action":"accept","content":{...}}`；二值 allow 不能替代原生选择。
 
 ```sh
 pnpm daemon status .local/device/config.json
@@ -70,7 +70,7 @@ const inventory = await peer.request('inventory');
 // await client.close();
 ```
 
-`request(method, params, timeoutMs)` 不自动重试。节点方法为 `inventory / prepare / execute / getExecution / events / reconcile / cancel / steer / collect / release / forgetSession`。设备协议 v2，server-client 协议 v1，版本不符明确拒绝。`DeviceController` 是 server 内部的设备入口，也可用于不经过中继的局部集成。
+`request(method, params, timeoutMs)` 不自动重试。节点方法为 `inventory / prepare / execute / getExecution / events / reconcile / cancel / steer / collect / release / forgetSession`。设备协议 v3，server-client 协议 v1，版本不符明确拒绝。`DeviceController` 是 server 内部的设备入口，也可用于不经过中继的局部集成。
 
 Skill 字节通过 `prepare` 传到设备，结果文件通过 `collect` 回传；`release` 只删除该次输出。`forgetSession` 仅在引用该会话的执行均安全释放后删除托管会话目录，保留执行去重身份。
 
@@ -84,7 +84,7 @@ Provider 空闲 10 分钟回收。Codex 可重新加载原 thread；ZCode 目前
 
 ## 引擎与结果
 
-- Codex：内置固定 ACPX 0.19.4 / Codex ACP 2.1.1 / Codex 0.159.3，只需本机有效登录；支持明确的 `final_answer`、严格插话和原 turn 的只读查回。
+- Codex：固定 ACPX 0.19.4 / Codex ACP 2.1.1，使用设备选择的本机 Codex 安装/home 与原生登录；支持明确的 `final_answer`、严格插话和原 turn 的只读查回。
 - ZCode：固定 zcode-acp-server 0.68.2，调用设备上的 ZCode；保留 build 模式审批。已单独完成 macOS ZCode 3.14.5 的真实执行验证，见 [ZCode Driver](docs/zcode-driver.md)。
 - Lobi / DeepSeek：复用独立 drivers 中的 ACP 适配器；本机安装、登录及 ACP 插件版本必须通过探测。
 

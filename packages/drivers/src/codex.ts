@@ -2,24 +2,35 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { createAcpRuntime, createRuntimeStore, type AcpRuntimeEvent, type AcpRuntimeOptions } from 'acpx/runtime';
+import { createAcpRuntime, createRuntimeStore, type AcpRuntimeOptions } from 'acpx/runtime';
 import { createAgentRegistry } from 'acpx/agent-registry';
 import type { HarnessExecutionInput } from './execution.ts';
 import { AnswerBudget, MAX_EVIDENCE_BYTES, readBoundedText } from './output-limits.ts';
+import { applyNativePermissionMode, nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
+import { decodeCodexEvents } from './codex-events.ts';
+import type { CodexMessage, CodexTokens } from './codex-events.ts';
 
-export type CodexEvent = AcpRuntimeEvent;
-export type CodexTokens = { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number };
-export type CodexMessage = { id: string; phase: 'commentary' | 'final_answer' | null; text: string };
+export type { CodexEvent, CodexTokens, CodexMessage } from './codex-events.ts';
 export interface CodexExecutionConfig {
   cwd: string;
   codexHome: string;
+  codexBin?: string;
+  /** Resolved by the local Codex adapter, never a remote execution parameter. */
+  nativeNode?: string;
   stateDir: string;
+  /** Application-wide native host endpoint; never another chat identity. */
+  desktopHost?: { pipePath: string; nodePath: string };
+  skillDirectory?: string;
   mcpServers?: AcpRuntimeOptions['mcpServers'];
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
 }
 export interface CodexModel { id: string; efforts: string[]; serviceTiers: string[] }
 export interface CodexInspection {
+  desktopHostState?: 'connected' | 'disabled' | 'unavailable';
+  nativeEnvironment?: { id: string; kind: 'native'; contextScope: 'device_user'; discovery: 'harness'; desktopHost: string };
   models: CodexModel[];
+  permissionModes?: NativePermissionMode[];
+  defaultPermissionMode?: string | null;
   /** Values reported by config/read; null means no explicit setting. */
   config: { sandbox: string | null; approvalPolicy: string | null; nativeMemoryDisabled: boolean };
 }
@@ -37,6 +48,7 @@ export interface CodexEvidence {
 }
 export interface CodexExecutionInput extends HarnessExecutionInput {
   model?: string;
+  mode?: string;
   effort?: string;
   serviceTier?: string;
   onSteeringReady?(steer: ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | null): void;
@@ -49,10 +61,16 @@ export function createCodexRuntime(config: CodexExecutionConfig, command?: strin
   return createAcpRuntime({
     cwd: config.cwd,
     sessionStore: createRuntimeStore({ stateDir: config.stateDir }),
-    agentRegistry: createAgentRegistry({ overrides: { codex: command ?? [process.execPath, createRequire(import.meta.url).resolve('@agentclientprotocol/codex-acp')] } }),
-    agentProcessEnv: { CODEX_HOME: config.codexHome, INITIAL_AGENT_MODE: config.sandbox ?? 'workspace-write' },
+    agentRegistry: createAgentRegistry({ overrides: { codex: command ?? [config.desktopHost?.nodePath ?? config.nativeNode ?? process.execPath, createRequire(import.meta.url).resolve('@agentclientprotocol/codex-acp')] } }),
+    agentProcessEnv: {
+      CODEX_HOME: config.codexHome, INITIAL_AGENT_MODE: config.sandbox ?? 'workspace-write',
+      ...(config.codexBin ? { CODEX_PATH: config.codexBin } : {}),
+      ...(config.skillDirectory ? { HARNESS_DOCK_SKILL_ROOT: config.skillDirectory } : {}),
+      ...(config.desktopHost ? { CODEX_APP_TOOLS_PIPE_PATH: config.desktopHost.pipePath, CODEX_MCP_NODE_PATH: config.desktopHost.nodePath, HARNESS_DOCK_CODEX_DESKTOP_HOST: '1' } : {}),
+      ...(!config.desktopHost && config.nativeNode ? { CODEX_MCP_NODE_PATH: config.nativeNode } : {}),
+    },
     mcpServers: config.mcpServers,
-    permissionMode: 'deny-all', nonInteractivePermissions: 'deny', fs: false, terminal: false,
+    permissionMode: 'deny-all', nonInteractivePermissions: 'deny', fs: false, terminal: false, elicitationModes: ['form', 'url'],
   });
 }
 
@@ -101,7 +119,13 @@ export class CodexExecutor {
   async inspect(signal: AbortSignal): Promise<CodexInspection> {
     const runtime = this.runtimeFactory(this.config);
     try {
-      const result = object(await runtime.dockControl({ command: { operation: 'inspect' }, signal }));
+      // Inventory never resumes an empty native thread: Codex may not persist it until the first turn.
+      const previous = await runtime.findSession({ sessionKey: 'capability-probe', agent: 'codex' });
+      if (previous) await runtime.prepareFreshSession({ handle: previous });
+      const handle = await runtime.ensureSession({ sessionKey: 'capability-probe', agent: 'codex', mode: 'persistent', cwd: this.config.cwd });
+      const command = { operation: 'inspect' as const, hostStatus: !!this.config.desktopHost };
+      const result = object(await runtime.dockControl({ handle, command, signal }));
+      const desktopHostState = this.config.desktopHost ? this.desktopState(result) : undefined;
       const config = object(result.config);
       if (!Array.isArray(result.models) || (config.sandbox !== null && typeof config.sandbox !== 'string') || (config.approvalPolicy !== null && typeof config.approvalPolicy !== 'string')) throw new Error('codex_inspection_invalid');
       const models = result.models.map(object).filter(model => model.hidden !== true).map(model => ({
@@ -109,8 +133,13 @@ export class CodexExecutor {
         efforts: Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts.map(value => String(object(value).reasoningEffort)) : [],
         serviceTiers: Array.isArray(model.additionalSpeedTiers) && model.additionalSpeedTiers.includes('fast') ? ['priority'] : [],
       }));
-      return { models, config: { sandbox: config.sandbox, approvalPolicy: config.approvalPolicy, nativeMemoryDisabled: config.nativeMemoryDisabled === true } };
+      const status = await runtime.getStatus({ handle, signal });
+      return { models, desktopHostState, ...nativePermissionModes(status.details?.configOptions), config: { sandbox: config.sandbox, approvalPolicy: config.approvalPolicy, nativeMemoryDisabled: config.nativeMemoryDisabled === true } };
     } finally { await runtime.shutdown(); }
+  }
+  private desktopState(result: Record<string, unknown>): 'connected' | 'disabled' | 'unavailable' {
+    const state = object(result.nativeHost).status;
+    return state === 'connected' || state === 'disabled' ? state : 'unavailable';
   }
   /** Reads the exact recorded native turn; never loads a session or sends a prompt. */
   async reconcile(runId: string, signal: AbortSignal): Promise<CodexEvidence | null> {
@@ -156,17 +185,31 @@ export class CodexExecutor {
         this.threadId = threadId;
         evidence.threadId = threadId;
         await this.save(evidence);
+        await applyNativePermissionMode(runtime, handle, input.mode ?? this.config.sandbox ?? 'workspace-write', signal);
         if (input.model) await runtime.setModel({ handle, model: input.model, signal });
         if (input.effort) await runtime.setConfigOption({ handle, key: 'reasoning_effort', value: input.effort, signal });
         await runtime.setConfigOption({ handle, key: 'fast-mode', value: input.serviceTier === 'priority' ? 'on' : 'off', signal });
         await input.onReady(threadId);
         input.signal.throwIfAborted();
         active = true;
-        const turn = runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', signal,
+        const turn = runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', signal, rawSessionUpdates: true,
           onPermissionRequest: async (request, context) => {
             const canAllow = request.raw.options.some(option => option.kind === 'allow_once');
-            const decision = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'Codex permission', details: request.raw.toolCall, canAllow }, context.signal, context.responseSent);
-            return { outcome: decision === 'allow' && canAllow && active && !context.signal.aborted ? 'allow_once' : 'reject_once' };
+            const decision = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'Codex permission', details: request.raw.toolCall, canAllow, options: request.raw.options }, context.signal, context.responseSent);
+            if (!active || context.signal.aborted || !decision || typeof decision !== 'object' || !('optionId' in decision)
+              || !request.raw.options.some(option => option.optionId === decision.optionId)) return { outcome: 'cancel' };
+            return { outcome: 'selected', optionId: decision.optionId };
+          },
+          onElicitation: async (request, context) => {
+            const raw = object(request);
+            if (raw.mode !== 'form' && raw.mode !== 'url') return { action: 'cancel' };
+            const form = raw.mode === 'form'
+              ? { mode: 'form' as const, message: request.message, requestedSchema: object(raw.requestedSchema) }
+              : { mode: 'url' as const, message: request.message, url: String(raw.url), elicitationId: String(raw.elicitationId) };
+            const decision = await input.permission?.({ id: randomUUID(), title: request.message.slice(0, 200), details: {}, canAllow: true, form }, context.signal, context.responseSent);
+            if (!active || signal.aborted || context.signal.aborted || !decision || typeof decision !== 'object' || !('action' in decision)) return { action: 'cancel' };
+            if (decision.action !== 'accept') return { action: decision.action };
+            return { action: 'accept', content: decision.content as Record<string, string | number | boolean | string[]> | undefined };
           },
         });
         void turn.promptStarted.catch(() => {});
@@ -178,7 +221,7 @@ export class CodexExecutor {
             return result.accepted === true && result.turnId === evidence.turnId ? 'accepted' : 'rejected';
           } catch { return 'unknown'; }
         };
-        for await (const event of turn.events) {
+        for await (const event of decodeCodexEvents(turn.events)) {
           try {
             if (event.type === 'text_delta' && event.stream !== 'thought') streamed.add(event.text);
             if (event.type === 'message_completed' && !evidence.messages.some(message => message.id === event.messageId)) {

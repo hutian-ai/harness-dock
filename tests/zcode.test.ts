@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { createAcpRuntime, createRuntimeStore } from 'acpx/runtime';
 import { createAgentRegistry } from 'acpx/agent-registry';
 import { ZCodeExecutor, type ZCodeExecutionConfig } from '../packages/drivers/src/zcode.ts';
-import type { AcpRuntimeEvent } from 'acpx/runtime';
+import type { CodexEvent } from '../packages/drivers/src/codex-events.ts';
 
 async function setup(t: { after(fn: () => Promise<void>): void }, rejectMode = false) {
   await mkdir('.local', { recursive: true });
@@ -24,18 +24,22 @@ async function setup(t: { after(fn: () => Promise<void>): void }, rejectMode = f
 }
 test('ZCode ACPX preserves its session, gates permissions and cancellation, and does not invent final messages', async t => {
   const { executor, root, audit } = await setup(t);
-  const events: AcpRuntimeEvent[] = [];
+  const events: CodexEvent[] = [];
   let sessionId: string | undefined;
   const input = (prompt: string) => ({ runId: randomUUID(), prompt, resumeThreadId: sessionId,
     signal: AbortSignal.timeout(10000), onReady: async (id: string) => { sessionId = id; },
-    onEvent: async (event: AcpRuntimeEvent) => { events.push(event); } });
-  assert.equal((await executor.execute(input('marker'))).state, 'completed');
+    onEvent: async (event: CodexEvent) => { events.push(event); } });
+  const inspection = await executor.inspect(AbortSignal.timeout(10000));
+  assert.deepEqual(inspection.permissionModes.map(mode => mode.value), ['build','native-mode']);
+  assert.equal((await executor.execute({...input('marker'), mode:'native-mode'})).state, 'completed');
+  assert.ok((await readFile(audit,'utf8')).includes('mode:native-mode'));
   assert.equal(events.flatMap(e => e.type === 'text_delta' && e.stream !== 'thought' ? [e.text] : []).join(''), 'marker');
   assert.ok(events.some(e => e.type === 'tool_call'));
   assert.ok(!events.some(e => e.type === 'message_completed'));
   assert.equal((await executor.execute({ ...input('permission'), permission: async () => 'allow' })).state, 'completed');
   assert.equal(await readFile(join(root, 'allowed.txt'), 'utf8'), 'synthetic');
-  assert.equal((await readFile(audit, 'utf8')).split('\n').filter(x => x === 'session/new').length, 1);
+  assert.equal((await readFile(audit, 'utf8')).split('\n').filter(x => x === 'session/new').length, 2);
+  assert.ok((await readFile(audit,'utf8')).includes('mode:build'));
   await rm(join(root, 'allowed.txt'));
   assert.equal((await executor.execute({ ...input('permission'), permission: async () => 'deny' })).state, 'completed');
   await assert.rejects(stat(join(root, 'allowed.txt')), { code: 'ENOENT' });
@@ -55,6 +59,9 @@ test('ZCode mode rejection prevents dispatch; provider connection loss has an un
   const rejected = await setup(t, true);
   assert.equal((await rejected.executor.execute(input)).state, 'failed');
   assert.ok(!(await readFile(rejected.audit, 'utf8')).includes('session/prompt'));
+  const missing = await setup(t);
+  assert.equal((await missing.executor.execute({...input,mode:'not-advertised'})).state,'failed');
+  assert.ok(!(await readFile(missing.audit,'utf8')).includes('session/prompt'));
   const crashed = await setup(t);
   assert.equal((await crashed.executor.execute({ ...input, prompt: 'crash' })).state, 'unknown');
 });
