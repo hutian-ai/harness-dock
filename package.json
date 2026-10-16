@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "node --test --import tsx tests/*.test.ts",
+    "test": "node --test --test-concurrency=1 --import tsx tests/*.test.ts",
     "check": "pnpm build && tsc -p tsconfig.tests.json && pnpm test",
     "demo:devices": "node --import tsx packages/client/src/device-console.ts",
     "daemon": "node --import tsx apps/daemon/src/cli.ts",

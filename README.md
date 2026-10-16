@@ -107,7 +107,7 @@ node /absolute/new-output-directory/controller/dist/device-console.js /absolute/
 npm install --offline --install-links=false --ignore-scripts --no-audit --no-fund /absolute/new-output-directory/controller
 ```
 
-保留上述产物目录，移动后重新安装。没有 npm registry 发布或自动升级流程。
+保留上述 SDK 产物目录，移动后重新安装。设备端支持将 daemon bundle 安装到独立版本目录，并通过固定入口显式升级或回滚；macOS 可注册用户登录自启，见 [家用安装与维护](docs/home-install.md)。没有 npm registry 发布或无人值守自动更新。
 
 ## 验证与边界
 
