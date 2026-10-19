@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { createAcpRuntime, createRuntimeStore, type AcpRuntimeOptions } from 'acpx/runtime';
 import { createAgentRegistry } from 'acpx/agent-registry';
 import type { HarnessExecutionInput, HarnessExecutionResult, HarnessExecutor } from './execution.ts';
+import { nativeElicitationForm, nativeElicitationResponse, nativePermissionOption, type NativePermissionDecision } from './execution.ts';
 import { createMcpBridge, type McpBridge, type McpInvocation, type McpToolDefinition } from './mcp-bridge.ts';
 import { AnswerBudget } from './output-limits.ts';
 import { applyNativePermissionMode, nativePermissionModes } from './native-permission-modes.ts';
@@ -15,12 +16,16 @@ export interface ZCodeExecutionConfig {
   zcodeHome: string;
   /** Explicit installed ZCode CLI executable or its bundled .cjs file. */
   zcodeBin: string;
+  /** Local-owner-selected environment dependencies, without remote injection. */
+  environment?: NodeJS.ProcessEnv;
   mcpServers?: AcpRuntimeOptions['mcpServers'];
 }
 export interface ZCodeExecutionInput<TDelivery = unknown> extends HarnessExecutionInput {
   model?: string;
   mode?: string;
   effort?: string;
+  skillDirectory?: string;
+  callerSkillsPresent?: boolean;
   tools?: { name: string; definitions: McpToolDefinition[]; invocation: McpInvocation<TDelivery> };
 }
 export async function createZCodeRuntime(config: ZCodeExecutionConfig) {
@@ -42,18 +47,20 @@ export async function createZCodeRuntime(config: ZCodeExecutionConfig) {
     cwd: config.cwd, sessionStore: createRuntimeStore({ stateDir: config.stateDir }),
     agentRegistry: createAgentRegistry({ overrides: { zcode: [process.execPath, entry] } }),
     agentProcessEnv: {
+      ...config.environment,
       ZCODE_BIN: config.zcodeBin, ZCODE_NODE: process.execPath, ZCODE_HOME: config.zcodeHome,
       XDG_CONFIG_HOME: xdg, ZCODE_ACP_RUNTIME: 'node', ZCODE_ACP_MODE: 'build',
       ZCODE_ACP_REMOTE: '0',
     },
     mcpServers: config.mcpServers,
     permissionMode: 'deny-all', nonInteractivePermissions: 'deny', fs: false, terminal: false,
+    elicitationModes: ['form', 'url'],
   });
 }
 
 /** Persistent ACPX-owned ZCode process; no ZCode desktop/relay dependency. */
 export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
-  readonly unsupported = ['exact_final_answer'];
+  readonly unsupported = ['exact_final_answer', 'caller_skills'];
   private runtime?: Awaited<ReturnType<typeof createZCodeRuntime>>;
   private sessionKey = randomUUID();
   private sessionId?: string;
@@ -81,6 +88,7 @@ export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
       return { provider: 'zcode', adapter: 'zcode-acp-server@0.68.2', configuredPermissionMode: 'build',
         sandbox: null, readiness: 'acp_session_created', modelExecutionVerified: false,
         models, currentModel, ...nativePermissionModes(options), defaultPermissionMode: 'build', reasoningEffortsByModel: currentModel ? { [currentModel]: reasoningEfforts } : {},
+        permissionInteractions: ['options', 'form', 'url'] as const, callerSkills: false,
         mcpTools: true, mcpExecutionVerified: false, exactFinalAnswer: false, status };
     } finally { await runtime.shutdown(); }
   }
@@ -98,6 +106,9 @@ export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
   }
   async execute(input: ZCodeExecutionInput<TDelivery>): Promise<HarnessExecutionResult> {
     if (this.executing) throw new Error('zcode_executor_busy');
+    // The pinned bridge discovers native skills only from fixed user/project
+    // roots. Do not mutate those roots or silently discard caller skills.
+    if (input.callerSkillsPresent) return { state: 'failed', error: 'zcode_caller_skills_unsupported' };
     if (input.resumeThreadId && input.resumeThreadId !== this.sessionId)
       return { state: 'failed', error: 'zcode_session_unavailable' };
     if (this.sessionId && input.resumeThreadId !== this.sessionId)
@@ -141,11 +152,21 @@ export class ZCodeExecutor<TDelivery = unknown> implements HarnessExecutor {
       dispatched = true;
       const turn = runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', signal,
         onPermissionRequest: async (request, context) => {
-          const canAllow = request.raw.options.some(option => option.kind === 'allow_once');
-          let decision: 'allow' | 'deny' = 'deny';
-          try { const answer = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'ZCode permission', details: request.raw.toolCall, canAllow }, context.signal, context.responseSent); decision = answer === 'allow' ? 'allow' : 'deny'; }
+          const canAllow = request.raw.options.filter(option => option.kind === 'allow_once').length === 1;
+          let decision: NativePermissionDecision | undefined;
+          try { decision = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'ZCode permission', details: request.raw.toolCall, canAllow, options: request.raw.options }, context.signal, context.responseSent); }
           catch { /* Permission transport/callback failure cannot grant access. */ }
-          return { outcome: decision === 'allow' && canAllow && !signal.aborted && !context.signal.aborted ? 'allow_once' : 'reject_once' };
+          const option = nativePermissionOption(request.raw.options, decision);
+          return option && accepting && !signal.aborted && !context.signal.aborted
+            ? { outcome: 'selected', optionId: option.optionId } : { outcome: 'cancel' };
+        },
+        onElicitation: async (request, context) => {
+          const form = nativeElicitationForm(request);
+          if (!form) return { action: 'cancel' };
+          let decision: NativePermissionDecision | undefined;
+          try { decision = await input.permission?.({ id: randomUUID(), title: form.message.slice(0, 200), details: {}, canAllow: true, form }, context.signal, context.responseSent); }
+          catch { /* A missing or failed answer cannot accept an elicitation. */ }
+          return nativeElicitationResponse(!accepting || signal.aborted || context.signal.aborted ? undefined : decision);
         },
       });
       void turn.promptStarted.catch(() => {});

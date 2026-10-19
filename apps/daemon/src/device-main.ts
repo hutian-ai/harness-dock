@@ -7,6 +7,7 @@ import { assertEndpoint, DEVICE_PROTOCOL_HEADER, DEVICE_PROTOCOL_VERSION, Device
 import type { DeviceConfig } from './config.ts';
 import { DeviceHost } from './device-host.ts';
 import { serveControl } from './local-control.ts';
+import { daemonEnvironment } from './provider-environment.ts';
 
 /** Outbound connection recovery restores observation; it never replays requests. */
 export class DeviceConnection {
@@ -89,8 +90,8 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
   const runtimeDirectory = dirname(process.execPath);
   const searchPath = process.env.PATH;
   if (!searchPath?.split(delimiter).includes(runtimeDirectory)) process.env.PATH = searchPath ? `${searchPath}${delimiter}${runtimeDirectory}` : runtimeDirectory;
-  const permitted = new Set(['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT', 'CODEX_HOME', 'CODEX_CLI_PATH', 'DSH_HOME', 'ZCODE_HOME', 'ZCODE_BIN']);
-  for (const key of Object.keys(process.env)) if (!permitted.has(key)) delete process.env[key];
+  const permitted = daemonEnvironment(process.env);
+  for (const key of Object.keys(process.env)) if (!Object.hasOwn(permitted, key)) delete process.env[key];
   const host = new DeviceHost(config);
   const ca = config.caFile ? await readFile(config.caFile, 'utf8') : undefined;
   const connection = new DeviceConnection(host, config, ca);

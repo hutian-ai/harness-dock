@@ -65,6 +65,92 @@ test("rejects a stale Lobi model allowlist", async () => {
   );
 });
 
+test("Lobi fresh execution stays available without resume or a plan mode", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dock-lobi-basic-"));
+  temporaryPaths.push(directory);
+  const executable = join(directory, "codewiz");
+  const log = join(directory, "requests.jsonl");
+  await writeFile(executable, `#!/usr/bin/env node
+const fs=require("node:fs"),readline=require("node:readline");
+readline.createInterface({input:process.stdin}).on("line",line=>{
+ const request=JSON.parse(line);fs.appendFileSync(${JSON.stringify(log)},line+"\\n");
+ const reply=result=>process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:request.id,result})+"\\n");
+ if(request.method==="initialize") reply({protocolVersion:1,agentCapabilities:{}});
+ if(request.method==="session/new") reply({sessionId:"basic-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:[{id:"model",name:"Model",type:"select",currentValue:"test-model",options:[{value:"test-model",name:"Test"}]}]});
+ if(request.method==="session/set_mode") reply({});
+ if(request.method==="session/prompt") reply({stopReason:"end_turn"});
+}).on("close",()=>process.exit(0));
+`);
+  await chmod(executable, 0o755);
+  const driver = new LobiAcpExecutor({ env: process.env, executable,
+    probeCommand: async () => ({ exitCode: 0, stdout: "0.1.95", stderr: "" }),
+    probeAcp: async () => ({ protocolVersion: 1, loadSession: false, resumeSession: false, models: ["test-model"], modes: ["build"] }),
+  });
+  const inspection = await driver.probe();
+  assert.equal(inspection.loadSession, false);
+  assert.equal(inspection.resumeSession, false);
+  assert.deepEqual(inspection.modes, ["build"]);
+  let starts = 0;
+  const input = { runId: "basic-run", cwd: directory, prompt: "basic", model: "test-model", config: {}, signal: AbortSignal.timeout(5000),
+    callbacks: { onStarted: async () => { starts += 1; }, onProgress: async () => {} } };
+  assert.equal((await driver.execute(input)).state, "completed");
+  await assert.rejects(driver.execute({ ...input, resumeSessionId: "saved", allowSessionResume: true }), /resume is unavailable/u);
+  await assert.rejects(driver.execute({ ...input, config: { mode: "plan" } }), /mode is unavailable: plan/u);
+  assert.equal(starts, 1);
+  const requests = (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line) as { method: string });
+  assert.equal(requests.filter(request => request.method === "session/prompt").length, 1);
+  assert.equal(requests.some(request => request.method === "session/load" || request.method === "session/resume"), false);
+});
+
+test("Lobi reports an absent mode catalog without disabling its ACP inventory", async () => {
+  const driver = new LobiAcpExecutor({ env: process.env, executable: "/opt/codewiz",
+    probeCommand: async () => ({ exitCode: 0, stdout: "0.1.95", stderr: "" }),
+    probeAcp: async () => ({ protocolVersion: 1, loadSession: true, resumeSession: false, models: ["test-model"], modes: [] }),
+  });
+  const inspection = await driver.probe();
+  assert.equal(inspection.loadSession, true);
+  assert.equal(inspection.resumeSession, false);
+  assert.deepEqual(inspection.modes, []);
+  await assert.rejects(driver.execute({ runId: "missing-mode", cwd: "/tmp", model: "test-model", config: {}, prompt: "must not dispatch", signal: new AbortController().signal,
+    callbacks: { onStarted: async () => assert.fail("no supported default mode"), onProgress: async () => {} } }), /mode is unavailable: build/u);
+});
+
+test("Lobi caller skills append to inline native config without replacing it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dock-lobi-skills-"));
+  temporaryPaths.push(directory);
+  const executable = join(directory, "codewiz");
+  const observed = join(directory, "inline-config.jsonl");
+  await writeFile(executable, `#!/usr/bin/env node
+const fs=require("node:fs"),readline=require("node:readline");
+fs.appendFileSync(${JSON.stringify(observed)},JSON.stringify(process.env.OPENCODE_CONFIG_CONTENT)+"\\n");
+readline.createInterface({input:process.stdin}).on("line",line=>{
+ const request=JSON.parse(line),reply=result=>process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:request.id,result})+"\\n");
+ if(request.method==="initialize") reply({protocolVersion:1,agentCapabilities:{}});
+ if(request.method==="session/new") reply({sessionId:"skills-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:[{id:"model",name:"Model",type:"select",currentValue:"test-model",options:[{value:"test-model",name:"Test"}]}]});
+ if(request.method==="session/set_mode") reply({});
+ if(request.method==="session/prompt") reply({stopReason:"end_turn"});
+}).on("close",()=>process.exit(0));
+`);
+  await chmod(executable, 0o755);
+  const callerSkills = join(directory, "caller-skills");
+  const original = ` { "theme": "native", "skills": { "paths": ["/native/skills", ${JSON.stringify(callerSkills)}], "urls": ["https://example.test/skills"] } } `;
+  const options = { executable, probeCommand: async () => ({ exitCode: 0, stdout: "0.1.95", stderr: "" }),
+    probeAcp: async () => ({ protocolVersion: 1, loadSession: false, resumeSession: false, models: ["test-model"], modes: ["build"] }) };
+  const driver = new LobiAcpExecutor({ ...options, env: { ...process.env, OPENCODE_CONFIG_CONTENT: original } });
+  await driver.probe();
+  const input = { runId: "skills-run", cwd: directory, model: "test-model", config: {}, prompt: "skills", signal: AbortSignal.timeout(5000),
+    callbacks: { onStarted: async () => {}, onProgress: async () => {} } };
+  assert.equal((await driver.execute({ ...input, skillDirectory: callerSkills })).state, "completed");
+  assert.equal((await driver.execute(input)).state, "completed");
+  const [merged, untouched] = (await readFile(observed, "utf8")).trim().split("\n").map(line => JSON.parse(line) as string);
+  assert.deepEqual(JSON.parse(merged!), { theme: "native", skills: { paths: ["/native/skills", callerSkills], urls: ["https://example.test/skills"] } });
+  assert.equal(untouched, original);
+  const invalid = new LobiAcpExecutor({ ...options, env: { ...process.env, OPENCODE_CONFIG_CONTENT: "malformed{" } });
+  await invalid.probe();
+  await assert.rejects(invalid.execute({ ...input, skillDirectory: callerSkills }), /inline config is invalid JSON/u);
+  assert.equal((await readFile(observed, "utf8")).trim().split("\n").length, 2);
+});
+
 for (const scenario of [
   "resume",
   "missing-loaded-model",
@@ -72,6 +158,8 @@ for (const scenario of [
   "removed-loaded-model",
   "removed-loaded-mode",
   "unacknowledged-model",
+  "empty-model-ack",
+  "resume-rejected",
   "unsupported-resume",
 ] as const) {
   test(`revalidates the actual Lobi session catalog: ${scenario}`, async () => {
@@ -96,10 +184,13 @@ lines.on("line",line=>{
  fs.appendFileSync(${JSON.stringify(requestLog)},JSON.stringify({method:request.method,params:request.params})+"\\n");
  const reply=result=>process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:request.id,result})+"\\n");
  if(request.method==="initialize") reply({protocolVersion:1,agentCapabilities:{loadSession:scenario!=="unsupported-resume"}});
- if(request.method==="session/load") reply(metadata());
+ if(request.method==="session/load") {
+  if(scenario==="resume-rejected") process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:request.id,error:{code:-32602,message:"Session not found"}})+"\\n");
+  else reply(metadata());
+ }
  if(request.method==="session/new") reply({sessionId:"new-session",...metadata()});
  if(request.method==="session/set_mode") reply({});
- if(request.method==="session/set_config_option") {if(scenario!=="unacknowledged-model") model=request.params.value;reply({configOptions:metadata().configOptions});}
+ if(request.method==="session/set_config_option") {if(scenario!=="unacknowledged-model") model=request.params.value;reply(scenario==="empty-model-ack"?{}:{configOptions:metadata().configOptions});}
  if(request.method==="session/prompt") reply({stopReason:"end_turn"});
 });
 lines.on("close",()=>process.exit(0));

@@ -1,4 +1,5 @@
 import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
+import { isProviderEnvironment } from './provider-environment.ts';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -13,6 +14,7 @@ const providerOverride = z.preprocess(value => Array.isArray(value) && !value.le
   home: absolutePath('invalid_provider_home').optional(),
   executable: z.string({ error: 'invalid_provider_executable' }).optional(),
   disabled: z.boolean({ error: 'invalid_provider_disabled' }).optional(),
+  environment: z.custom<Record<string, string>>(isProviderEnvironment, { error: 'invalid_provider_environment' }).optional(),
 }, { error: 'invalid_provider_override' }));
 const deviceConfig = z.looseObject({
   nodeId: id, endpoint: z.unknown(),
@@ -37,6 +39,11 @@ export async function readConfig(path: string): Promise<DeviceConfig> {
   assertEndpoint(config.endpoint);
   const parsed = deviceConfig.safeParse(config);
   if (!parsed.success) throw new Error(parsed.error.issues[0]!.message);
+  if (Object.values(config.providers ?? {}).some(provider => provider?.environment && Object.keys(provider.environment).length)) {
+    const file = await stat(path);
+    if (process.platform !== 'win32' && ((file.mode & 0o077) || file.uid !== process.getuid?.()))
+      throw new Error('provider_environment_config_requires_owner_only');
+  }
   resourceLimits(config.resources);
   return config;
 }

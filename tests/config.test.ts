@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
 import { readConfig, parseDevicePairing } from '../apps/daemon/src/config.ts';
+import { daemonEnvironment, providerEnvironment, providerDependencyVariables } from '../apps/daemon/src/provider-environment.ts';
 import { parseServerConfig, readServerConfig } from '../apps/server/src/config.ts';
 
 const token = () => randomBytes(32).toString('hex');
@@ -99,6 +100,54 @@ test('device config keeps optional compatibility while rejecting unsafe director
     [{ providers: { codex: { disabled: 'true' } } }, 'invalid_provider_disabled'],
   ] as [object, string][]) await assert.rejects(read({ ...base, ...change }), error => error instanceof Error && error.message === message);
   await assert.rejects(read({ ...base, endpoint: 'ws://192.0.2.1/' }), /Use verified wss/);
+});
+
+test('provider dependencies are local explicit selections and cannot replace execution identity or policy', () => {
+  const inherited = {
+    PATH: '/usr/bin', HOME: '/home/example', TMPDIR: '/tmp/example', TEMP: '/tmp/example',
+    CODEX_HOME: '/home/example/.codex', DSH_HOME: '/home/example/.dsh',
+    HTTPS_PROXY: 'http://inherited.example:8080', NODE_EXTRA_CA_CERTS: '/inherited/ca.pem',
+    NODE_OPTIONS: '--require=untrusted.js', HARNESS_DOCK_TOKEN: 'synthetic-controller-secret',
+  };
+  const daemon = daemonEnvironment(inherited);
+  assert.equal(daemon.CODEX_HOME, inherited.CODEX_HOME);
+  assert.equal(daemon.DSH_HOME, inherited.DSH_HOME);
+  assert.equal(daemon.HARNESS_DOCK_TOKEN, undefined);
+  assert.equal(daemon.NODE_OPTIONS, undefined);
+  assert.equal(daemon.HTTPS_PROXY, undefined, 'dependency inheritance requires an explicit local selection');
+  const selected = { HTTPS_PROXY: 'http://selected.example:8080', NODE_EXTRA_CA_CERTS: '/local/ca.pem', NO_PROXY: '' };
+  assert.deepEqual(providerEnvironment({ environment: selected }, inherited), {
+    PATH: inherited.PATH, HOME: inherited.HOME, TMPDIR: inherited.TMPDIR, TEMP: inherited.TEMP, ...selected,
+  });
+  assert.equal(providerEnvironment(undefined, inherited).HTTPS_PROXY, undefined);
+  assert.deepEqual(providerEnvironment({ environment: {} }, {}), {});
+  assert.deepEqual(providerEnvironment({ environment: Object.fromEntries(providerDependencyVariables.map(key => [key, 'selected'])) }, {}),
+    Object.fromEntries(providerDependencyVariables.map(key => [key, 'selected'])));
+  for (const key of ['PATH', 'HOME', 'CODEX_HOME', 'CODEX_PATH', 'CODEX_APP_TOOLS_PIPE_PATH', 'ZCODE_BIN', 'NODE_OPTIONS', 'HARNESS_DOCK_TOKEN', 'API_TOKEN'])
+    assert.throws(() => providerEnvironment({ environment: { [key]: 'synthetic-private-value' } }, inherited), { message: 'invalid_provider_environment' });
+  for (const environment of [null, [], 'all', { HTTPS_PROXY: 1 }, { HTTPS_PROXY: 'bad\0value' }, { HTTPS_PROXY: 'x'.repeat(16_385) }])
+    assert.throws(() => providerEnvironment({ environment } as never, inherited), { message: 'invalid_provider_environment' });
+});
+
+test('device config protects selected dependency values and returns them without rewriting', async t => {
+  const directory = await temporary(t), path = join(directory, 'config.json');
+  const base = { mode: 'device', nodeId: randomUUID(), token: token(), endpoint: 'ws://127.0.0.1:1/', cwd: directory, stateDir: join(directory, 'state') };
+  const config = { ...base, providers: {
+    codex: { environment: { HTTPS_PROXY: 'http://proxy.example:8080', NODE_EXTRA_CA_CERTS: '/local/ca.pem' } },
+    zcode: { environment: { NO_PROXY: 'localhost' } },
+  } };
+  await writeFile(path, JSON.stringify(config), { mode: 0o600 });
+  assert.deepEqual(await readConfig(path), config);
+  assert.equal(providerEnvironment(config.providers.zcode, {}).HTTPS_PROXY, undefined, 'selections are scoped to one Provider');
+  if (process.platform !== 'win32') {
+    await chmod(path, 0o644);
+    await assert.rejects(readConfig(path), { message: 'provider_environment_config_requires_owner_only' });
+    await chmod(path, 0o600);
+  }
+  for (const environment of [null, [], { NODE_OPTIONS: '--require=synthetic.js' }, { HTTPS_PROXY: false }]) {
+    await writeFile(path, JSON.stringify({ ...base, providers: { codex: { environment } } }));
+    await assert.rejects(readConfig(path), { message: 'invalid_provider_environment' });
+  }
 });
 
 test('device pairing rejects extra identity fields and CLI keeps file and flag checks', async t => {

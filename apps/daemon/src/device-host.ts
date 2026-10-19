@@ -1,14 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { arch, hostname, platform, release } from 'node:os';
-import { join } from 'node:path';
-import { access } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import {
-  CodexHost, LobiAcpExecutor, DeepSeekAcpExecutor, ZCodeExecutor, discoverProviders,
-  AnswerBudget, boundedObservation,
-  type AcpExecutor, type CodexHostEnvironment, type DiscoveredProvider, type McpInvocation,
+  CodexHost, discoverProviders, createProviderAdapter, boundedObservation,
+  type CodexHostEnvironment, type ProviderAdapter, type ProviderCapabilities, type McpInvocation,
   type McpToolDefinition, type ProviderKey, type NativePermissionRequest, type NativePermissionDecision,
 } from '@harness-dock/drivers';
 import type { DeviceConfig } from './config.ts';
+import { providerEnvironment } from './provider-environment.ts';
 import { collectFiles, digest, prepareDirectories, releaseDirectories, verifySkillFiles, managedStateBytes, forgetSessionDirectories, type DeviceFile } from './device-files.ts';
 import { DeviceStore, type StoredExecution } from './device-store.ts';
 import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
@@ -23,6 +22,8 @@ export interface DeviceExecuteInput {
 interface InventoryProvider {
   key: ProviderKey; displayName: string; status: 'ready' | 'not_found' | 'unavailable' | 'disabled';
   version: string | null; models: string[]; inspection?: unknown; error?: string;
+  readiness?: { level: 'protocol'; checkedAt: string; modelExecutionVerified: false };
+  capabilities?: ProviderCapabilities;
 }
 type CodexHostPort = Pick<CodexHost, 'inspect' | 'execute' | 'reconcile' | 'close'>;
 const object = (value: unknown): Record<string, unknown> => {
@@ -76,8 +77,8 @@ export class DeviceHost {
   readonly #codex: CodexHostPort;
   readonly #limits: DeviceResourceLimits;
   readonly #lifetime = new AbortController();
-  readonly #acp = new Map<ProviderKey, AcpExecutor>();
-  readonly #found = new Map<ProviderKey, DiscoveredProvider>();
+  readonly #adapters = new Map<ProviderKey, ProviderAdapter>();
+  readonly #adapterKeys = new Map<ProviderKey, string>();
   #providers?: InventoryProvider[];
   #probing?: Promise<unknown>;
   #maintenance?: Promise<unknown>;
@@ -88,7 +89,6 @@ export class DeviceHost {
   #persistenceFailed = false;
   #closed = false;
   #callback?: DeviceCallback;
-  #zcode?: { key: string; executor: ZCodeExecutor };
   #active?: { runId: string; controller: AbortController; promise: Promise<unknown>; cancellationRequested: boolean; historyTruncated: boolean; steer?: (text: string) => Promise<'accepted' | 'rejected' | 'unknown'> };
   constructor(readonly config: DeviceConfig, codex: CodexHostPort = new CodexHost()) {
     this.nodeId = config.nodeId;
@@ -131,8 +131,10 @@ export class DeviceHost {
     });
   }
   async #closeProviders(): Promise<void> {
-    const zcode = this.#zcode; this.#zcode = undefined;
-    const results = await Promise.allSettled([this.#codex.close(), zcode?.executor.close()]);
+    const results = await Promise.allSettled([
+      ...[...this.#adapters.values()].map(adapter => adapter.close()),
+      ...(!this.#adapters.has('codex') ? [this.#codex.close()] : []),
+    ]);
     const failure = results.find(result => result.status === 'rejected');
     if (failure?.status === 'rejected') throw failure.reason;
   }
@@ -182,12 +184,6 @@ export class DeviceHost {
     if (!Number.isSafeInteger(after) || after < 0) throw new Error('invalid_sequence');
     return this.#store.events(runId, after);
   }
-  #environment(provider: DiscoveredProvider, sessionKey: string, cwd: string, config: Record<string, unknown> = {}, skillDirectory?: string): CodexHostEnvironment {
-    const home = join(this.config.stateDir, 'providers', 'codex', digest(sessionKey));
-    return { cwd, codexHome: provider.home!, codexBin: provider.executable!, stateDir: join(home, 'execution'),
-      sandbox: 'workspace-write',
-      serviceTier: typeof config.serviceTier === 'string' ? config.serviceTier : undefined, skillDirectory };
-  }
   async inventory(refresh = false): Promise<unknown> {
     if (this.#closed) throw new Error('device_stopping');
     if (this.#probing) return this.#probing;
@@ -196,36 +192,30 @@ export class DeviceHost {
       await this.#cleanup();
       const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(90_000)]);
       const found = await discoverProviders({ overrides: this.config.providers, signal });
-      this.#found.clear(); this.#acp.clear();
       const providers: InventoryProvider[] = [];
       for (const provider of found) {
-        this.#found.set(provider.key, provider);
         const item: InventoryProvider = { key: provider.key, displayName: provider.displayName,
           status: provider.status === 'installed' ? 'unavailable' : provider.status, version: provider.version, models: [] };
         providers.push(item);
-        if (provider.status !== 'installed') { item.error = provider.reason; continue; }
+        if (provider.status !== 'installed') {
+          item.error = provider.reason;
+          await this.#adapters.get(provider.key)?.close();
+          this.#adapters.delete(provider.key); this.#adapterKeys.delete(provider.key);
+          continue;
+        }
         try {
-          if (provider.key === 'codex') {
-            const environment = this.#environment(provider, 'probe', this.config.cwd);
-            const inspection = await this.#codex.inspect(environment, signal);
-            item.inspection = inspection; item.models = inspection.models.map(model => model.id);
-          } else if (provider.key === 'zcode') {
-            // The bridge's lazy handshake alone does not validate the login. Require local credentials too.
-            await access(join(provider.home!, 'v2', 'credentials.json'));
-            const executor = new ZCodeExecutor({ cwd: this.config.cwd, stateDir: join(this.config.stateDir, 'zcode-probe'), zcodeBin: provider.executable!, zcodeHome: provider.home! });
-            const inspection = await executor.inspect(signal);
-            item.inspection = inspection;
-            item.models = inspection.models;
-          } else {
-            const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-              ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT'].includes(key.toUpperCase())));
-            if (provider.key === 'deepseek-harness') env.DSH_HOME = provider.home!;
-            const executor = provider.key === 'lobi'
-              ? new LobiAcpExecutor({ executable: provider.executable!, env })
-              : new DeepSeekAcpExecutor({ executable: provider.executable!, env });
-            const inspection = await executor.probe(signal);
-            this.#acp.set(provider.key, executor); item.inspection = inspection; item.models = inspection.models;
+          const environment = providerEnvironment(this.config.providers?.[provider.key]);
+          const key = digest(canonical({ executable: provider.executable, home: provider.home, environment }));
+          let adapter = this.#adapters.get(provider.key);
+          if (!adapter || this.#adapterKeys.get(provider.key) !== key) {
+            await adapter?.close();
+            adapter = createProviderAdapter(provider, { cwd: this.config.cwd, stateDir: this.config.stateDir,
+              idleTimeoutMs: this.#limits.idleTimeoutMs, environment, codex: this.#codex });
+            this.#adapters.set(provider.key, adapter); this.#adapterKeys.set(provider.key, key);
           }
+          const inspection = await adapter.inspect(signal);
+          item.inspection = inspection.inspection; item.models = inspection.models; item.capabilities = inspection.capabilities;
+          item.readiness = { level: 'protocol', checkedAt: new Date().toISOString(), modelExecutionVerified: false };
           item.status = 'ready';
         } catch (error) { item.error = error instanceof Error ? error.message : String(error); }
       }
@@ -239,12 +229,10 @@ export class DeviceHost {
       platform: { platform: platform(), arch: arch(), release: release(), hostname: hostname() },
       activeRunId: this.activeRunId, unresolvedRunIds: this.#store.unresolved(), resources: this.#limits,
       providers: (this.#providers ?? []).map(provider => ({ ...provider,
-        sessionResumeMode: provider.key === 'codex' ? 'native' : provider.key === 'zcode' ? 'warm'
-          : (provider.inspection as { loadSession?: boolean; resumeSession?: boolean } | undefined)?.loadSession
-            || (provider.inspection as { resumeSession?: boolean } | undefined)?.resumeSession ? 'native' : 'unsupported',
-        ...(provider.key === 'zcode' ? { warmSessionIdleTimeoutMs: this.#limits.idleTimeoutMs,
-          warmSessionId: this.#zcode?.executor.retainedSessionId ?? null,
-          warmSessionExpiresAt: this.#zcode?.executor.retainedSessionId && !this.#active ? this.#idleDeadline ?? null : null } : {}),
+        sessionResumeMode: provider.capabilities?.sessionResume ?? 'unsupported',
+        ...(provider.capabilities?.sessionResume === 'warm' ? { warmSessionIdleTimeoutMs: this.#limits.idleTimeoutMs,
+          warmSessionId: this.#adapters.get(provider.key)?.retainedSessionId() ?? null,
+          warmSessionExpiresAt: this.#adapters.get(provider.key)?.retainedSessionId() && !this.#active ? this.#idleDeadline ?? null : null } : {}),
       })) };
   }
   async prepare(value: unknown) {
@@ -290,27 +278,16 @@ export class DeviceHost {
       if (unresolved.length) throw new Error(`unresolved_execution:${unresolved[0]}`);
       const prepared = this.#store.preparation(input.runId);
       if (!prepared || prepared.released || prepared.sessionKey !== (input.sessionKey ?? input.runId)) throw new Error('execution_not_prepared');
-      const provider = this.#found.get(input.provider);
+      const adapter = this.#adapters.get(input.provider);
       const available = this.#providers?.find(item => item.key === input.provider);
-      if (!provider || available?.status !== 'ready') throw new Error('provider_unavailable');
+      if (!adapter || available?.status !== 'ready') throw new Error('provider_unavailable');
       if (input.model && !available.models.includes(input.model)) throw new Error('model_unavailable');
       const config = input.config ?? {};
-      if (input.provider === 'codex') {
-        if (Object.keys(config).some(key => !['effort', 'serviceTier', 'mode'].includes(key))) throw new Error('unsupported_config');
-        const inspection = available.inspection as { models: { id: string; efforts: string[]; serviceTiers: string[] }[] };
-        const model = inspection.models.find(model => model.id === input.model);
-        if (config.effort && !model?.efforts.includes(String(config.effort)) || config.serviceTier && !model?.serviceTiers.includes(String(config.serviceTier))) throw new Error('configuration_unavailable');
-      } else if (input.provider === 'zcode') {
-        if (Object.keys(config).some(key => !['effort', 'mode'].includes(key))) throw new Error('zcode_config_unsupported');
-        const inspection = available.inspection as { reasoningEffortsByModel: Record<string, string[]> };
-        if (config.effort && !inspection.reasoningEffortsByModel[input.model ?? '']?.includes(String(config.effort))) throw new Error('configuration_unavailable');
-      }
-      if ((input.provider === 'codex' || input.provider === 'zcode') && config.mode !== undefined) {
-        const inspection = available.inspection as { permissionModes?: { value: string }[] };
-        if (typeof config.mode !== 'string' || !inspection.permissionModes?.some(mode => mode.value === config.mode)) throw new Error('permission_mode_unavailable');
-      }
+      const callerSkillsPresent = (await readdir(prepared.directories.skillDirectory)).length > 0;
+      adapter.validate({ model: input.model, config, resumeSessionId: input.resumeSessionId, callerSkillsPresent });
       const controller = new AbortController();
-      const environment = input.provider === 'codex' ? this.#environment(provider, prepared.sessionKey, prepared.directories.workdir, config, prepared.directories.skillDirectory) : undefined;
+      const environment = adapter.environment({ sessionKey: prepared.sessionKey, workdir: prepared.directories.workdir,
+        config, skillDirectory: prepared.directories.skillDirectory });
       const record: StoredExecution = { runId: input.runId, provider: input.provider, input: fingerprint, state: 'running', environment };
       this.#store.admit(record); // Persist before any provider process or prompt is started.
       const active = { runId: input.runId, controller, cancellationRequested: false, historyTruncated: false, promise: Promise.resolve<unknown>(null), steer: undefined as ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | undefined };
@@ -346,7 +323,8 @@ export class DeviceHost {
             else if (request.form && decision && typeof decision === 'object' && 'action' in decision
               && ['accept', 'decline', 'cancel'].includes(String(decision.action)) && Buffer.byteLength(JSON.stringify(decision)) <= 32768)
               effective = decision as NativePermissionDecision;
-            else if (!request.options && !request.form && (decision === 'deny' || decision === 'allow' && request.canAllow)) effective = decision;
+            else if (!request.form && (!request.options || input.provider !== 'codex')
+              && (decision === 'deny' || decision === 'allow' && request.canAllow)) effective = decision;
           }
           const confirmed = decision !== undefined && canonical(decision) === canonical(effective);
           if (responseSent) {
@@ -360,50 +338,14 @@ export class DeviceHost {
           return effective;
         };
         try {
-          let result: unknown;
-          if (input.provider === 'codex') {
-            result = await this.#codex.execute({ environment: environment!, runId: input.runId, prompt: input.prompt,
-              model: input.model, mode: typeof config.mode === 'string' ? config.mode : undefined, effort: typeof config.effort === 'string' ? config.effort : undefined,
-              resumeThreadId: input.resumeSessionId, previousRunId: input.previousRunId, retainSession: input.retainSession ?? false,
-              signal, tools: { name: input.tools?.name ?? 'controller', definitions: input.tools?.definitions ?? [], invocation },
-              onReady: ready,
-              onEvent: async event => { await observations.write('event', event); },
-              onSteeringReady: steer => { active.steer = steer ?? undefined; void this.#call(input.runId, 'steering', { available: Boolean(steer) }).catch(() => {}); },
-              permission,
-            });
-          } else if (input.provider === 'zcode') {
-            const key = prepared.sessionKey;
-            if (this.#zcode?.key !== key) { await this.#zcode?.executor.close(); this.#zcode = undefined; }
-            const executor = (this.#zcode ??= { key, executor: new ZCodeExecutor({ cwd: prepared.directories.workdir,
-              stateDir: join(this.config.stateDir, 'providers', 'zcode', digest(key)), zcodeHome: provider.home!, zcodeBin: provider.executable! }) }).executor;
-            let text = '', sessionId: string | undefined;
-            const textBudget = new AnswerBudget();
-            const terminal = await executor.execute({ runId: input.runId, prompt: input.prompt, resumeThreadId: input.resumeSessionId, signal,
-              model: input.model, mode: typeof config.mode === 'string' ? config.mode : undefined, effort: typeof config.effort === 'string' ? config.effort : undefined,
-              tools: { name: input.tools?.name ?? 'controller', definitions: input.tools?.definitions ?? [], invocation },
-              onReady: async value => { sessionId = value; await ready(value); },
-              onEvent: async event => {
-                if (event.type === 'text_delta' && event.stream !== 'thought') { textBudget.add(event.text); text += event.text; }
-                await observations.write('event', event);
-              }, permission });
-            result = { ...terminal, text, sessionId, resumable: terminal.state === 'completed' && input.retainSession === true,
-              sessionResumeMode: 'warm', warmSessionIdleTimeoutMs: this.#limits.idleTimeoutMs,
-              resumed: Boolean(input.resumeSessionId), exactFinalAnswer: false };
-            if (!input.retainSession) { await executor.close(); this.#zcode = undefined; }
-          } else {
-            result = await this.#acp.get(input.provider)!.execute({ runId: input.runId, cwd: prepared.directories.workdir,
-              prompt: input.prompt, model: input.model ?? available.models[0]!, config, signal,
-              resumeSessionId: input.resumeSessionId, allowSessionResume: true, skillDirectory: prepared.directories.skillDirectory,
-              tools: input.tools?.definitions, mcp: invocation, mcpName: input.tools?.name,
-              cancellationRequested: () => active.cancellationRequested,
-              callbacks: {
-                onStarted: async () => { await ready(); },
-                onProgress: async payload => { await observations.write('progress', payload); },
-                onFileChanges: async event => { await observations.write('fileChanges', event); },
-                permission: async (request, nativeSignal, responseSent) => await permission({ id: request.id, title: `${input.provider} permission`, details: request.toolCall, canAllow: request.canAllow }, nativeSignal, responseSent) === 'allow' ? 'allow' : 'deny',
-              },
-            });
-          }
+          const result = await adapter.execute({ runId: input.runId, sessionKey: prepared.sessionKey,
+            prompt: input.prompt, model: input.model, config, resumeSessionId: input.resumeSessionId,
+            previousRunId: input.previousRunId, retainSession: input.retainSession ?? false,
+            workdir: prepared.directories.workdir, skillDirectory: prepared.directories.skillDirectory, callerSkillsPresent,
+            signal, cancellationRequested: () => active.cancellationRequested, tools: input.tools, invocation,
+            ready, observe: (kind, payload) => observations.write(kind, payload), permission,
+            steering: steer => { active.steer = steer ?? undefined; void this.#call(input.runId, 'steering', { available: Boolean(steer) }).catch(() => {}); },
+          }, environment);
           await observations.finish();
           const state = object(result).state;
           record.state = ['completed', 'failed', 'cancelled'].includes(String(state)) ? state as StoredExecution['state'] : 'unknown';
@@ -485,11 +427,8 @@ export class DeviceHost {
     return this.#maintain(async () => {
       // Durable invalidation precedes deletion; interrupted cleanup remains safely retryable.
       const forgotten = this.#store.forgetSession(sessionKey);
-      await this.#codex.close();
-      if (this.#zcode?.key === sessionKey) {
-        const zcode = this.#zcode; this.#zcode = undefined;
-        await zcode.executor.close();
-      }
+      if (!this.#adapters.has('codex')) await this.#codex.close();
+      await Promise.all([...this.#adapters.values()].map(adapter => adapter.forgetSession(sessionKey)));
       await forgetSessionDirectories(this.config.stateDir, sessionKey);
       return forgotten;
     });
