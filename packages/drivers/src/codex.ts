@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { createAcpRuntime, createRuntimeStore, type AcpRuntimeOptions } from 'acpx/runtime';
 import { createAgentRegistry } from 'acpx/agent-registry';
-import type { HarnessExecutionInput } from './execution.ts';
+import { nativeElicitationForm, nativeElicitationResponse, type HarnessExecutionInput } from './execution.ts';
 import { AnswerBudget, MAX_EVIDENCE_BYTES, readBoundedText } from './output-limits.ts';
 import { applyNativePermissionMode, nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
 import { decodeCodexEvents } from './codex-events.ts';
@@ -18,6 +18,8 @@ export interface CodexExecutionConfig {
   /** Resolved by the local Codex adapter, never a remote execution parameter. */
   nativeNode?: string;
   stateDir: string;
+  /** Locally selected runtime dependencies; never received from a remote execution request. */
+  environment?: NodeJS.ProcessEnv;
   /** Application-wide native host endpoint; never another chat identity. */
   desktopHost?: { pipePath: string; nodePath: string };
   skillDirectory?: string;
@@ -63,6 +65,7 @@ export function createCodexRuntime(config: CodexExecutionConfig, command?: strin
     sessionStore: createRuntimeStore({ stateDir: config.stateDir }),
     agentRegistry: createAgentRegistry({ overrides: { codex: command ?? [config.desktopHost?.nodePath ?? config.nativeNode ?? process.execPath, createRequire(import.meta.url).resolve('@agentclientprotocol/codex-acp')] } }),
     agentProcessEnv: {
+      ...config.environment,
       CODEX_HOME: config.codexHome, INITIAL_AGENT_MODE: config.sandbox ?? 'workspace-write',
       ...(config.codexBin ? { CODEX_PATH: config.codexBin } : {}),
       ...(config.skillDirectory ? { HARNESS_DOCK_SKILL_ROOT: config.skillDirectory } : {}),
@@ -201,15 +204,10 @@ export class CodexExecutor {
             return { outcome: 'selected', optionId: decision.optionId };
           },
           onElicitation: async (request, context) => {
-            const raw = object(request);
-            if (raw.mode !== 'form' && raw.mode !== 'url') return { action: 'cancel' };
-            const form = raw.mode === 'form'
-              ? { mode: 'form' as const, message: request.message, requestedSchema: object(raw.requestedSchema) }
-              : { mode: 'url' as const, message: request.message, url: String(raw.url), elicitationId: String(raw.elicitationId) };
+            const form = nativeElicitationForm(request);
+            if (!form) return { action: 'cancel' };
             const decision = await input.permission?.({ id: randomUUID(), title: request.message.slice(0, 200), details: {}, canAllow: true, form }, context.signal, context.responseSent);
-            if (!active || signal.aborted || context.signal.aborted || !decision || typeof decision !== 'object' || !('action' in decision)) return { action: 'cancel' };
-            if (decision.action !== 'accept') return { action: decision.action };
-            return { action: 'accept', content: decision.content as Record<string, string | number | boolean | string[]> | undefined };
+            return nativeElicitationResponse(!active || signal.aborted || context.signal.aborted ? undefined : decision);
           },
         });
         void turn.promptStarted.catch(() => {});

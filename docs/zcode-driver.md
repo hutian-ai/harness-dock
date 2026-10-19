@@ -1,5 +1,12 @@
 # ZCode Driver
 
+## 2026-10-19 轻量接入与原生交互
+
+ZCode 已具备 ACP 接入，固定路径保持 `ZCodeExecutor → ACPX → zcode-acp-server@0.68.2 → 原生 app-server`。本轮随其他 Provider 收口具名适配、增量能力报告和本机代理/证书选择；不更换桥接器，不启用 Hub，默认仍为 build。
+
+权限请求保留全部原生 optionId/name/kind，支持精确选择；form/url 提问经同一回调及实际 transport 写入回执转发。旧 allow/deny 仅映射唯一的单次选项，歧义、迟到和断线失败关闭。合成协议覆盖与真实模型证据分别见 [验证记录](validation.md)。
+
+固定桥没有受支持的附加调用方 skill 根入口。非空附加 skill 在 DeviceHost 准入前以 `zcode_caller_skills_unsupported` 拒绝；原生 skill 发现保持原样，不把文件复制进用户或项目目录。能力报告保留 warm-only、`exactFinalAnswer=false`、原生结果查回不支持；目录刷新不应销毁尚有效的暖会话。自带 Browser Use 的可靠宿主接入仍未验收，下文保留已知证据。
 
 2026-10-16 继续核对原生服务：安装版 Electron main 的 createWebRemoteControlSharedHostAttachments 使用 AttachServicePort/MessageChannelMain 接入既有 desktop host，clientMode=web-remote-replayable；host 内 interaction/browserList/browserExecute 交给 browserControlExecutor。该入口由内置 Web Remote Control manager 在 relay 鉴权、bridgeSessionId/generation、workspace scope 校验后装配，并非独立 app-server 暴露的本地监听端口。已找到复用原生 Browser Use 的候选路径，但未找到可供社区 ACP 直接连接的稳定本地 attach API，未启用远程连接/改鉴权/接管现有任务。下一步应取得原生授权 attach 入口并在 ZCode 薄适配转发整套原生服务；不能在 dock 实现 browserList/browserExecute 的浏览器后端。此处是静态安装包证据，不是新的运行成功。
 
@@ -38,7 +45,7 @@
 - 节点固定 cwd、发现的 ZCode 入口和 ZCODE_HOME；控制端可选择已就绪的 Provider，不能通过执行参数更换宿主目录或可执行文件。
 - 复用同一 ACPX 实例和原会话；续接不匹配立即失败，不静默创建替代会话。新会话关闭旧实例。
 - 默认显式使用 ZCode `build` 权限模式；控制端可选择实际 ACP configOptions 上报的 mode（2026-10-15，当前工作树），派发前重验目录并通过原生 session/set_mode 设置并核对配置更新 currentValue 后才发送 prompt；独立 XDG 配置关闭桥接器远程 Hub、自动配额续跑及完成提示。该模式不等同于 Codex workspace-write 或 OS 沙箱。
-- 当前单次审批仅支持 ACP `allow_once`；目标需透传精确原生选项与实际支持的提问，不以权限种类替代 optionId。审批回调异常、取消或过期默认拒绝。拒绝客户端文件和终端委托回调，由 ZCode 自身工具负责执行。
+- 审批透传精确原生选项与 form/url 提问，精确 optionId 可表达本次请求实际提供的选择；旧二值回答只兼容唯一单次选项，不以权限种类替代精确选择。审批回调异常、取消或过期默认拒绝。拒绝客户端文件和终端委托回调，由 ZCode 自身工具负责执行。
 - 取消发往原轮次，只有上游终态确认才记为 cancelled；派发后失联为 unknown。重连不重派；跨 Daemon 重启不恢复执行。
 - ZCode ACP 文本作为本轮输出，不伪造 `final_answer`。探测明确报告不支持精确 final 和原生 turn 查询。
 

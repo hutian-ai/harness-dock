@@ -2,6 +2,8 @@
 
 harness-dock 是供 调用方应用 等应用调用的本地 Agent 接入基础设施。每台执行设备运行独立 Daemon，server 管理连接与配对，调用方使用 client SDK；三者可同机或分别部署。人日常使用调用方应用或原生客户端，dock 的本机入口用于安装、配对、权限引导和诊断。当前为私有源码/构建产物，没有发布 npm 或托管云服务。
 
+Codex、ZCode、Lobi、DeepSeek 拥有各自的模型循环、工具、插件和原生权限。dock 通过 ACP 与具名薄适配接入这些平台，负责跨设备派发、观察、审批归属和恢复；原生能力接入缺失时明确报告，不在 dock 中另建浏览器、电脑操作或工具宿主。
+
 Harness 内部后续 Agent、工具调用及权限范围继续由 Harness 自己处理。dock 负责正确启动/连接所选原生环境，必要时转发原生审批；当前 Codex 路径经 ACP 启动执行实例，并非接管桌面 App 已运行的聊天。后台实例缺少某项原生依赖时，先核对启动与连接条件，只对已确认的缺口补薄适配；原生拒绝保持如实报告，不据此另建桌面授权机制。
 
 ```text
@@ -49,7 +51,24 @@ pnpm daemon logs .local/device/config.json
 pnpm daemon stop .local/device/config.json
 ```
 
-关闭控制台不等于停止执行。Daemon 状态中的 `connected` 表示已连接 server；暂无开机自启。安装、跨网与 调用方应用 配对见 [家用电脑安装](docs/home-install.md)。
+关闭控制台不等于停止执行。Daemon 状态中的 `connected` 表示已连接 server；macOS 可显式启用当前用户登录自启。安装、跨网与 调用方应用 配对见 [家用电脑安装](docs/home-install.md)。
+
+本机所有者可在受保护的设备配置中为每个 Provider 选择代理和证书依赖，例如：
+
+```json
+{
+  "providers": {
+    "codex": {
+      "environment": {
+        "HTTPS_PROXY": "http://proxy.example:8080",
+        "NODE_EXTRA_CA_CERTS": "/absolute/local-ca.pem"
+      }
+    }
+  }
+}
+```
+
+允许 `HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY` 及其小写形式，以及 `NODE_EXTRA_CA_CERTS / SSL_CERT_FILE / SSL_CERT_DIR / REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE`。值为不含 NUL、最多 16 KiB 的字符串；非空选择要求 POSIX 配置归当前用户所有且无组/其他用户权限，建议 0600。前台和自启动读取同一配置，依赖值不复制到 LaunchAgent 或安装记录，也不出现在 inventory/status 中。不自动继承整个终端环境；远程执行不能传任意环境值、home、命令或权限变量。
 
 ## 控制端 SDK
 
@@ -72,9 +91,11 @@ const inventory = await peer.request('inventory');
 // await client.close();
 ```
 
+inventory 保留原有 `inspection`，并增量提供 `capabilities` 与 `readiness`。`ready` 和 `readiness.level=protocol` 表示已完成协议探测，`modelExecutionVerified=false`；不代表已执行模型、浏览器或全部插件。续接、查回、精确最终答案、附加 skill、原生交互及桌面宿主分别报告，真实动作证据见验证记录。
+
 `request(method, params, timeoutMs)` 不自动重试。节点方法为 `inventory / prepare / execute / getExecution / events / reconcile / cancel / steer / collect / release / forgetSession`。设备协议 v3，server-client 协议 v1，版本不符明确拒绝。`DeviceController` 是 server 内部的设备入口，也可用于不经过中继的局部集成。
 
-Skill 字节通过 `prepare` 传到设备，结果文件通过 `collect` 回传；`release` 只删除该次输出。`forgetSession` 仅在引用该会话的执行均安全释放后删除托管会话目录，保留执行去重身份。
+Skill 字节通过 `prepare` 传到设备，执行前按 `capabilities.callerSkills` 校验；ZCode 当前明确拒绝调用方附加 skill。结果文件通过 `collect` 回传；`release` 只删除该次输出。`forgetSession` 仅在引用该会话的执行均安全释放后删除托管会话目录，保留执行去重身份。
 
 ## 长期资源管理
 
@@ -87,8 +108,8 @@ Provider 空闲 10 分钟回收。Codex 可重新加载原 thread；ZCode 目前
 ## 引擎与结果
 
 - Codex：固定 ACPX 0.19.4 / Codex ACP 2.1.1，使用设备选择的本机 Codex 安装/home 与原生登录；支持明确的 `final_answer`、严格插话和原 turn 的只读查回。
-- ZCode：固定 zcode-acp-server 0.68.2，调用设备上的 ZCode；保留 build 模式审批。已单独完成 macOS ZCode 3.14.5 的真实执行验证，见 [ZCode Driver](docs/zcode-driver.md)。
-- Lobi / DeepSeek：复用独立 drivers 中的 ACP 适配器；本机安装、登录及 ACP 插件版本必须通过探测。
+- ZCode：通过固定 zcode-acp-server 0.68.2 提供 ACP 接入，调用设备上的 ZCode；保留 build 模式审批。调用方附加 skill 尚无受支持入口，明确拒绝；自带 Browser Use 尚未验收。此前 macOS ZCode 3.14.5 的真实执行证据见 [ZCode Driver](docs/zcode-driver.md)。
+- Lobi / DeepSeek：执行统一使用固定 ACPX 0.19.4；具名适配器保留安装、模型/模式和配置校验，官方 ACP SDK 仅用于能力探测。本机安装、登录及 ACP 插件版本必须通过探测。
 
 文本增量不是权威最终答案。ZCode 不提供精确 `final_answer`，不能将拼接文本冒充这一能力。Provider 支持的能力、探测失败和真实验收证据分别记录。固定补丁见 [补丁说明](patches/README.md)。
 
@@ -118,12 +139,17 @@ pnpm check
 # 需要已登录的真实模型；只操作隔离实验目录
 pnpm accept:codex
 pnpm accept:zcode
+pnpm accept:lobi
+pnpm accept:deepseek
+pnpm accept:deepseek --default-home
 node --import tsx scripts/accept-bundle.ts /absolute/new-output-directory
 ```
 
+上述验收命令包含构建，请串行执行。Lobi/DeepSeek 另检查原生取消终态；DeepSeek 默认使用隔离 home 加载当前 CLI 配套的 ACP 插件，临时复制本机配置/凭证，结束后删除副本。传入 `--default-home` 则通过设备自动发现使用本机原有 home/profile 与登录，不复制、升级或删除原生配置/凭证；需要该 profile 的插件已与 CLI 配套。
+
 这不是完整桌面远控软件：鼠标、屏幕及应用操作依赖 Provider 自身工具与操作系统权限。ZCode 桌面 UI 也不是 harness-dock 控制端；当前方向是 Daemon 调用 ZCode Agent。
 
-正式执行链只保留设备 Daemon 和 ServerClient；Driver 是 Daemon 内部的执行模块，见 [Driver 边界](docs/embedded-driver.md)。Provider Docker/Podman 保留实验代码并后置，不作为家用安装门禁。
+正式执行链只保留设备 Daemon 和 ServerClient；Driver 是 Daemon 内部的执行模块，见 [Driver 边界](docs/embedded-driver.md)。ContainerHarness 已退出 drivers 普通导出入口，Provider Docker/Podman 保留实验代码并后置，不作为家用安装门禁。
 
 ## 云端部署
 

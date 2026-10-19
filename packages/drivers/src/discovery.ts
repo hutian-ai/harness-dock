@@ -9,6 +9,8 @@ export interface ProviderOverride {
   executable?: string;
   home?: string;
   disabled?: boolean;
+  /** Local-owner-selected proxy/certificate dependencies; never remote execution input. */
+  environment?: Record<string, string>;
 }
 export interface ProviderDiscoveryOptions {
   environment?: NodeJS.ProcessEnv;

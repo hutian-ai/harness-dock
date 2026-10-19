@@ -1,6 +1,6 @@
 # 成熟模块复用评估（2026-10-12）
 
-结论：云端用 Docker Compose；Codex/ZCode 继续 ACPX；Lobi/DeepSeek 复用官方 ACP SDK 和统一探测/执行生命周期；设备网络继续 ws + json-rpc-2.0。没有引入新的代理平台、账号系统或消息中间件。
+当前结论（2026-10-19）：保持本地 Agent 接入基础设施定位；Codex/ZCode/Lobi/DeepSeek 的执行统一使用 ACPX，Provider 差异通过具名薄适配连接；Lobi/DeepSeek 的完整能力探测局部使用官方 ACP SDK；设备网络继续 ws + json-rpc-2.0，云端用 Docker Compose。下文保留各次取舍，旧执行方案由最新一节替代。
 
 ## Socket.IO 4.8.4：本轮不替换
 
@@ -44,5 +44,23 @@ Lobi 要在新会话上验证可选模式再设置 build/plan；DeepSeek 要逐�
 - 采用 pnpm 11.9.0 的现代 `deploy`，启用 workspace 注入与 build 后同步；移除 legacy 自引用软链修补及源安装状态恢复。保留交付文件 hardlink detach，不能用注入本身替代产物不可变性。隔离实验及最终产物均通过仓库外使用、依赖隔离与重建后不变检查；外部依赖锁定版本没有升级。
 
 本轮没有新增日志框架、状态机、ORM 或网络协议。源码、合成回归、真实 Provider 探测与交付证据分别见 [验证记录](validation.md)。
+
+## 2026-10-17：Lobi / DeepSeek 执行统一到 ACPX
+
+复核固定 ACPX 0.19.4 后，确认其公共 runtime 已覆盖注册启动命令、显式原会话续接、配置控制、逐轮权限回调及写入回执、原始 session update、取消和完整结果。此前能力探测字段不足，不能作为保留另一套完整执行器的理由。
+
+`runAcpSession` 改为消费 ACPX 公共 API，删除直接通过 SDK 启动进程、initialize/new/load/resume、发送 prompt/cancel 及管理权限响应传输的实现。每次调用使用内存 sessionStore 并显式冷加载原生 sessionId，Daemon 仍拥有持久执行身份；不从 ACPX 旧记录推断另一会话，也不自动重发 prompt。具名适配器只保留启动参数/环境、模型/模式/推理配置及实际响应校验。
+
+确认的元数据缺口是 ACPX 丢弃 new/load/resume 返回的模式列表。固定补丁仅增加模式目录的只读投影，经现有 record/clone/getStatus.details.modes 通道提供本轮真实目录；缺失仍为 null，不使用探测时的旧列表替代。没有增加 RPC 或修改会话、权限、恢复状态机。完整安装能力探测继续使用 `probeAcpSession` 的 SDK 实现。
+
+保留 dock 的结果边界：只有 end_turn 算成功；cancelled 还须有明确取消请求；其他明确 stopReason 算失败；已派发但无完成响应保持 unknown。使用 promptStarted 确认实际派发，取消 ACK 不算完成。配置须由实际 setConfigOption 响应确认，不能使用 ACPX 乐观更新后的本地值代替 Provider 回读；用量经本轮 runtime record 还原原有字段，缺失保持未知。MCP 工具桥及其 delivered 回执沿用原实现。验证结果与真实环境限制见 [验证记录](validation.md)。
+
+## 2026-10-19：轻量接入层收口
+
+保留 server/SDK/Daemon 的可靠派发、审批归属、去重、unknown 与资源边界。将 Provider 专属探测、配置和结果映射从 DeviceHost 收入具名适配器；原生工具循环、插件、skill 与记忆继续由 harness 管理。普通 drivers 导出移除 ContainerHarness，容器实验文件和脚本保留，不作为 v1 门禁。
+
+能力报告只增加标准字段，保留调用方现用的原生 inspection 和续接字段；协议 ready 不提升为真实模型或工具验收。本机按 Provider 明确选择代理/证书依赖；原生交互保留 options/form/url 和实际投递回执。Lobi 不再要求同时支持所有模式和两种恢复协议，但每次执行仍确认所选配置；DeepSeek 的本机权限上限保留。
+
+ZCode 已经通过固定 ACP 桥接入，纳入本轮适配收口。固定桥不支持可靠附加调用方 skill，非空输入在准入前明确拒绝；保持默认 build、warm-only、无精确 final 和 Browser Use 未验收的限制。Codex 独立恢复证据不合并删除；后台原生能力缺口先核对启动环境、必需依赖与原生信任限制，不预设采用桌面 relay 或新增授权机制。
 
 权限职责澄清：Harness 拥有内部 Agent、工具执行与原生授权范围；dock 只连接所选原生环境、路由原生审批并保持其归属/有效期。当前 ACP 启动的 Codex 实例并非桌面 App 已运行的聊天；原生宿主拒绝是需要准确报告的接入结果，不能据此把“桌面宿主委托”列成独立建设项。只有确认缺失依赖及受支持入口后，才补具名薄适配。

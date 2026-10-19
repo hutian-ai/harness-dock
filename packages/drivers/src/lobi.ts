@@ -2,9 +2,6 @@ import { ExecaError } from "execa";
 import { probeAcpSession } from "./acp-probe.ts";
 import {
   PROTOCOL_VERSION,
-  type SetSessionConfigOptionResponse,
-  type SetSessionConfigOptionRequest,
-  methods,
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
 import {
@@ -40,6 +37,8 @@ export type LobiAcpOptions = {
   env: NodeJS.ProcessEnv;
   executable: string;
   modelAllowlist?: string[];
+  /** Successful probe for the same locally selected installation/environment. */
+  inspection?: AcpInspection;
   probeCommand?: ProbeCommand;
   probeAcp?: ProbeAcp;
 };
@@ -118,6 +117,23 @@ function configuredMode(
   return mode;
 }
 
+function additiveSkillConfig(existing: string | undefined, skillDirectory: string): string {
+  let parsed: unknown;
+  try { parsed = existing === undefined ? {} : JSON.parse(existing); }
+  catch { throw new Error("Lobi native inline config is invalid JSON"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("Lobi native inline config must be an object");
+  const config = parsed as Record<string, unknown>;
+  const rawSkills = config.skills;
+  if (rawSkills !== undefined && (!rawSkills || typeof rawSkills !== "object" || Array.isArray(rawSkills)))
+    throw new Error("Lobi native inline skill config must be an object");
+  const skills = (rawSkills ?? {}) as Record<string, unknown>;
+  const paths = skills.paths ?? [];
+  if (!Array.isArray(paths) || paths.some(path => typeof path !== "string"))
+    throw new Error("Lobi native inline skill paths must be a string array");
+  return JSON.stringify({ ...config, skills: { ...skills, paths: [...new Set([...paths, skillDirectory])] } });
+}
+
 export class LobiAcpExecutor implements AcpExecutor {
   readonly key = "lobi";
   #mcpTools = false;
@@ -127,11 +143,17 @@ export class LobiAcpExecutor implements AcpExecutor {
   readonly #probeCommand: ProbeCommand;
   readonly #probeAcp: ProbeAcp;
   #availableModes: string[] = [];
+  #canResume = false;
 
   constructor(options: LobiAcpOptions) {
     this.#env = { ...options.env };
     this.#executable = options.executable;
     this.#modelAllowlist = [...new Set(options.modelAllowlist ?? [])];
+    if (options.inspection) {
+      this.#mcpTools = options.inspection.mcpTools === true;
+      this.#canResume = options.inspection.loadSession || options.inspection.resumeSession;
+      this.#availableModes = [...options.inspection.modes];
+    }
     this.#probeCommand =
       options.probeCommand ??
       ((executable, args, signal) =>
@@ -183,25 +205,10 @@ export class LobiAcpExecutor implements AcpExecutor {
         "unsupported_version",
         "Lobi CodeWiz ACP protocol is unsupported",
       );
-    if (!acp.loadSession || !acp.resumeSession)
-      throw new AcpProbeError(
-        "protocol_error",
-        "Lobi CodeWiz ACP does not support governed session resume",
-      );
     if (acp.models.length === 0)
       throw new AcpProbeError(
         "protocol_error",
         "Lobi CodeWiz ACP reported an empty model catalog",
-      );
-    if (acp.modes.length === 0)
-      throw new AcpProbeError(
-        "protocol_error",
-        "Lobi CodeWiz ACP reported an empty mode catalog",
-      );
-    if (!acp.modes.includes("plan") || !acp.modes.includes("build"))
-      throw new AcpProbeError(
-        "protocol_error",
-        "Lobi CodeWiz ACP must report plan and build modes",
       );
     const unavailableModels = this.#modelAllowlist.filter(
       (model) => !acp.models.includes(model),
@@ -214,6 +221,7 @@ export class LobiAcpExecutor implements AcpExecutor {
     const models =
       this.#modelAllowlist.length > 0 ? this.#modelAllowlist : acp.models;
     this.#availableModes = [...acp.modes];
+    this.#canResume = acp.loadSession || acp.resumeSession;
     this.#mcpTools = acp.mcpTools === true;
     return {
       version: version.slice(0, 120),
@@ -225,6 +233,8 @@ export class LobiAcpExecutor implements AcpExecutor {
       mcpTools: this.#mcpTools,
       reasoningEffortsByModel: {},
       permissionPresets: [],
+      permissionInteractions: ["options", "form", "url"],
+      callerSkills: true,
     };
   }
 
@@ -234,6 +244,8 @@ export class LobiAcpExecutor implements AcpExecutor {
     const { cwd: workdir, signal, callbacks, skillDirectory } = input;
     if ((input.tools?.length ?? 0) > 0 && !this.#mcpTools)
       throw new Error("Lobi MCP tool transport has not been verified");
+    if (input.resumeSessionId && (!this.#canResume || input.allowSessionResume === false))
+      throw new Error("Lobi Provider session resume is unavailable");
     const selectedMode = configuredMode(input.config, this.#availableModes);
     if (
       this.#modelAllowlist.length > 0 &&
@@ -242,6 +254,8 @@ export class LobiAcpExecutor implements AcpExecutor {
       throw new Error(
         `Lobi model is outside the local allowlist: ${input.model}`,
       );
+    const inlineSkillConfig = skillDirectory
+      ? additiveSkillConfig(this.#env.OPENCODE_CONFIG_CONTENT, skillDirectory) : undefined;
     return runAcpSession({
       provider: {
         source: "lobi-codewiz-acp",
@@ -249,23 +263,18 @@ export class LobiAcpExecutor implements AcpExecutor {
         stopErrorPrefix: "lobi",
       },
       ...input,
+      allowSessionResume: input.allowSessionResume ?? true,
       prepareCommand: () => {
         return {
           executable: this.#executable,
           args: [...LOBI_ACP_ARGS, "--cwd", workdir],
           env: {
             ...this.#env,
-            ...(skillDirectory
-              ? {
-                  OPENCODE_CONFIG_CONTENT: JSON.stringify({
-                    skills: { paths: [skillDirectory] },
-                  }),
-                }
-              : {}),
+            ...(inlineSkillConfig !== undefined ? { OPENCODE_CONFIG_CONTENT: inlineSkillConfig } : {}),
           },
         };
       },
-      configure: async ({ agent, awaitAcp, sessionId, session, resumed }) => {
+      configure: async ({ setMode, setConfigOption, sessionId, session, resumed }) => {
         if (!sessionId) throw new Error("Lobi CodeWiz returned no session id");
         const sessionModes =
           session.modes?.availableModes.map((mode) => mode.id) ?? [];
@@ -274,13 +283,7 @@ export class LobiAcpExecutor implements AcpExecutor {
             `Lobi mode is unavailable in this session: ${selectedMode}`,
           );
 
-        await awaitAcp(
-          agent.request(methods.agent.session.setMode, {
-            sessionId,
-            modeId: selectedMode,
-          }),
-          "mode configuration",
-        );
+        await setMode(selectedMode);
         const modelOption = findConfigOption(
           session.configOptions,
           "model",
@@ -293,17 +296,7 @@ export class LobiAcpExecutor implements AcpExecutor {
         if (!optionValues(modelOption).includes(input.model))
           throw new Error(`Lobi model is unavailable: ${input.model}`);
         if (modelOption.currentValue !== input.model) {
-          const configured = await awaitAcp(
-            agent.request<
-              SetSessionConfigOptionResponse,
-              SetSessionConfigOptionRequest
-            >(methods.agent.session.setConfigOption, {
-              sessionId,
-              configId: modelOption.id,
-              value: input.model,
-            }),
-            "model configuration",
-          );
+          const configured = await setConfigOption(modelOption.id, input.model);
           const accepted = findConfigOption(
             configured.configOptions,
             "model",

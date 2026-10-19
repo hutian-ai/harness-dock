@@ -2,8 +2,6 @@ import { ExecaError } from "execa";
 import { probeAcpSession } from "./acp-probe.ts";
 import {
   PROTOCOL_VERSION,
-  type SetSessionConfigOptionResponse,
-  type SetSessionConfigOptionRequest,
   methods,
   type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
@@ -50,6 +48,8 @@ export type DeepSeekAcpOptions = {
   env: NodeJS.ProcessEnv;
   executable: string;
   models?: string[];
+  /** Successful probe for the same locally selected installation/environment. */
+  inspection?: AcpInspection;
   permissionPreset?: "read-only" | "workspace-write" | "danger-full-access";
   probeCommand?: ProbeCommand;
   probeAcp?: ProbeAcp;
@@ -87,7 +87,7 @@ async function defaultProbeAcp(
       }
       assertSelectedModel(configOptions, model);
       const reasoningOption = findConfigOption(configOptions, 'thought_level', 'reasoning_effort');
-      reasoningEntries.push([model, reasoningOption ? optionValues(reasoningOption) : []]);
+      reasoningEntries.push([model, reasoningOption ? optionValues(reasoningOption, true) : []]);
     }
     return { models, reasoningEffortsByModel: Object.fromEntries(reasoningEntries) };
   });
@@ -134,14 +134,16 @@ function boundedPermissionPresets(
   >;
 }
 
-function optionValues(option: SessionConfigOption): string[] {
+function optionValues(option: SessionConfigOption, allowProviderDefault = false): string[] {
   if (option.type !== "select") return [];
   const values = option.options.flatMap((entry) =>
     "options" in entry
       ? entry.options.map((value) => value.value)
       : [entry.value],
   );
-  if (values.some((value) => !value.trim()))
+  // DeepSeek uses the exact empty string for its native "Provider default"
+  // reasoning selection. Model identities and whitespace remain invalid.
+  if (values.some((value) => !value.trim() && !(allowProviderDefault && value === "")))
     throw new Error(`DeepSeek Harness ${option.id} reported an invalid value`);
   return [...new Set(values)];
 }
@@ -178,6 +180,7 @@ function findConfigOption(
 export class DeepSeekAcpExecutor implements AcpExecutor {
   readonly key = "deepseek-harness";
   #mcpTools = false;
+  #canResume: boolean | undefined;
   readonly #env: NodeJS.ProcessEnv;
   readonly #executable: string;
   readonly #models: string[];
@@ -190,6 +193,10 @@ export class DeepSeekAcpExecutor implements AcpExecutor {
     this.#env = { ...options.env };
     this.#executable = options.executable;
     this.#models = [...new Set(options.models ?? [])];
+    if (options.inspection) {
+      this.#mcpTools = options.inspection.mcpTools === true;
+      this.#canResume = options.inspection.loadSession || options.inspection.resumeSession;
+    }
     this.#permissionPreset = options.permissionPreset ?? "workspace-write";
     this.#probeCommand =
       options.probeCommand ??
@@ -269,16 +276,19 @@ export class DeepSeekAcpExecutor implements AcpExecutor {
       models.map((model) => [model, acp.reasoningEffortsByModel[model] ?? []]),
     );
     this.#mcpTools = acp.mcpTools === true;
+    this.#canResume = acp.loadSession === true || acp.resumeSession === true;
     return {
       version,
       protocolVersion: acp.protocolVersion,
       models: [...models],
       modes: [],
       loadSession: acp.loadSession === true,
-      resumeSession: acp.loadSession === true || acp.resumeSession === true,
+      resumeSession: acp.resumeSession === true,
       mcpTools: this.#mcpTools,
       reasoningEffortsByModel: modelValues,
       permissionPresets: boundedPermissionPresets(this.#permissionPreset),
+      permissionInteractions: ["options", "form", "url"],
+      callerSkills: true,
     };
   }
 
@@ -288,8 +298,10 @@ export class DeepSeekAcpExecutor implements AcpExecutor {
     const { cwd: workdir, signal, callbacks, skillDirectory } = input;
     if ((input.tools?.length ?? 0) > 0 && !this.#mcpTools)
       throw new Error("DeepSeek MCP tool transport has not been verified");
+    if (input.resumeSessionId && (this.#canResume === false || input.allowSessionResume === false))
+      throw new Error("DeepSeek Provider session resume is unavailable");
     assertSupportedConfigKeys(input.config);
-    const reasoningEffort = configuredString(input.config, "reasoning_effort");
+    const reasoningEffort = input.config.reasoning_effort === "" ? "" : configuredString(input.config, "reasoning_effort");
     if (this.#models.length > 0 && !this.#models.includes(input.model))
       throw new Error(
         `DeepSeek Harness model is outside the local allowlist: ${input.model}`,
@@ -338,7 +350,7 @@ export class DeepSeekAcpExecutor implements AcpExecutor {
             },
           };
         },
-        configure: async ({ agent, awaitAcp, sessionId, session, resumed }) => {
+        configure: async ({ setConfigOption, sessionId, session, resumed }) => {
           let configOptions = session.configOptions;
           await callbacks.onProgress({
             source: "deepseek-harness-acp",
@@ -352,17 +364,7 @@ export class DeepSeekAcpExecutor implements AcpExecutor {
               `DeepSeek Harness model is unavailable: ${input.model}`,
             );
           if (modelOption.currentValue !== input.model) {
-            const configured = await awaitAcp(
-              agent.request<
-                SetSessionConfigOptionResponse,
-                SetSessionConfigOptionRequest
-              >(methods.agent.session.setConfigOption, {
-                sessionId,
-                configId: modelOption.id,
-                value: input.model,
-              }),
-              "model configuration",
-            );
+            const configured = await setConfigOption(modelOption.id, input.model);
             configOptions = configured.configOptions;
           }
           assertSelectedModel(configOptions, input.model);
@@ -371,26 +373,16 @@ export class DeepSeekAcpExecutor implements AcpExecutor {
             "thought_level",
             "reasoning_effort",
           );
-          if (reasoningEffort) {
+          if (reasoningEffort !== undefined) {
             if (
               reasoningOption?.type !== "select" ||
-              !optionValues(reasoningOption).includes(reasoningEffort)
+              !optionValues(reasoningOption, true).includes(reasoningEffort)
             )
               throw new Error(
                 `DeepSeek Harness reasoning effort is unavailable: ${reasoningEffort}`,
               );
             if (reasoningOption.currentValue !== reasoningEffort) {
-              const configured = await awaitAcp(
-                agent.request<
-                  SetSessionConfigOptionResponse,
-                  SetSessionConfigOptionRequest
-                >(methods.agent.session.setConfigOption, {
-                  sessionId,
-                  configId: reasoningOption.id,
-                  value: reasoningEffort,
-                }),
-                "reasoning configuration",
-              );
+              const configured = await setConfigOption(reasoningOption.id, reasoningEffort);
               const accepted = findConfigOption(
                 configured.configOptions,
                 "thought_level",

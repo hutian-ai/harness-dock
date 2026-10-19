@@ -1,5 +1,6 @@
 import type { McpInvocation, McpToolDefinition } from "./mcp-bridge.ts";
 import type { runBoundedCommand } from "./process-command.ts";
+import type { NativePermissionDecision, NativePermissionRequest } from "./execution.ts";
 
 export type ProbeCommand = (
   executable: string,
@@ -38,12 +39,18 @@ export interface AcpInspection {
   mcpTools: boolean;
   reasoningEffortsByModel: Record<string, string[]>;
   permissionPresets: string[];
+  /** Implemented client transport; this is not real model execution evidence. */
+  permissionInteractions?: readonly ("options" | "form" | "url")[];
+  callerSkills?: boolean;
 }
 export interface AcpPermissionRequest {
   id: string;
   sessionId: string;
   toolCall: unknown;
   canAllow: boolean;
+  title?: string;
+  options?: NativePermissionRequest["options"];
+  form?: NativePermissionRequest["form"];
 }
 export interface AcpExecutionCallbacks {
   /** Persist the owner's admission fence before process execution. */
@@ -54,7 +61,7 @@ export interface AcpExecutionCallbacks {
     request: AcpPermissionRequest,
     signal: AbortSignal,
     responseSent: Promise<void>,
-  ): Promise<"allow" | "deny">;
+  ): Promise<NativePermissionDecision>;
 }
 export interface AcpExecutionInput<TDelivery = unknown> {
   runId: string;

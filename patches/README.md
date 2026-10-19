@@ -9,6 +9,8 @@
 
 控制方法不提供任意 RPC 透传。read_turn 不创建会话或执行 prompt；steer 迟到拒绝，不回退下一轮。responseSent 不决定 allow/deny，也不保证工具成功。环境允许列表保留基础进程变量及调用方显式环境，防止嵌入宿主的 Core 凭据被继承。授权 MCP 环境由宿主单独冻结。
 
+Lobi/DeepSeek 执行统一使用 ACPX 后，增加 new/load/resume 的模式目录只读投影：保留到 record.acpx.session_modes，经现有 clone 和 getStatus.details.modes 返回。缺失为 null，用于本轮配置校验；不创建会话、不触发重连，不修改执行/恢复状态机。该投影不把安装探测结果冒充本轮会话能力，完整能力探测仍局部使用 SDK；上游完整暴露模式 metadata 后删除此补丁。
+
 事件约定 `_meta["harness-dock"].version = 1` 是本地扩展；其解析与 CodexEvent/CodexMessage/CodexTokens 类型由 packages/drivers/src/codex-events.ts 持有，CodexExecutor 在对外观察前解码，原始信封和其他元数据不进入设备事件流。详细消费边界见 [嵌入接口](../docs/embedded-driver.md)。历史 SDK 的版本和能力以各验收日期为准。补丁不是零维护成本；升级前须检查上游对应函数、固定类型与真实审批、精确结果、取消、续接和进程清理。上游提供等价能力后删除对应补丁。
 
 保留依赖包内的许可证：ACPX MIT、Codex ACP Apache-2.0。固定来源为 [ACPX v0.19.4](https://github.com/openclaw/acpx/tree/v0.19.4) 和 [Codex ACP v2.1.1](https://github.com/agentclientprotocol/codex-acp/tree/v2.1.1)。

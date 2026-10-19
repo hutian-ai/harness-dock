@@ -1,343 +1,188 @@
-import {
-  PROTOCOL_VERSION,
-  type NewSessionRequest,
-  type LoadSessionResponse,
-  type LoadSessionRequest,
-  client as createAcpClientApp,
-  methods,
-  ndJsonStream,
-  type ClientConnection,
-  type NewSessionResponse,
-  type StopReason,
-  type Usage,
-} from "@agentclientprotocol/sdk";
 import { randomUUID } from "node:crypto";
-import {
-  Readable as NodeReadable,
-  Writable as NodeWritable,
-} from "node:stream";
-import {
-  startProtocolProcess,
-  captureProtocolStderr,
-  closeProtocolProcess,
-  type ProtocolProcess,
-} from "./process-command.ts";
-import { acpFileChangeEvent } from "./acp-file-changes.ts";
-import {
-  createProtocolWaiter,
-  protocolFailureResult,
-} from "./protocol-operation.ts";
+import { createAcpRuntime, createAgentRegistry, type AcpSessionRecord } from "acpx/runtime";
+import { PROTOCOL_VERSION, type SessionConfigOption, type SessionModeState, type SessionUpdate } from "@agentclientprotocol/sdk";
 import type { AcpExecutionInput, AcpExecutionResult } from "./acp-types.ts";
+import { acpFileChangeEvent } from "./acp-file-changes.ts";
+import { protocolFailureResult, raceWithSignalAndTimeout } from "./protocol-operation.ts";
 import { createMcpBridge } from "./mcp-bridge.ts";
-import { AnswerBudget } from './output-limits.ts';
-
-type AcpProvider = {
-  source: string;
-  label: string;
-  stopErrorPrefix: string;
-};
-
-type AcpCommand = {
-  executable: string;
-  args: readonly string[];
-  env: NodeJS.ProcessEnv;
-};
+import { AnswerBudget } from "./output-limits.ts";
+import { nativeElicitationForm, nativeElicitationResponse, nativePermissionOption, type NativePermissionDecision } from "./execution.ts";
 
 type SessionConfiguration = {
-  agent: ClientConnection["agent"];
-  awaitAcp: <T>(
-    operation: Promise<T>,
-    label: string,
-    timeoutMs?: number | null,
-  ) => Promise<T>;
   sessionId: string;
-  session: Omit<NewSessionResponse, "sessionId">;
+  session: { configOptions?: SessionConfigOption[] | null; modes?: SessionModeState | null };
   resumed: boolean;
+  setMode(mode: string): Promise<void>;
+  setConfigOption(key: string, value: string): Promise<{ configOptions?: SessionConfigOption[] | null }>;
 };
 
-function usageRecord(
-  usage: Usage | null | undefined,
-): Record<string, number> | undefined {
-  if (!usage) return undefined;
-  const entries = Object.entries(usage).filter(
-    (entry): entry is [string, number] => typeof entry[1] === "number",
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function resultFromStopReason(
-  prefix: string,
-  reason: StopReason,
-  cancellationRequested: boolean,
-  text: string,
-  usage?: Record<string, number>,
-): Pick<AcpExecutionResult, "state" | "text" | "usage" | "errorCode"> {
-  if (reason === "end_turn") return { state: "completed", text, usage };
-  if (reason === "cancelled" && cancellationRequested)
-    return { state: "cancelled", text, usage };
-  return { state: "failed", errorCode: `${prefix}_${reason}`, text, usage };
-}
-
+/** ACPX owns processes, protocol, turns and permission response transport.
+ * Each invocation cold-loads an explicit native session. Runtime records are
+ * ephemeral; the Daemon retains admission, execution facts and session identity.
+ */
 export async function runAcpSession<TDelivery>(
   options: AcpExecutionInput<TDelivery> & {
-    provider: AcpProvider;
-    prepareCommand: () => AcpCommand | Promise<AcpCommand>;
-    configure: (context: SessionConfiguration) => Promise<void>;
+    provider: { source: string; label: string; stopErrorPrefix: string };
+    prepareCommand: () => { executable: string; args: readonly string[]; env: NodeJS.ProcessEnv } | Promise<{ executable: string; args: readonly string[]; env: NodeJS.ProcessEnv }>;
+    configure(context: SessionConfiguration): Promise<void>;
   },
 ): Promise<AcpExecutionResult> {
-  const { cwd, callbacks, provider } = options;
+  const { callbacks, provider } = options;
   const outputAbort = new AbortController();
   const signal = AbortSignal.any([options.signal, outputAbort.signal]);
-  const outputBudget = new AnswerBudget();
-  const errorPrefix = provider.source.replaceAll("-", "_");
-  const cancellationRequested = () =>
-    options.cancellationRequested?.() ?? options.signal.aborted;
-  let child: ProtocolProcess | null = null;
+  const cancellationRequested = () => options.cancellationRequested?.() ?? options.signal.aborted;
+  const budget = new AnswerBudget();
   let sessionId: string | null = null;
-  let acceptAgentMessageChunks = false;
-  let finalMessage = "";
-  let readStderr = () => "";
-  let callbackError: unknown = null;
-  let promptDispatched = false;
-  let onAbort: (() => void) | null = null;
-  let bridge:
-    Awaited<ReturnType<typeof createMcpBridge<TDelivery>>> | undefined;
+  let dispatched = false;
+  let text = "";
+  let callbackError: unknown;
+  let record: AcpSessionRecord | undefined;
+  let runtime: ReturnType<typeof createAcpRuntime> | undefined;
+  let bridge: Awaited<ReturnType<typeof createMcpBridge<TDelivery>>> | undefined;
+  const wait = <T>(operation: Promise<T>, phase: string, timeoutMs: number | null = 15_000) =>
+    raceWithSignalAndTimeout(operation, {
+      signal, label: `${provider.label} ${phase}`, timeoutMs,
+      abortGraceMs: timeoutMs === null ? 5_000 : 0,
+    });
 
-  const permissionResponses = new Map<string, { resolve(): void; reject(error: unknown): void }>();
   await callbacks.onStarted(options.runId);
   try {
+    signal.throwIfAborted();
     if (options.tools?.length) {
       if (!options.mcp) throw new Error("ACP tool callback is unavailable");
-      bridge = await createMcpBridge({
-        tools: options.tools,
-        signal,
-        invocation: options.mcp,
-        name: options.mcpName,
-      });
+      bridge = await createMcpBridge({ tools: options.tools, signal, invocation: options.mcp, name: options.mcpName });
     }
     const command = await options.prepareCommand();
-    const spawnedChild = startProtocolProcess(
-      command.executable,
-      command.args,
-      {
-        cwd,
-        env: command.env,
+    signal.throwIfAborted();
+    runtime = createAcpRuntime({
+      cwd: options.cwd,
+      agentRegistry: createAgentRegistry({ overrides: { [provider.source]: [command.executable, ...command.args] } }),
+      agentProcessEnv: Object.fromEntries(Object.entries(command.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+      sessionStore: {
+        load: async id => record?.acpxRecordId === id ? structuredClone(record) : undefined,
+        save: async value => { record = structuredClone(value); },
       },
-    );
-    child = spawnedChild;
-    readStderr = captureProtocolStderr(spawnedChild);
-
-    const clientApp = createAcpClientApp({ name: "harness-dock" })
-      .onNotification(methods.client.session.update, async ({ params }) => {
-        const update = params.update;
-        bridge?.acknowledgeToolUpdate(update);
-        try {
-          if (acceptAgentMessageChunks && update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
-            outputBudget.add(update.content.text);
-            finalMessage += update.content.text;
-          }
-          const fileChanges = await acpFileChangeEvent(
-            provider.source,
-            params.sessionId,
-            update,
-          );
-          if (fileChanges) await callbacks.onFileChanges?.(fileChanges);
-          await callbacks.onProgress({
-            source: provider.source,
-            sessionId: params.sessionId,
-            update,
-          });
-        } catch (error) {
-          callbackError = error;
-          outputAbort.abort(error);
-          throw error;
-        }
-      })
-      .onRequest(
-        methods.client.session.requestPermission,
-        async ({ params, requestId, signal: requestSignal }) => {
-          if (signal.aborted)
-            return { outcome: { outcome: "cancelled" as const } };
-          const selectedOption = params.options.find(
-            (option) => option.kind === "allow_once",
-          );
-          const responseSent = new Promise<void>((resolve, reject) => { permissionResponses.set(JSON.stringify(requestId), { resolve, reject }); });
-          void responseSent.catch(() => {});
-          let decision: "allow" | "deny" = "deny";
-          try {
-            decision =
-              (await callbacks.permission?.(
-                {
-                  id: randomUUID(),
-                  sessionId: params.sessionId,
-                  toolCall: params.toolCall,
-                  canAllow: Boolean(selectedOption),
-                },
-                AbortSignal.any([signal, requestSignal]),
-                responseSent,
-              )) ?? "deny";
-          } catch {
-            // Failed permission callbacks cannot grant access.
-          }
-          await callbacks.onProgress({
-            source: provider.source,
-            sessionId: params.sessionId,
-            permission: {
-              toolCallId: params.toolCall.toolCallId,
-              kind: params.toolCall.kind,
-              decision:
-                selectedOption && decision === "allow" && !signal.aborted
-                  ? "allow_once"
-                  : "cancelled",
-            },
-          });
-          return selectedOption && decision === "allow" && !signal.aborted
-            ? {
-                outcome: {
-                  outcome: "selected" as const,
-                  optionId: selectedOption.optionId,
-                },
-              }
-            : { outcome: { outcome: "cancelled" as const } };
-        },
-      );
-    const transport = ndJsonStream(
-      NodeWritable.toWeb(spawnedChild.stdin) as WritableStream<Uint8Array>,
-      NodeReadable.toWeb(spawnedChild.stdout) as ReadableStream<Uint8Array>,
-    );
-    const writer = transport.writable.getWriter();
-    const connection = clientApp.connect({ readable: transport.readable, writable: new WritableStream({
-      async write(message) {
-        try {
-          await writer.write(message);
-          if ('id' in message && !('method' in message)) {
-            const key = JSON.stringify(message.id);
-            permissionResponses.get(key)?.resolve();
-            permissionResponses.delete(key);
-          }
-        } catch (error) {
-          for (const pending of permissionResponses.values()) pending.reject(error);
-          permissionResponses.clear();
-          throw error;
-        }
-      },
-      close: () => writer.close(),
-      abort: reason => writer.abort(reason),
-    }) });
-    const agent = connection.agent;
-
-    const awaitAcp = createProtocolWaiter({
-      signal,
-      label: `${provider.label} ACP`,
-      closed: connection.closed,
-      exited: spawnedChild.exited,
+      mcpServers: bridge ? [bridge.descriptor] : [],
+      permissionMode: "deny-all", nonInteractivePermissions: "deny", fs: false, terminal: false,
+      elicitationModes: ["form", "url"],
+      timeoutMs: 15_000,
+      processLifecycle: { onBeforeSpawn: () => signal.throwIfAborted() },
     });
-    onAbort = () => {
-      if (sessionId)
-        void agent
-          .notify(methods.agent.session.cancel, { sessionId })
-          .catch(() => undefined);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) onAbort();
-
-    const initialized = await awaitAcp(
-      agent.request(methods.agent.initialize, {
-        protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: {},
-        clientInfo: { name: "harness-dock", version: "0.1.0" },
-      }),
-      "initialize",
-    );
-    if (initialized.protocolVersion !== PROTOCOL_VERSION)
-      throw new Error(
-        `Unsupported ACP protocol version ${initialized.protocolVersion}`,
-      );
-
-    const supportsLoad = initialized.agentCapabilities?.loadSession === true;
-    const supportsResume = initialized.agentCapabilities?.sessionCapabilities?.resume != null;
-    const providerSessionResumable =
-      options.allowSessionResume === true && (supportsLoad || supportsResume);
-    const requestedProviderSessionId = options.allowSessionResume
-      ? options.resumeSessionId
-      : null;
-    if (requestedProviderSessionId && !providerSessionResumable)
-      throw new Error(
-        `${provider.label} no longer supports loading its Provider session`,
-      );
-    const session = requestedProviderSessionId
-      ? await awaitAcp(
-          agent.request<LoadSessionResponse, LoadSessionRequest>(
-            supportsLoad ? methods.agent.session.load : methods.agent.session.resume,
-            {
-              sessionId: requestedProviderSessionId,
-              cwd,
-              mcpServers: bridge ? [bridge.descriptor] : [],
-            },
-          ),
-          "session load",
-        )
-      : await awaitAcp(
-          agent.request<NewSessionResponse, NewSessionRequest>(
-            methods.agent.session.new,
-            {
-              cwd,
-              mcpServers: bridge ? [bridge.descriptor] : [],
-            },
-          ),
-          "session new",
-        );
-    sessionId =
-      requestedProviderSessionId || (session as NewSessionResponse).sessionId;
-    const resumed = Boolean(requestedProviderSessionId);
-    if (bridge) await awaitAcp(bridge.ready, "MCP tool discovery");
-    await options.configure({ agent, awaitAcp, sessionId, session, resumed });
-
-    if (signal.aborted)
-      throw new Error(`${provider.label} was canceled before prompt dispatch`);
-    acceptAgentMessageChunks = true;
-    promptDispatched = true;
-    const promptResult = await awaitAcp(
-      agent.request(methods.agent.session.prompt, {
-        sessionId,
-        prompt: [{ type: "text", text: options.prompt }],
-      }),
-      "prompt",
-      null,
-    );
+    const handle = await wait(runtime.ensureSession({
+      sessionKey: randomUUID(), agent: provider.source, cwd: options.cwd, mode: "persistent",
+      resumeSessionId: options.allowSessionResume ? options.resumeSessionId : undefined,
+    }), "session setup");
+    if (record?.protocolVersion !== PROTOCOL_VERSION)
+      throw new Error(`Unsupported ACP protocol version ${record?.protocolVersion}`);
+    sessionId = handle.backendSessionId ?? null;
+    if (!sessionId || (options.allowSessionResume && options.resumeSessionId && sessionId !== options.resumeSessionId))
+      throw new Error(`${provider.label} Provider session identity mismatch`);
+    const resumed = options.allowSessionResume === true && Boolean(options.resumeSessionId);
+    const capabilities = record?.agentCapabilities;
+    const resumable = options.allowSessionResume === true &&
+      (capabilities?.loadSession === true || capabilities?.sessionCapabilities?.resume != null);
+    if (resumed && !resumable) throw new Error(`${provider.label} no longer supports loading its Provider session`);
+    if (bridge) await wait(bridge.ready, "MCP tool discovery");
+    const status = await wait(runtime.getStatus({ handle }), "session metadata");
+    const activeRuntime = runtime;
+    await options.configure({
+      sessionId, resumed,
+      session: {
+        configOptions: status.details?.configOptions as SessionConfigOption[] | undefined,
+        modes: status.details?.modes as SessionModeState | null | undefined,
+      },
+      setMode: mode => wait(activeRuntime.setMode({ handle, mode, signal }), "mode configuration"),
+      // Validate the actual acknowledgement, not ACPX's optimistic saved selection.
+      setConfigOption: (key, value) => wait(activeRuntime.setConfigOption({ handle, key, value, signal }), "configuration") as Promise<{ configOptions?: SessionConfigOption[] | null }>,
+    });
+    signal.throwIfAborted();
+    const turn = runtime.startTurn({
+      handle, requestId: options.runId, text: options.prompt, mode: "prompt", signal,
+      rawSessionUpdates: true, timeoutMs: 0,
+      onPermissionRequest: async (request, context) => {
+        let decision: NativePermissionDecision | undefined;
+        try {
+          decision = await callbacks.permission?.({
+            id: randomUUID(), sessionId: request.sessionId, toolCall: request.raw.toolCall,
+            title: request.raw.toolCall.title ?? `${provider.label} permission`,
+            canAllow: request.raw.options.filter(option => option.kind === "allow_once").length === 1,
+            options: request.raw.options,
+          }, context.signal, context.responseSent);
+        } catch { /* Callback failure cannot grant access. */ }
+        const option = nativePermissionOption(request.raw.options, decision);
+        await callbacks.onProgress({
+          source: provider.source, sessionId: request.sessionId,
+          permission: {
+            toolCallId: request.raw.toolCall.toolCallId, kind: request.raw.toolCall.kind,
+            optionId: option?.optionId,
+            decision: option && !signal.aborted && !context.signal.aborted ? option.kind : "cancelled",
+          },
+        });
+        return option && !signal.aborted && !context.signal.aborted
+          ? { outcome: "selected", optionId: option.optionId }
+          : { outcome: "cancel" };
+      },
+      onElicitation: async (request, context) => {
+        const form = nativeElicitationForm(request);
+        if (!form) return { action: "cancel" };
+        let decision: NativePermissionDecision | undefined;
+        try {
+          decision = await callbacks.permission?.({
+            id: randomUUID(), sessionId: sessionId!, toolCall: {},
+            title: form.message.slice(0, 200), canAllow: true, form,
+          }, context.signal, context.responseSent);
+        } catch { /* A missing or failed answer cannot accept an elicitation. */ }
+        return nativeElicitationResponse(signal.aborted || context.signal.aborted ? undefined : decision);
+      },
+    });
+    void turn.promptStarted.then(() => { dispatched = true; }, () => {});
+    const events = (async () => {
+      try {
+        for await (const event of turn.events) {
+          if (event.type !== "session_update") continue;
+          const update = event.update as SessionUpdate;
+          bridge?.acknowledgeToolUpdate(update);
+          if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+            budget.add(update.content.text);
+            text += update.content.text;
+          }
+          const changes = await acpFileChangeEvent(provider.source, event.sessionId, update);
+          if (changes) await callbacks.onFileChanges?.(changes);
+          await callbacks.onProgress({ source: provider.source, sessionId: event.sessionId, update });
+        }
+      } catch (error) {
+        callbackError = error;
+        outputAbort.abort(error);
+      }
+    })();
+    const [result] = await wait(Promise.all([turn.result, events]), "prompt", null);
     if (callbackError) throw callbackError;
-    const usage = usageRecord(promptResult.usage);
-    const result = resultFromStopReason(
-      provider.stopErrorPrefix,
-      promptResult.stopReason,
-      cancellationRequested(),
-      finalMessage,
-      usage,
-    );
+    if (result.status === "failed") throw new Error(result.error.message);
+    // ACPX labels every non-cancelled stop reason completed. Only end_turn is success here.
+    const state = result.stopReason === "end_turn" ? "completed"
+      : result.stopReason === "cancelled" && cancellationRequested() ? "cancelled" : "failed";
+    const usage = record ? usageRecord(record.cumulative_token_usage) : undefined;
     return {
-      ...result,
-      sessionId,
-      resumable: providerSessionResumable,
-      resumed,
+      state, sessionId, resumed, resumable, text, usage,
+      ...(state === "failed" ? { errorCode: `${provider.stopErrorPrefix}_${result.stopReason ?? result.status}` } : {}),
     };
   } catch (error) {
     if (callbackError) throw callbackError;
-    return protocolFailureResult(
-      error,
-      cancellationRequested(),
-      promptDispatched,
-      {
-        errorPrefix,
-        stderr: readStderr(),
-        sessionId,
-        text: finalMessage,
-      },
-    );
+    return protocolFailureResult(error, cancellationRequested(), dispatched, {
+      errorPrefix: provider.source.replaceAll("-", "_"), stderr: "", sessionId, text,
+    });
   } finally {
-    for (const pending of permissionResponses.values()) pending.reject(new Error("permission_transport_closed"));
-    permissionResponses.clear();
-    if (onAbort) signal.removeEventListener("abort", onAbort);
-    if (child) await closeProtocolProcess(child);
-    await bridge?.close();
+    try { await runtime?.shutdown(); }
+    finally { await bridge?.close(); }
   }
+}
+
+function usageRecord(usage: AcpSessionRecord["cumulative_token_usage"]): Record<string, number> | undefined {
+  const names = {
+    input_tokens: "inputTokens", output_tokens: "outputTokens", thought_tokens: "thoughtTokens",
+    cache_creation_input_tokens: "cachedWriteTokens", cache_read_input_tokens: "cachedReadTokens", total_tokens: "totalTokens",
+  };
+  const entries = Object.entries(usage).flatMap(([key, value]) => typeof value === "number" && key in names
+    ? [[names[key as keyof typeof names], value] as const] : []);
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }

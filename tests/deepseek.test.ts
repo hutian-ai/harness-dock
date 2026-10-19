@@ -40,7 +40,7 @@ const scenario = ${JSON.stringify(scenario)};
 const models = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-next"];
 let model = models[0];
 let effort = "low";
-const reasoning = () => model === models[0] ? ["low"] : model === models[1] ? ["high", "max"] : [];
+const reasoning = () => model === models[0] ? (scenario.includes("provider-default") ? ["", "low"] : ["low"]) : model === models[1] ? ["high", "max"] : [];
 const options = () => scenario === "missing-model" ? [] : [
   {id:"model",category:"model",name:"Model",type:"select",currentValue:model,options:[{group:"Models",options:models.map(value=>({value,name:value}))}]},
   ...(scenario === "missing-reasoning" || reasoning().length === 0 ? [] : [{id:"reasoning_effort",category:"thought_level",name:"Reasoning",type:"select",currentValue:effort,options:reasoning().map(value=>({value,name:value}))}])
@@ -48,14 +48,14 @@ const options = () => scenario === "missing-model" ? [] : [
 const lines=readline.createInterface({input:process.stdin});
 lines.on("line",line=>{
   const request=JSON.parse(line);
-  fs.appendFileSync(${JSON.stringify(requestLog)},JSON.stringify({method:request.method})+"\\n");
+  fs.appendFileSync(${JSON.stringify(requestLog)},JSON.stringify(request)+"\\n");
   const reply=result=>process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:request.id,result})+"\\n");
   if(request.method==="initialize") reply({protocolVersion:1,agentCapabilities:{sessionCapabilities:{resume:{}}}});
   if(request.method==="session/new") reply({sessionId:"catalog-session",configOptions:options()});
   if(request.method==="session/resume") reply(scenario === "missing-loaded-config" ? {} : {configOptions:options()});
   if(request.method==="session/set_config_option") {
     if(request.params.configId==="model" && scenario!=="unacknowledged-model") {model=request.params.value;effort=reasoning()[0]??"";}
-    if(request.params.configId==="reasoning_effort" && scenario!=="unacknowledged-reasoning") effort=request.params.value;
+    if(request.params.configId==="reasoning_effort" && !scenario.includes("unacknowledged-reasoning")) effort=request.params.value;
     reply({configOptions:options()});
   }
   if(request.method==="session/prompt") reply({stopReason:"end_turn"});
@@ -122,6 +122,34 @@ test("does not invent DeepSeek reasoning options that the Provider omits", async
     "workspace-write",
   ]);
 });
+
+test("preserves DeepSeek's empty provider-default reasoning value without prompting", async () => {
+  const provider = await catalogProvider("provider-default");
+  const inspection = await new DeepSeekAcpExecutor({ env: process.env, executable: provider.executable }).probe();
+  assert.deepEqual(inspection.reasoningEffortsByModel, {
+    "deepseek-v4-flash": ["", "low"],
+    "deepseek-v4-pro": ["high", "max"],
+    "deepseek-next": [],
+  });
+  assert.equal((await provider.requests()).includes("session/prompt"), false);
+});
+
+for (const acknowledged of [true, false]) {
+  test(`DeepSeek provider-default reasoning requires a native ACK: ${acknowledged}`, async () => {
+    const provider = await catalogProvider(acknowledged ? "provider-default" : "provider-default-unacknowledged-reasoning");
+    const result = await new DeepSeekAcpExecutor({ env: process.env, executable: provider.executable }).execute({
+      runId: "018f47f2-4f15-7c86-a8d9-9e38115d9060", cwd: provider.directory,
+      model: "deepseek-v4-flash", config: { reasoning_effort: "" }, prompt: "synthetic prompt",
+      signal: new AbortController().signal,
+      callbacks: { onStarted: async () => undefined, onProgress: async () => undefined },
+    });
+    assert.equal(result.state, acknowledged ? "completed" : "failed");
+    const requests = (await readFile(join(provider.directory, "requests.jsonl"), "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line) as { method: string; params?: { configId?: string; value?: string } });
+    assert(requests.some(request => request.method === "session/set_config_option" && request.params?.configId === "reasoning_effort" && request.params.value === ""));
+    assert.equal(requests.some(request => request.method === "session/prompt"), acknowledged);
+  });
+}
 
 for (const scenario of ["missing-model", "unacknowledged-model"] as const) {
   test(`rejects a DeepSeek probe with ${scenario}`, async () => {

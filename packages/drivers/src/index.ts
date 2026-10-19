@@ -8,8 +8,8 @@ export { createMcpBridge, type McpBridge, type McpInvocation, type McpToolCall, 
 export { ToolDeliveryTracker, type ToolDelivery } from './tool-delivery.ts';
 export { CodexExecutor, createCodexRuntime, type CodexExecutionConfig, type CodexExecutionInput, type CodexEvidence, type CodexEvent, type CodexInspection, type CodexMessage, type CodexTokens } from './codex.ts';
 export { nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
-export { ContainerHarness, type ContainerConfig } from './container.ts';
 export { ZCodeExecutor, createZCodeRuntime, type ZCodeExecutionConfig } from './zcode.ts';
 export type { HarnessExecutor, HarnessExecutionInput, HarnessExecutionResult, NativePermissionRequest, NativePermissionDecision, NativeInteractionResponse } from './execution.ts';
 export { discoverProviders, type ProviderKey, type ProviderOverride, type ProviderDiscoveryOptions, type DiscoveredProvider } from './discovery.ts';
 export { AnswerBudget, boundedObservation, readBoundedText, MAX_ANSWER_BYTES, MAX_OBSERVATION_BYTES } from './output-limits.ts';
+export { createProviderAdapter, type ProviderAdapter, type ProviderCapabilities, type ProviderExecution, type ProviderInspection } from './provider-adapter.ts';

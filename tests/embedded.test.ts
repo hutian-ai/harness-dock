@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CodexExecutor, createCodexRuntime } from '../packages/drivers/src/codex.ts';
@@ -23,16 +23,18 @@ test('embedding excludes host credentials while retaining the configured executi
   process.env[name] = 'synthetic-secret';
   process.env.CODEX_MCP_NODE_PATH = '/synthetic/native-node';
   process.env.CODEX_APP_TOOLS_PIPE_PATH = '/synthetic/another-chat';
-  const runtime = createCodexRuntime({ cwd: root, codexHome: root, stateDir: join(root, 'state'), codexBin: '/synthetic/codex', nativeNode: '/synthetic/native-node', skillDirectory: '/synthetic/skills' }, [process.execPath, fixture]);
+  const runtime = createCodexRuntime({ cwd: root, codexHome: root, stateDir: join(root, 'state'), codexBin: '/synthetic/codex', nativeNode: '/synthetic/native-node', skillDirectory: '/synthetic/skills',
+    environment: { HTTPS_PROXY: 'http://proxy.example.test:8080', NODE_EXTRA_CA_CERTS: '/synthetic/ca.pem', CODEX_HOME: '/wrong-home' } }, [process.execPath, fixture]);
   try {
     await writeFile(fixture, `import {createInterface} from 'node:readline';
 for await (const line of createInterface({input:process.stdin})) {
  const q=JSON.parse(line); if(q.id===undefined)continue;
- const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{secretPresent:process.env.${name}!==undefined,home:process.env.CODEX_HOME,pathPresent:typeof process.env.PATH==='string',binary:process.env.CODEX_PATH,skillRoot:process.env.HARNESS_DOCK_SKILL_ROOT,nativeNode:process.env.CODEX_MCP_NODE_PATH,pipePresent:process.env.CODEX_APP_TOOLS_PIPE_PATH!==undefined};
+ const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{secretPresent:process.env.${name}!==undefined,home:process.env.CODEX_HOME,pathPresent:typeof process.env.PATH==='string',binary:process.env.CODEX_PATH,skillRoot:process.env.HARNESS_DOCK_SKILL_ROOT,nativeNode:process.env.CODEX_MCP_NODE_PATH,pipePresent:process.env.CODEX_APP_TOOLS_PIPE_PATH!==undefined,proxy:process.env.HTTPS_PROXY,certificate:process.env.NODE_EXTRA_CA_CERTS};
  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');
 }`);
     const observed = await runtime.dockControl({ command: { operation: 'inspect' }, signal: AbortSignal.timeout(5000) });
-    assert.deepEqual(observed, { secretPresent: false, home: root, pathPresent: true, binary:'/synthetic/codex', skillRoot:'/synthetic/skills',nativeNode:'/synthetic/native-node',pipePresent:false });
+    assert.deepEqual(observed, { secretPresent: false, home: root, pathPresent: true, binary:'/synthetic/codex', skillRoot:'/synthetic/skills',nativeNode:'/synthetic/native-node',pipePresent:false,
+      proxy:'http://proxy.example.test:8080',certificate:'/synthetic/ca.pem' });
   } finally {
     await runtime.shutdown();
     if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
@@ -213,7 +215,9 @@ test('a released ZCode warm session explicitly rejects resume without starting a
     agentProcessEnv: { DOCK_AUDIT: audit }, permissionMode: 'deny-all', nonInteractivePermissions: 'deny', fs: false, terminal: false,
   }));
   t.after(async () => { await executor.close(); await rm(root, { recursive: true, force: true }); });
-  const input = { runId: 'first', prompt: 'synthetic', signal: AbortSignal.timeout(5000), onReady: async () => {}, onEvent: async () => {} };
+  // This case exercises idle release, not cancellation. A shorter independent
+  // timer can expire after completion and legitimately retire the warm session.
+  const input = { runId: 'first', prompt: 'synthetic', signal: t.signal, onReady: async () => {}, onEvent: async () => {} };
   assert.equal((await executor.execute(input)).state, 'completed');
   const sessionId = executor.retainedSessionId;
   assert.ok(sessionId);
@@ -225,18 +229,42 @@ test('a released ZCode warm session explicitly rejects resume without starting a
 });
 
 test('device admission and approval fences survive duplicate requests, cancellation races and detached callbacks', { timeout: 10000 }, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'dock-control-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dock-control-')));
+  const executable = join(root, 'codex');
+  await writeFile(executable, `#!${process.execPath}\nconsole.log('codex-cli 1.0.0');\n`, { mode: 0o700 });
   let current!: CodexHostInput<unknown>, finish!: (result: CodexEvidence) => void, starts = 0;
+  const nativeInspection = { models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }],
+    config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: true } };
   const host = new DeviceHost({ mode: 'device', nodeId: 'control-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { home: root }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } }, {
-    inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: true } }),
-    execute: async input => { starts++; current = input; await input.onReady('thread'); return new Promise(resolve => { finish = resolve; }); },
+    providers: { codex: { executable, home: root, environment: { HTTPS_PROXY: 'http://proxy.example.test:8080' } }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } }, {
+    inspect: async environment => {
+      assert.equal(environment.environment?.HTTPS_PROXY, 'http://proxy.example.test:8080');
+      assert.equal(environment.codexHome, root);
+      return nativeInspection;
+    },
+    execute: async input => { starts++; current = input;
+      assert.equal(input.environment.environment?.HTTPS_PROXY, 'http://proxy.example.test:8080');
+      await input.onReady('thread'); return new Promise(resolve => { finish = resolve; }); },
     close: async () => {}, reconcile: async () => null,
   });
   t.after(async () => { finish?.({ runId: current.runId, fingerprint: 'synthetic', state: 'cancelled', messages: [] }); await host.close(); await rm(root, { recursive: true, force: true }); });
   let decide!: (value: string) => void;
   host.bind(async (_method, value) => (value as { kind: string }).kind === 'permission' ? new Promise(resolve => { decide = resolve; }) : null);
-  await host.inventory(); await host.prepare({ runId: 'first' });
+  const inventory = await host.inventory() as { providers: { key: string; status: string; error?: string; models: string[]; inspection: unknown;
+    capabilities: { sessionResume: string; resultQuery: string; callerSkills: boolean }; sessionResumeMode: string;
+    readiness: { level: string; modelExecutionVerified: boolean } }[] };
+  const reported = inventory.providers.find(provider => provider.key === 'codex')!;
+  assert.equal(reported.status, 'ready', reported.error);
+  assert.deepEqual(reported.inspection, nativeInspection); // Native fields remain available to existing consumers.
+  assert.deepEqual(reported.models, ['synthetic']);
+  assert.equal(reported.sessionResumeMode, 'native');
+  assert.equal(reported.capabilities.resultQuery, 'native');
+  assert.equal(reported.capabilities.callerSkills, true);
+  assert.equal(reported.readiness.level, 'protocol');
+  assert.equal(reported.readiness.modelExecutionVerified, false);
+  assert.equal(JSON.stringify(inventory).includes('proxy.example.test'), false);
+  assert.equal(starts, 0); // Ready reports protocol inspection, not a dispatched model turn.
+  await host.prepare({ runId: 'first' });
   const input = { provider: 'codex', runId: 'first', model: 'synthetic', prompt: 'synthetic' };
   const run = host.execute(input);
   for (let i = 0; i < 100 && !finish; i++) await delay(5);
