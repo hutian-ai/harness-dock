@@ -9,6 +9,7 @@ import { managedStateBytes, forgetSessionDirectories } from '../apps/daemon/src/
 import { RotatingLog } from '../apps/daemon/src/rotating-log.ts';
 import { DeviceStore } from '../apps/daemon/src/device-store.ts';
 import { ObservationWriter } from '../apps/daemon/src/observation-writer.ts';
+import type { CodexHostInput, CodexEvidence } from '../packages/drivers/src/index.ts';
 
 const nextTurn = () => new Promise<void>(resolve => setImmediate(resolve));
 const deferred = () => {
@@ -17,6 +18,71 @@ const deferred = () => {
   return { promise, resolve };
 };
 const textDelta = (text: string, phase = 'final_answer') => ({ type: 'text_delta', messageId: 'message', stream: 'output', phase, text });
+
+test('an approval holds only its own session; parallel cancellation, output and replay stay scoped', { timeout: 10000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'dock-concurrent-'));
+  const executable = join(root, 'codex');
+  await writeFile(executable, '#!/bin/sh\necho "codex-cli 0.1.0"\n', { mode: 0o700 });
+  const waiting = deferred(), approve = deferred(), cancelStarted = deferred();
+  const inputs = new Map<string, CodexHostInput<unknown>>();
+  const decisions: string[] = [];
+  let starts = 0;
+  const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
+    providers: { codex: { executable, home: root }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } },
+  }, () => ({
+    inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: false } }),
+    reconcile: async () => null, close: async () => {},
+    execute: async input => {
+      starts++; inputs.set(input.runId, input);
+      await input.onReady(`thread:${input.runId}`);
+      if (input.runId === 'approval') {
+        const answer = await input.permission!({ id: 'same-request-id', title: 'Approve', details: {}, canAllow: true }, input.signal, Promise.resolve());
+        decisions.push(String(answer));
+      } else if (input.runId === 'cancel') {
+        cancelStarted.resolve();
+        await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve(), { once: true }));
+      }
+      return { runId: input.runId, fingerprint: 'synthetic', state: input.signal.aborted ? 'cancelled' : 'completed',
+        threadId: `thread:${input.runId}`, turnId: input.runId,
+        messages: [{ id: input.runId, phase: 'final_answer', text: input.runId }] } as CodexEvidence;
+    },
+  }));
+  t.after(async () => { approve.resolve(); host.cancel('cancel'); await host.close(); await rm(root, { recursive: true, force: true }); });
+  host.bind(async (_method, raw) => {
+    const value = raw as { runId: string; kind: string };
+    if (value.kind === 'permission') {
+      assert.equal(value.runId, 'approval'); waiting.resolve(); await approve.promise; return 'allow';
+    }
+    return null;
+  });
+  await host.inventory();
+  const request = (runId: string, sessionKey = runId) => ({ provider: 'codex', runId, sessionKey, prompt: runId, model: 'synthetic' });
+  await host.prepare({ runId: 'approval' });
+  const first = host.execute(request('approval'));
+  await waiting.promise;
+  const replay = host.execute(request('approval'));
+  await assert.rejects(host.prepare({ runId: 'same-session', sessionKey: 'approval' }), /session_busy/);
+  await host.prepare({ runId: 'other-session', sessionKey: 'approval-alias' });
+  await assert.rejects(host.execute({ ...request('other-session', 'approval-alias'), resumeSessionId: 'thread:approval' }), /session_busy/);
+  await host.prepare({ runId: 'chat' });
+  assert.equal((await host.execute(request('chat')) as { result: { state: string } }).result.state, 'completed');
+  await host.collect('chat'); await host.release('chat');
+  assert.equal(host.getExecution('approval')?.state, 'running');
+  await host.prepare({ runId: 'cancel' });
+  const canceled = host.execute(request('cancel'));
+  await cancelStarted.promise;
+  await host.prepare({ runId: 'overflow' });
+  await assert.rejects(host.execute(request('overflow')), /device_busy/);
+  assert.deepEqual(host.activeRunIds.sort(), ['approval', 'cancel']);
+  host.cancel('cancel'); await canceled;
+  assert.equal(inputs.get('approval')!.signal.aborted, false);
+  approve.resolve();
+  assert.deepEqual(await replay, await first);
+  assert.deepEqual(decisions, ['allow']); assert.equal(starts, 3);
+  assert.equal(await inputs.get('approval')!.permission!({ id: 'late', title: 'Late', details: {}, canAllow: true }, new AbortController().signal, Promise.resolve()), 'deny');
+  assert.deepEqual(host.activeRunIds, []);
+});
 
 test('observation streaming sends the first fragment immediately and merges a burst before its receipt', { timeout: 5000 }, async t => {
   const receipt = deferred(), sent: Record<string, unknown>[] = [];

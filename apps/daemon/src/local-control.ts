@@ -7,7 +7,7 @@ import type { DeviceConfig } from './config.ts';
 
 export interface LocalStatus {
   nodeId: string; daemonId: string; pid: number; connected: boolean; endpoint: string;
-  entrypoint?: string; runtime?: string; activeRunId?: string; unresolvedRunIds?: string[];
+  entrypoint?: string; runtime?: string; activeRunIds?: string[]; unresolvedRunIds?: string[];
 }
 function socketPath(config: DeviceConfig, daemonId: string): string {
   const key = createHash('sha256').update(`${resolve(config.stateDir)}:${daemonId}`).digest('hex').slice(0, 32);

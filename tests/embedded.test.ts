@@ -180,7 +180,7 @@ test('device idle release waits for an active approval and fences shutdown again
   await assert.rejects(host.release('first'), /busy/);
   allow('deny'); await run;
   for (let n = 0; n < 100 && closeCalls === 0; n++) await delay(5);
-  assert.equal(closeCalls, 1);
+  assert.equal(closeCalls, 2);
   await assert.rejects(host.prepare({ runId: 'second' }), /busy/);
   let stopped = false;
   const stop = host.close().then(() => { stopped = true; });
@@ -235,7 +235,7 @@ test('device admission and approval fences survive duplicate requests, cancellat
   let current!: CodexHostInput<unknown>, finish!: (result: CodexEvidence) => void, starts = 0;
   const nativeInspection = { models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }],
     config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: true } };
-  const host = new DeviceHost({ mode: 'device', nodeId: 'control-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
+  const host = new DeviceHost({ mode: 'device', nodeId: 'control-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxConcurrentExecutions: 1 },
     providers: { codex: { executable, home: root, environment: { HTTPS_PROXY: 'http://proxy.example.test:8080' } }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } }, {
     inspect: async environment => {
       assert.equal(environment.environment?.HTTPS_PROXY, 'http://proxy.example.test:8080');
