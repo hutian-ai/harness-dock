@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { createAcpRuntime, createRuntimeStore, type AcpRuntimeOptions } from 'acpx/runtime';
 import { createAgentRegistry } from 'acpx/agent-registry';
+import { AGENT_PROCESS_ENV_ALLOW } from './agent-environment.ts';
 import { nativeElicitationForm, nativeElicitationResponse, type HarnessExecutionInput } from './execution.ts';
 import { AnswerBudget, MAX_EVIDENCE_BYTES, readBoundedText } from './output-limits.ts';
 import { applyNativePermissionMode, nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
@@ -65,6 +66,7 @@ export function createCodexRuntime(config: CodexExecutionConfig, command?: strin
     cwd: config.cwd,
     sessionStore: createRuntimeStore({ stateDir: config.stateDir }),
     agentRegistry: createAgentRegistry({ overrides: { codex: command ?? [config.desktopHost?.nodePath ?? config.nativeNode ?? process.execPath, createRequire(import.meta.url).resolve('@agentclientprotocol/codex-acp')] } }),
+    agentProcessEnvAllow: AGENT_PROCESS_ENV_ALLOW,
     agentProcessEnv: {
       ...config.environment,
       CODEX_HOME: config.codexHome, INITIAL_AGENT_MODE: config.sandbox ?? 'workspace-write',

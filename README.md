@@ -115,7 +115,7 @@ Provider 空闲 10 分钟回收。Codex 可重新加载原 thread；单轮文本
 
 ## Codex 执行与结果
 
-Codex 使用固定 ACPX 0.19.4 / Codex ACP 2.1.1，以及设备选择的本机 Codex 安装/home 与原生登录；支持明确的 `final_answer`、严格插话和原 turn 的只读查回。
+Codex 使用固定 ACPX 0.21.1 / Codex ACP 2.1.1，以及设备选择的本机 Codex 安装/home 与原生登录；支持明确的 `final_answer`、严格插话和原 turn 的只读查回。
 
 文本增量不是权威最终答案。Provider 支持的能力、探测失败和真实验收证据分别记录。固定补丁见 [补丁说明](patches/README.md)。
 

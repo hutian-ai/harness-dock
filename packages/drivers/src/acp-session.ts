@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AGENT_PROCESS_ENV_ALLOW } from "./agent-environment.ts";
 import { createAcpRuntime, createAgentRegistry, type AcpSessionRecord } from "acpx/runtime";
 import { PROTOCOL_VERSION, type SessionConfigOption, type SessionModeState, type SessionUpdate } from "@agentclientprotocol/sdk";
 import type { AcpExecutionInput, AcpExecutionResult } from "./acp-types.ts";
@@ -57,6 +58,7 @@ export async function runAcpSession<TDelivery>(
     runtime = createAcpRuntime({
       cwd: options.cwd,
       agentRegistry: createAgentRegistry({ overrides: { [provider.source]: [command.executable, ...command.args] } }),
+      agentProcessEnvAllow: AGENT_PROCESS_ENV_ALLOW,
       agentProcessEnv: Object.fromEntries(Object.entries(command.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
       sessionStore: {
         load: async id => record?.acpxRecordId === id ? structuredClone(record) : undefined,

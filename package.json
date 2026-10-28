@@ -24,7 +24,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.0",
-    "acpx": "0.19.4",
+    "acpx": "0.21.1",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "ws": "8.22.0",

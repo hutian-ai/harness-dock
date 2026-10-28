@@ -41,7 +41,7 @@ for (const target of ['daemon', 'controller', 'server']) {
   await rmdir(join(directory, 'node_modules/.pnpm'));
 }
 await mkdir(join(root, 'daemon/patches'));
-for (const patch of ['acpx@0.19.4.patch', '@agentclientprotocol__codex-acp@2.1.1.patch'])
+for (const patch of ['acpx@0.21.1.patch', '@agentclientprotocol__codex-acp@2.1.1.patch'])
   await copyFile(resolve('patches', patch), join(root, 'daemon/patches', patch));
 await copyFile(resolve('patches/README.md'), join(root, 'daemon/patches/README.md'));
 for (const target of ['daemon', 'controller', 'server']) await writeBundleNotices(join(root, target));

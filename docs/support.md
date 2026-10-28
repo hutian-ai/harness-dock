@@ -21,7 +21,7 @@ package 继续保持 private；源码与独立构建包是首版分发方式，�
 | Provider Docker/Podman | 后置实验 | 不作为 v1 门禁；云端 server 的 Docker 部署单独成立 |
 
 需要 Node.js 22.19+、pnpm 12.15.0；Codex 使用本机所选安装/home 和已有登录。
-固定适配依赖为 ACPX 0.19.4 / Codex ACP 2.1.1，补丁边界见
+固定适配依赖为 ACPX 0.21.1 / Codex ACP 2.1.1，补丁边界见
 [patches/README.md](../patches/README.md)。模型可用性与额度属于原生账户条件。
 
 ## 能力证据
