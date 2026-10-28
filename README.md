@@ -4,7 +4,7 @@ harness-dock 是跨机器的原生 Harness 接入与执行基础设施。应用�
 
 每台设备运行独立 Daemon，设备与调用方主动连接自托管 server。调用方无需管理远程 Provider 进程、登录文件或设备上的工具安装。
 
-**最小版本：仅支持 macOS arm64 设备上的 Codex。** server 可部署在 Linux；项目处于开发者 Alpha，采用私有源码与候选运行包分发，尚无 npm registry 发布。
+**最小版本：仅支持 macOS arm64 设备上的 Codex。** server 可部署在 Linux。源码采用 MIT，当前为开发者 Alpha；从源码即可启动，workspace package 保持 private，避免误发布到 npm。
 
 ## 适用场景
 
@@ -38,11 +38,74 @@ server 是受信任的转发节点，能够读取转发内容。远程连接使�
 
 ## 开始使用
 
-准备 Node.js 22.19+，并在执行设备安装、登录 Codex。使用预构建运行包时不需要 Git 或 pnpm。
+准备 Git、Node.js 22.19+；在执行设备原生安装、登录 Codex。先取得并构建源码：
 
-1. 按 [快速开始](apps/docs-site/README.md#quickstart) 初始化 server、配对设备并完成首次执行。
-2. 按 [SDK 指南](apps/docs-site/README.md#sdk) 将设备接入自己的应用。
-3. 跨机器运行时，配置 [Linux server 与 WSS](apps/docs-site/README.md#server)。
+```sh
+git clone https://github.com/hutian-ai/harness-dock.git
+cd harness-dock
+npm install --global pnpm@12.15.0
+pnpm install --frozen-lockfile
+pnpm build
+pnpm smoke:source
+```
+
+`smoke:source` 使用临时回环端口和隔离配置，禁用 Codex，不读取原生登录或调用模型。它验证源码 CLI/SDK 的连接和启停路径；真实设备仍需完成下列验收。
+
+### 在一台 Mac 完成首次执行
+
+以下命令均从仓库根目录运行；首次使用新的 `.local/quickstart` 目录。终端 1 初始化并启动本机 server：
+
+```sh
+pnpm server init .local/quickstart/control
+pnpm server run .local/quickstart/control/server.json
+```
+
+终端 2 配对并启动独立 Daemon：
+
+```sh
+mkdir -p .local/quickstart/work
+pnpm daemon init --cwd "$PWD/.local/quickstart/work" \
+  --home "$PWD/.local/quickstart/device" \
+  --pairing "$PWD/.local/quickstart/control/device-pairing.json"
+pnpm daemon start .local/quickstart/device/config.json
+pnpm daemon doctor .local/quickstart/device/config.json --json
+pnpm client nodes .local/quickstart/control/client.json
+pnpm client doctor .local/quickstart/control/client.json --probe --json
+```
+
+真实两轮测试会使用原生模型额度。`--approval` 在交互终端展示原生选项，由你决定是否允许：
+
+```sh
+pnpm client test .local/quickstart/control/client.json --approval
+pnpm daemon stop .local/quickstart/device/config.json
+```
+
+成功结果应包含 `state: completed`、`sameSessionVerified: true` 和 `approvalVerified: true`。测试失败时保存原 `runs`/runId，先查询 `pnpm client status <client.json> --node-id <设备UUID> --run-id <原runId>`；不要换身份重发来判断原结果。安装与协议 ready 不等于模型、桌面或浏览器已验收。
+
+### 独立设备连接已有 server
+
+在独立 Mac 上完成上面的 clone、依赖安装、构建和源码冒烟。由 server 管理者为这台设备创建独立身份、授权给应用并加载配置，然后安全提供该设备专属的 `device-pairing.json`（含已配置的 WSS 入口）。只把这份文件保存为 `.local/device-pairing.json`，再执行：
+
+```sh
+mkdir -p "$HOME/harness-work"
+chmod 600 .local/device-pairing.json
+pnpm daemon init --cwd "$HOME/harness-work" \
+  --home "$PWD/.local/home-device" --pairing "$PWD/.local/device-pairing.json"
+pnpm daemon start .local/home-device/config.json
+pnpm daemon doctor .local/home-device/config.json --json
+pnpm daemon status .local/home-device/config.json
+```
+
+若使用私有 CA，在 `init` 增加 `--ca-file /absolute/trusted-ca.pem`。原生 Codex 使用这台 Mac 当前用户自己的安装与登录；设备凭据和应用 `client.json` 分别授权，不混用。持有应用凭据的控制端按 `status` 返回的 nodeId 执行：
+
+```sh
+pnpm client doctor /private/client.json --node-id <设备UUID> --probe --json
+pnpm client test /private/client.json --node-id <设备UUID> --approval
+```
+
+源码后台启动不注册登录自启。登录自启、版本化安装和升级回滚见 [设备维护](apps/docs-site/README.md#installation)；跨机器 server 的 TLS、配对和加载确认见 [server 指南](apps/docs-site/README.md#server)。更新源码前先确认无活动或 unknown 执行，再通过原入口停机；不在运行中的源码目录重装依赖或构建。
+
+### 应用接入 SDK
 
 SDK 通过随候选包提供的归档安装：
 
@@ -79,6 +142,7 @@ await client.close();
 npm install --global pnpm@12.15.0
 pnpm install --frozen-lockfile
 pnpm check
+pnpm smoke:source
 ```
 
 真实 Codex 验收需要本机登录及模型额度，显式执行 `pnpm accept:codex`。其他命令与贡献约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -12,6 +12,8 @@
     "build": "pnpm -r build",
     "test": "node --test --test-concurrency=1 --import tsx tests/*.test.ts",
     "check": "pnpm build && tsc -p tsconfig.tests.json && pnpm test",
+    "smoke:source": "node --import tsx scripts/smoke-source.ts",
+    "check:privacy": "node --import tsx scripts/check-privacy.ts",
     "daemon": "node --import tsx apps/daemon/src/cli.ts",
     "dev:daemon": "node --import tsx apps/daemon/src/cli.ts run .local/device/config.json",
     "accept:codex": "pnpm build && node --import tsx scripts/accept-codex.ts",

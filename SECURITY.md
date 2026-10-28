@@ -9,13 +9,11 @@ unaccepted native capabilities are listed in [support guide](apps/docs-site/READ
 
 ## Reporting a vulnerability
 
-While the repository is private, report a sanitized reproduction through its
-existing private maintainer collaboration channel or a private repository issue.
-Before making the repository public, maintainers must enable GitHub private
-vulnerability reporting and verify the **Security → Report a vulnerability** entry.
-After publication, use that entry rather than a public issue or pull request. If
-it is unavailable, contact a maintainer through an established private channel;
-do not publish exploit details while looking for a contact.
+Use the repository's **Security → Report a vulnerability** entry when available.
+Maintainers should enable GitHub private vulnerability reporting and verify that
+entry. If it is unavailable, contact a maintainer through an established private
+channel; do not include exploit details in a public issue or pull request while
+looking for a contact.
 
 Include the affected revision, environment, preconditions, expected/actual
 behavior, impact and a minimal synthetic reproduction. Omit real tokens, pairing
