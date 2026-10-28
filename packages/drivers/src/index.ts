@@ -11,5 +11,6 @@ export { CodexExecutor, createCodexRuntime, type CodexExecutionConfig, type Code
 export { nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
 export type { HarnessExecutor, HarnessExecutionInput, HarnessExecutionResult, NativePermissionRequest, NativePermissionDecision, NativeInteractionResponse } from './execution.ts';
 export { discoverProviders, type ProviderKey, type ProviderOverride, type ProviderDiscoveryOptions, type DiscoveredProvider } from './discovery.ts';
+export { discoverCodexInstallation } from './codex-environment.ts';
 export { AnswerBudget, boundedObservation, readBoundedText, MAX_ANSWER_BYTES, MAX_OBSERVATION_BYTES } from './output-limits.ts';
-export { createProviderAdapter, type ProviderAdapter, type ProviderCapabilities, type ProviderExecution, type ProviderInspection } from './provider-adapter.ts';
+export { createProviderAdapter, createProviderAdapters, type ProviderAdapters, type ProviderAdapterOptions, type ProviderAdapter, type ProviderCapabilities, type ProviderExecution, type ProviderInspection } from './provider-adapter.ts';

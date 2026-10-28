@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { JSONRPCClient, JSONRPCServer, JSONRPCServerAndClient } from 'json-rpc-2.0';
@@ -8,9 +9,9 @@ import {
   SERVER_PROTOCOL_HEADER, SERVER_PROTOCOL_VERSION, type DeviceRequestContext,
 } from '@harness-dock/client';
 import {
-  DeviceInboundBudget, DeviceTransport, DEVICE_TRANSPORT_LIMITS, DockError, id, type DeviceNodeSummary,
+  DeviceInboundBudget, DeviceTransport, DEVICE_TRANSPORT_LIMITS, DEVICE_PROTOCOL_VERSION, DockError, id, type DeviceNodeSummary,
 } from '@harness-dock/protocol';
-import { parseServerConfig, type ServerConfig } from './config.ts';
+import { parseServerConfig, serverConfigRevision, type ServerConfig } from './config.ts';
 export { parseServerConfig, readServerConfig, type ServerConfig } from './config.ts';
 export { initializeServer, type ServerSetupOptions } from './setup.ts';
 
@@ -59,10 +60,12 @@ export class DockServer {
       const payload = { serverId: this.serverId, sequence: ++this.sequence, node };
       if (slot.connection) void this.notify(slot.connection, 'server.node', payload).catch(() => {});
     });
+    const health = { version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
+      deviceProtocol: DEVICE_PROTOCOL_VERSION, serverProtocol: SERVER_PROTOCOL_VERSION, configRevision: serverConfigRevision(config) };
     const handle = (request: IncomingMessage, response: ServerResponse) => {
       if (request.method === 'GET' && request.url === '/healthz') {
         response.writeHead(this.closing ? 503 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        response.end(JSON.stringify({ status: this.closing ? 'stopping' : 'ok' }));
+        response.end(JSON.stringify({ status: this.closing ? 'stopping' : 'ok', ...health }));
       } else response.writeHead(404).end();
     };
     this.listener = options.tls
@@ -133,7 +136,9 @@ export class DockServer {
       const node = this.controller.node(nodeId)!;
       if (!node.connected || node.daemonId !== id.parse(call.daemonId)) throw new DockError('device_connection_expired');
       // The device retains execution ownership when this client's transport disappears.
-      return await node.request(call.method, payload, timeoutMs);
+      // Method and node grants were checked above; the relay does not project a
+      // provider-specific response or invent a compile-time response type.
+      return await node.request<unknown>(call.method, payload, timeoutMs);
     });
     socket.on('pong', () => { alive = true; });
     socket.on('message', data => {

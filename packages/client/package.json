@@ -20,10 +20,12 @@
     "ws": "8.22.0"
   },
   "bin": {
-    "harness-dock-devices": "dist/device-console.js"
+    "harness-dock-devices": "dist/device-console.js",
+    "harness-dock-client": "dist/cli.js"
   },
   "files": [
     "dist",
+    "examples",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "THIRD_PARTY_NOTICES.json"

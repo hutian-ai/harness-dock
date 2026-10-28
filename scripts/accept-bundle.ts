@@ -51,6 +51,18 @@ execFileSync('npm', ['ci', '--offline', '--ignore-scripts', '--no-audit', '--no-
 await writeFile(join(consumer, 'index.ts'), [
   "export { ServerClient, DeviceController, DockError } from '@harness-dock/client';",
   "export type { ServerPeer, DeviceNodeSummary, DeviceRequestHandler } from '@harness-dock/client';",
+  "import type { ServerPeer, DeviceInventory, DeviceExecutionResponse, DevicePermissionDecision } from '@harness-dock/client';",
+  "export async function typedConsumer(peer: ServerPeer) {",
+  "  const inventory: DeviceInventory = await peer.request('inventory');",
+  "  const result: DeviceExecutionResponse = await peer.request('execute', { provider: inventory.providers[0]!.key, runId: 'synthetic', prompt: 'never called' });",
+  "  peer.onExecutionCallback(async request => {",
+  "    if (request.kind === 'permission') { request.payload.options?.[0]?.optionId satisfies string | undefined; return 'deny' satisfies DevicePermissionDecision; }",
+  "    return null;",
+  "  });",
+  "  // @ts-expect-error execution identity is required",
+  "  await peer.request('execute', { provider: 'codex', prompt: 'never called' });",
+  "  return result;",
+  "}",
 ].join('\n'));
 await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
   compilerOptions: { target: 'ES2022', module: 'NodeNext', strict: true, types: [], outDir: 'dist' },

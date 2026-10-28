@@ -1,28 +1,10 @@
-# 发布与独立设备验收
+# 构建与分发
 
-首版定位为 macOS arm64 + Codex 开发者 Alpha。发布准备可以在私有仓库完成；
-变更仓库可见性、创建公开 Release 和 npm 发布不是本流程自动执行的操作。
-本页是验收与操作规程，勾选项必须对应实际证据。
+运行包分别交付 server、daemon、controller 和 SDK 归档。所有 workspace package 保持 private；候选产物不是 npm 发布或公共 Release。
 
-## 当前发布状态（2026-10-27）
+## 从冻结源码构建
 
-- [x] 项目 MIT 许可证与 package license 声明；第三方原许可独立保留。
-- [x] 贡献、安全报告、变更记录与首版支持矩阵已建立。
-- [x] CI 工作流已配置为确定性检查和离线分发检查，不配置 Provider 凭据。
-- [x] 最终候选的本地 pnpm check、依赖审计与离线分发检查通过并记录；真实模型证据另列。
-- [ ] 推送后 GitHub CI 实际成功；配置文件存在不代表已经运行。
-- [ ] 独立 macOS 设备安装/旧版升级验收通过。
-- [ ] 无 dock 安装的新目录或干净用户环境安装验收通过。
-- [ ] 最终源码、完整待发布历史、归档和构建包隐私复核完成。
-- [ ] 公共仓库的私密漏洞报告入口已启用并验证。
-- [ ] 最终候选已提交，版本、变更记录、标签和源代码一致。
-
-## 在隔离候选中验证
-
-不要对现用 daemon release 执行包管理器，也不要在共享源码中并行构建。先将
-当前候选复制到 ignored `.local/` 下的新目录或独立临时目录，不带原 node_modules、
-凭据、会话、实验输出和相邻仓库。版本管理中的源码及明确需要的未跟踪源码须一并
-冻结，记录文件摘要；不得只对 HEAD 测试后声称验证了工作区。
+使用可信源码提交，在隔离目录中安装并串行运行：
 
 ```sh
 npm install --global pnpm@12.15.0
@@ -30,61 +12,46 @@ pnpm install --frozen-lockfile
 pnpm check
 pnpm audit --prod
 pnpm audit
-pnpm bundle .local/bundles/alpha-candidate
-node --import tsx scripts/accept-bundle.ts .local/bundles/alpha-candidate --offline
+pnpm bundle .local/bundles/candidate
+node --import tsx scripts/accept-bundle.ts .local/bundles/candidate --offline
 ```
 
-最后一步不启动真实 Provider，不使用模型账户；它检查仓外空缓存 SDK 安装/ci、
-公开类型、依赖隔离、补丁、许可证与 CLI。真实模型验收在已登录的独立环境另外执行：
+bundle 输出三个完整运行目录及 controller.tgz。依赖由冻结锁文件安装，分发时携带实际依赖，不依赖源码工作区或 registry。运行包带项目许可、第三方索引和 daemon 补丁；封存后不要在其中重装依赖。
+
+设备包必须在目标平台构建，不跨系统复制 node_modules。正式设备范围是 macOS arm64 + Codex；Linux 构建的 daemon 仅为内部检查产物，不构成设备支持。
+
+## 候选归档
 
 ```sh
-node --import tsx scripts/accept-bundle.ts .local/bundles/alpha-candidate
+pnpm package:local --bundles .local/bundles/candidate --output .local/distribution/candidate
 ```
 
-真实验收会访问模型服务，只使用合成输入和隔离工作目录。将摘要记录到
-`validation.md`；原始日志和 evidence.json 留在 ignored `.local/`。原生配置、
-已有 unknown 和用户工作文件不作为清理对象。Linux CI 成功只证明该 job 的范围。
+输出 server/controller/daemon 归档、离线 SDK、release.json、README.txt 和 SHA256SUMS。产物去除构建用户属主与 macOS 扩展属性、ACL 和文件标志。来源为实际源码 revision，工作区未提交时明确标记 dirty。
 
-## 已有旧版的独立 macOS 设备
+在 Linux 构建 server 镜像并一同导出：
 
-1. 通过该设备受保护的固定入口读取 status、版本与日志；只读核对 OS/架构、
-   Node、设备协议、server 兼容性、活动执行和 unknown。记录摘要，不公开真实地址或身份。
-2. 任一活动执行、维护操作或 unknown 都不进入升级。等待活动任务结束；unknown 按
-   原身份查询和人工裁决，不能清库、强杀、重派或自动标记取消来绕过。
-3. 先保留原 installation current/previous、程序产物、配置和状态的私有恢复材料。
-   在该设备本地构建候选，或传入同 OS/架构的受控构建包；不从其他架构复制 node_modules。
-4. 按 [安装与维护](home-install.md) 显式 upgrade。旧版不支持安全停机时使用旧版自己的
-   status/stop 完成空闲迁移，拒绝按保存的 PID 发送信号。只在 server 协议兼容后切换。
-5. 回读实际启动版本、Node、connected 和 inventory；随后用新 runId 与合成内容验证
-   两轮上下文、MCP、原生审批及送达、事件、断线只读查询与 release/forget。记录真实
-   cancelled 终态才可声明取消通过；缺少证据保持 unknown，停止后续变更。
-6. 所有任务终态明确且安全释放后验证显式回滚和恢复候选，再核对旧身份、配对、配置、
-   历史与用户文件。程序回滚不会回滚数据库、任务或已发生的外部效果。实际注销/登录由
-   设备所有者在合适时段操作并单独记录，不为验收远程强制注销。
+```sh
+docker build -t harness-dock-server:<固定提交> .local/bundles/candidate/server
+pnpm package:local --bundles .local/bundles/candidate \
+  --output .local/distribution/linux-candidate --server-image harness-dock-server:<固定提交>
+```
 
-已有设备升级只建立升级证据。全新安装另选没有 dock 状态的目录或干净用户环境：
-使用新的测试配对身份、独立端口和工作根，按 README 初始化、安装、执行、停止；
-不要让两个 Daemon 同时使用原 nodeId 或同一 SQLite 状态目录。若环境不具备，明确保留待验收。
+命令只导出已存在的本地 Linux 镜像，不推送 registry、不运行或部署服务。摘要用于完整性检查，不替代源码来源和发布者认证。
 
-## 隐私与第三方分发
+## CI
 
-检查实际待发布内容，包括新文件、历史、归档、软链目标和 license/notice。密钥扫描
-与语义复核分别成立：扫描通过不代表公司内部地址、私人部署、个人邮箱、配对信息或
-使用状态已脱敏。只发布本仓，排除 `.local/`、`.serena/`、凭据、日志、数据库、
-原生会话与相邻项目。真实信息清理不改写已发生的实验结论。
+CI 在 main push、pull request 和手动触发时运行 macOS/Linux 构建、类型、确定性测试、独立离线分发及依赖审计，不提供 Provider 凭据。
 
-每个运行包须包含项目 LICENSE、THIRD_PARTY_NOTICES.md/json；索引引用的原始许可
-文件必须存在，补丁与说明随 daemon 分发。原生依赖升级后重新检查其平台包及上游
-NOTICE，不只依赖 package.json 的 SPDX 标签。详见
-[第三方说明](../THIRD_PARTY_NOTICES.md)。
+在 Actions 手动运行 CI 并启用 prepare_artifacts，才额外生成可下载候选包；Linux 作业构建并导出 server 镜像。核对工作流成功状态、源码提交、平台、artifact 摘要和 release.json；配置文件存在不代表实际构建成功。
 
-## 冻结版本与发布
+真实 Codex 模型检查需在已登录的受控设备显式执行，见 [验证方法](validation.md)。设备首装、升级和回滚另按 [设备维护](device.md) 验收。
 
-维护者复核完成后，使用仓库维护身份提交已审查的候选，并确认工作区干净。首个
-Alpha 可使用 `0.1.0-alpha.1`，届时同步所有 workspace 版本和锁文件，把 CHANGELOG
-的 Unreleased 转成该版本，再运行对应候选的门禁；不可在 dirty 工作区给旧 HEAD
-打标签冒充新实现。记录提交、版本、平台、产物摘要和原生依赖版本。
+## 交付检查
 
-仓库保持 private，直到所有必要验收完成且 Owner 明确授权公开。公开前验证私密
-漏洞报告入口，复核最终许可和归档。包继续保持 private；首版不发布 npm。公开
-Release、现用服务升级和云端部署各自记录，不由 Git push 或测试通过推导完成。
+- 冻结的源码、版本、依赖和变更说明一致；工作区清洁。
+- 运行包和 SDK 在仓库外可安装、编译与启动，许可和补丁完整。
+- 真实能力有对应环境证据；不把协议 ready 当作全部工具可用。
+- 实际归档、完整待分发历史与软链目标无凭据、私人地址或相邻项目内容。
+- 独立设备的安装和升级限制已明确，恢复材料由所有者保存。
+
+密钥扫描与隐私语义复核分别执行。仅分发本仓库，不打包本机 .local/、认证、会话、日志或相邻仓库。仓库可见性、公共 Release、npm/镜像发布和现用服务部署需要各自明确授权。

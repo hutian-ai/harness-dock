@@ -5,8 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { initializeDevice, parseDevicePairing, readConfig } from './config.ts';
 import { control } from './local-control.ts';
-import { installationRoot, manageInstallation, readInstallation, startInstalled } from './installation.ts';
-import { startBackground } from './process-management.ts';
 
 process.umask(0o077);
 try {
@@ -15,10 +13,15 @@ try {
     mode: { type: 'string' }, pairing: { type: 'string' }, 'node-id': { type: 'string' }, token: { type: 'string' }, 'ca-file': { type: 'string' },
     help: { type: 'boolean', short: 'h' }, 'background-log': { type: 'boolean' },
     bundle: { type: 'string' }, 'install-dir': { type: 'string' }, node: { type: 'string' }, disable: { type: 'boolean' },
+    version: { type: 'boolean' }, json: { type: 'boolean' }, autostart: { type: 'boolean' },
   } });
-  if (!command || values.help || command === 'help') {
+  if (values.version) console.log(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version);
+  else if (!command || values.help || command === 'help') {
     console.log('harness-dock-daemon init --cwd <directory> [--home .local/device] [--endpoint wss://controller.example/] [--pairing <device-pairing.json>]\nharness-dock-daemon <run|start|status|stop|logs> [config.json]\nharness-dock-daemon <install|upgrade> [config.json] --bundle <daemon-bundle> [--node <node>] [--install-dir <directory>]\nharness-dock-daemon rollback [config.json] [--install-dir <directory>]\nharness-dock-daemon autostart [config.json] [--disable] [--install-dir <directory>]\nDefault config: .local/device/config.json. start runs in the background; run stays in the foreground.\nManaged installs keep releases separate from device state. autostart enables a macOS user LaunchAgent and starts it; --disable stops and unregisters it.');
-  } else if (command === 'init') {
+    console.log('harness-dock-daemon setup --cwd <directory> --home <private-directory> --pairing <device-pairing.json> --bundle <daemon-bundle> [--autostart]\nharness-dock-daemon doctor [config.json] [--json]\nharness-dock-daemon --version\nsetup installs and starts this device only; --autostart explicitly enables login startup. doctor sends no model prompt.');
+  } else if (command === 'doctor') {
+    await (await import('./doctor.ts')).deviceDoctor(resolve(argument ?? process.env.HARNESS_DOCK_INSTALLED_CONFIG ?? '.local/device/config.json'), values.json);
+  } else if (command === 'init' || command === 'setup') {
     if (!values.cwd) throw new Error('init requires --cwd');
     if (values.mode && values.mode !== 'device') throw new Error('unsupported_mode');
     {
@@ -29,11 +32,31 @@ try {
         if (!file.isFile() || file.size > 16_384 || process.platform !== 'win32' && (file.mode & 0o077)) throw new Error('invalid_pairing_file_permissions');
         pairing = parseDevicePairing(JSON.parse(await readFile(values.pairing, 'utf8')));
       }
-      console.log(JSON.stringify(await initializeDevice({ home: values.home ?? '.local/device', cwd: values.cwd, endpoint: pairing.endpoint ?? values.endpoint, nodeId: pairing.nodeId ?? values['node-id'], token: pairing.token ?? values.token, caFile: values['ca-file'] }), null, 2));
+      const options = { home: values.home ?? '.local/device', cwd: values.cwd, endpoint: pairing.endpoint ?? values.endpoint, nodeId: pairing.nodeId ?? values['node-id'], token: pairing.token ?? values.token, caFile: values['ca-file'] };
+      if (command === 'init') console.log(JSON.stringify(await initializeDevice(options), null, 2));
+      else {
+        if (!values.pairing || !values.bundle) throw new Error('setup requires --pairing and --bundle');
+        const path = resolve(options.home, 'config.json');
+        try {
+          const existing = await readConfig(path);
+          if (existing.nodeId !== pairing.nodeId || existing.token !== pairing.token || existing.endpoint !== pairing.endpoint || existing.cwd !== resolve(values.cwd))
+            throw new Error('setup_identity_conflict: existing device was preserved; use its installed entrypoint');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          await initializeDevice(options);
+        }
+        const { installationRoot, readInstallation, manageInstallation, startInstalled } = await import('./installation.ts');
+        const root = installationRoot(path, values['install-dir']);
+        if (!await readInstallation(root, path)) await manageInstallation('install', { config: path, root, bundle: values.bundle, runtime: values.node });
+        const result = values.autostart ? await manageInstallation('autostart', { config: path, root }) : await startInstalled(path, root);
+        console.log(JSON.stringify({ configPath: path, installation: root, result, next: 'Run the installed doctor command. Connected is not model execution verification.' }, null, 2));
+      }
     }
   } else {
     if (!['run', 'start', 'status', 'stop', 'logs', 'install', 'upgrade', 'rollback', 'autostart'].includes(command)) throw new Error(`Unknown command: ${command}`);
     const path = resolve(argument ?? process.env.HARNESS_DOCK_INSTALLED_CONFIG ?? '.local/device/config.json');
+    const { installationRoot, manageInstallation, readInstallation, startInstalled } = await import('./installation.ts');
+    const { startBackground } = await import('./process-management.ts');
     const root = installationRoot(path, values['install-dir'] ?? process.env.HARNESS_DOCK_INSTALL_DIR);
     const config = await readConfig(path);
     if (command === 'install' || command === 'upgrade' || command === 'rollback' || command === 'autostart') {
