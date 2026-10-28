@@ -171,9 +171,6 @@ importers:
 
   .:
     devDependencies:
-      '@agentclientprotocol/sdk':
-        specifier: 1.4.0
-        version: 1.4.0(zod@4.6.7)
       '@modelcontextprotocol/client':
         specifier: 2.3.0
         version: 2.3.0
@@ -216,6 +213,8 @@ importers:
       zod:
         specifier: 4.6.6
         version: 4.6.6
+
+  apps/docs-site: {}
 
   apps/server:
     dependencies:
@@ -264,9 +263,6 @@ importers:
       acpx:
         specifier: 0.21.1
         version: 0.21.1(patch_hash=61e25a4e66ad1926d9c6aa01fc870fd2ae7a06c919996b6a8c3ffc465efd9beb)
-      diff:
-        specifier: 8.0.3
-        version: 8.0.3
       execa:
         specifier: 10.0.1
         version: 10.0.1
@@ -676,10 +672,6 @@ packages:
     resolution: {integrity: sha512-N+MeXYoqr3pOgn8xfyRPREN7gHakLYjhsHhWGT3fWAiL4IkAt0iDw14QiiEm2bE30c5XX5q0FtAA3CK5f9/BUg==}
     engines: {node: '>=12'}
 
-  diff@8.0.3:
-    resolution: {integrity: sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ==}
-    engines: {node: '>=0.3.1'}
-
   diff@9.0.0:
     resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
     engines: {node: '>=0.3.1'}
@@ -1061,7 +1053,6 @@ snapshots:
       '@agentclientprotocol/sdk': 1.4.0(zod@4.6.6)
       '@modelcontextprotocol/server': 2.3.0
       acpx: 0.21.1(patch_hash=61e25a4e66ad1926d9c6aa01fc870fd2ae7a06c919996b6a8c3ffc465efd9beb)
-      diff: 8.0.3
       execa: 10.0.1
     transitivePeerDependencies:
       - bare-abort-controller
@@ -1238,8 +1229,6 @@ snapshots:
       default-browser-id: 5.0.1
 
   define-lazy-prop@3.0.0: {}
-
-  diff@8.0.3: {}
 
   diff@9.0.0: {}
 

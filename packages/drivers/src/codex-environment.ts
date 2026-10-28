@@ -150,7 +150,7 @@ export async function discoverCodexInstallation(options: { environment: NodeJS.P
   const available = candidates.filter((candidate, index) => candidates.findIndex(other => other.path === candidate.path) === index);
   for (const candidate of available) {
     if (!await usableFile(candidate.path)) continue;
-    return { ...descriptor, status: 'installed', executable: await realpath(candidate.path), source: candidate.source, candidates: available.map(value => value.path), version: await installedVersion(candidate.path, 'codex') };
+    return { ...descriptor, status: 'installed', executable: await realpath(candidate.path), source: candidate.source, candidates: available.map(value => value.path), version: await installedVersion(candidate.path) };
   }
   return { ...descriptor, reason: explicit ? 'Configured executable not found' : 'Supported installation not found' };
 }

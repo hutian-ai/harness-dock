@@ -1,7 +1,7 @@
 import type { ProviderOverride } from '@harness-dock/drivers';
 
 const baseVariables = new Set(['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT']);
-const discoveryVariables = new Set(['CODEX_HOME', 'CODEX_CLI_PATH', 'DSH_HOME']);
+const discoveryVariables = new Set(['CODEX_HOME', 'CODEX_CLI_PATH']);
 
 /** Dependency values are chosen in protected local config, never copied from the whole host. */
 export const providerDependencyVariables = [

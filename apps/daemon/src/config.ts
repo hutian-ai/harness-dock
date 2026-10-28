@@ -10,23 +10,21 @@ import { z } from 'zod';
 export type NodeIdentity = { nodeId: string; endpoint: string; token: string; caFile?: string; };
 export interface DeviceConfig extends NodeIdentity { mode: 'device'; cwd: string; stateDir: string; resources?: Partial<DeviceResourceLimits>; providers?: Partial<Record<ProviderKey, ProviderOverride>> }
 const absolutePath = (error: string) => z.string({ error }).refine(isAbsolute, { error });
-const providerOverride = z.preprocess(value => Array.isArray(value) && !value.length ? {} : value, z.strictObject({
+const providerOverride = z.strictObject({
   home: absolutePath('invalid_provider_home').optional(),
   executable: z.string({ error: 'invalid_provider_executable' }).optional(),
   disabled: z.boolean({ error: 'invalid_provider_disabled' }).optional(),
   environment: z.custom<Record<string, string>>(isProviderEnvironment, { error: 'invalid_provider_environment' }).optional(),
-}, { error: 'invalid_provider_override' }));
-const deviceConfig = z.looseObject({
+}, { error: 'invalid_provider_override' });
+const deviceConfig = z.strictObject({
   nodeId: id, endpoint: z.unknown(),
   token: z.string({ error: 'weak_token' }).min(32, { error: 'weak_token' }),
   mode: z.literal('device', { error: 'unsupported_mode' }),
   resources: z.record(z.string(), z.unknown(), { error: 'invalid_resource_limit' }).optional(),
   cwd: absolutePath('Node directories must be absolute'), stateDir: absolutePath('Node directories must be absolute'),
-  caFile: z.preprocess(value => value || undefined, absolutePath('Node directories must be absolute').optional()),
-  // Preserve the old optional/empty override inputs; validation does not rewrite the stored config.
-  providers: z.preprocess(value => value ? Object.fromEntries(Object.entries(value)) : undefined,
-    z.partialRecord(z.enum(['codex', 'deepseek-harness']), providerOverride, { error: 'invalid_provider_override' }).optional()),
-});
+  caFile: absolutePath('Node directories must be absolute').optional(),
+  providers: z.partialRecord(z.enum(['codex']), providerOverride, { error: 'invalid_provider_override' }).optional(),
+}, { error: 'invalid_device_config' });
 const devicePairing = z.strictObject({ nodeId: z.string(), token: z.string(), endpoint: z.string() });
 export function parseDevicePairing(input: unknown): Pick<NodeIdentity, 'nodeId' | 'token' | 'endpoint'> {
   const parsed = devicePairing.safeParse(input);

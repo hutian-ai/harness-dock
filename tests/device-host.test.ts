@@ -30,7 +30,7 @@ test('an approval holds only its own session; parallel cancellation, output and 
   let starts = 0;
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 },
-    providers: { codex: { executable, home: root }, 'deepseek-harness': { disabled: true } },
+    providers: { codex: { executable, home: root } },
   }, createProviderAdapters(() => ({
     inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: false } }),
     reconcile: async () => null, close: async () => {},
@@ -58,6 +58,8 @@ test('an approval holds only its own session; parallel cancellation, output and 
     return null;
   });
   await host.inventory();
+  await assert.rejects(host.execute({ provider: 'other', runId: 'unsupported', prompt: 'synthetic' }), /unsupported_provider/);
+  assert.equal(starts, 0, 'unsupported Providers must be rejected before dispatch');
   const request = (runId: string, sessionKey = runId) => ({ provider: 'codex', runId, sessionKey, prompt: runId, model: 'synthetic' });
   await host.prepare({ runId: 'capacity' });
   const growth = join(root, 'state', 'provider-growth');
@@ -256,42 +258,6 @@ test('maintenance shutdown refuses a pending admission or unknown result and res
     assert.throws(() => recovered.closeIfIdle(), /unresolved_execution/);
     assert.deepEqual(recovered.maintenanceStatus().unresolvedRunIds, ['unknown']);
   } finally { await recovered.close(); }
-});
-
-
-test('ACP probes preserve base environment and exclude inherited control secrets', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'dock-device-env-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const output = join(root, 'observations.jsonl'), executable = join(root, 'provider');
-  await writeFile(executable, String.raw`#!${process.execPath}
-const {appendFileSync} = require('node:fs');
-appendFileSync(${JSON.stringify(output)}, JSON.stringify({
-  secret: process.env.DEVICE_TEST_CONTROL_SECRET,
-  path: process.env.PATH, home: process.env.HOME, providerHome: process.env.DSH_HOME
-}) + '\n');
-console.log('0.0.0');
-`, { mode: 0o700 });
-  const previous = process.env.DEVICE_TEST_CONTROL_SECRET;
-  process.env.DEVICE_TEST_CONTROL_SECRET = 'synthetic-control-secret';
-  t.after(() => {
-    if (previous === undefined) delete process.env.DEVICE_TEST_CONTROL_SECRET;
-    else process.env.DEVICE_TEST_CONTROL_SECRET = previous;
-  });
-  const providerHome = join(root, 'provider-home');
-  const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
-    endpoint: 'ws://127.0.0.1:48518/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { disabled: true },
-      'deepseek-harness': { executable, home: providerHome } } });
-  t.after(() => host.close());
-  await host.inventory();
-  const observations = (await readFile(output, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-  assert.equal(observations.length, 2); // Version and command checks for the configured ACP Provider.
-  for (const observation of observations) {
-    assert.equal(observation.secret, undefined);
-    assert.equal(observation.path, process.env.PATH);
-    assert.equal(observation.home, process.env.HOME);
-  }
-  assert.equal(observations.filter(item => item.providerHome === providerHome).length, 2);
 });
 
 

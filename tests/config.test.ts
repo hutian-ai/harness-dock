@@ -80,15 +80,17 @@ test('server config file checks remain separate from schema validation', async t
   await assert.rejects(readServerConfig(directory), /invalid_config_file/);
 });
 
-test('device config keeps optional compatibility while rejecting unsafe directories and overrides', async t => {
+test('device config accepts Codex overrides and rejects unknown or malformed configuration', async t => {
   const directory = await temporary(t), path = join(directory, 'config.json');
   const base = { mode: 'device', nodeId: randomUUID(), token: ' '.repeat(32), endpoint: 'ws://127.0.0.1:1/', cwd: directory, stateDir: join(directory, 'state') };
   const read = async (input: object) => { await writeFile(path, JSON.stringify(input), { mode: 0o600 }); return await readConfig(path); };
-  const optional = { ...base, extra: 'retained', caFile: '', providers: { codex: { executable: '', disabled: false } } };
-  assert.deepEqual(await read(optional), optional, 'daemon config permits extra top-level fields without dropping them');
+  const optional = { ...base, providers: { codex: { disabled: false } } };
+  assert.deepEqual(await read(optional), optional);
+  assert.deepEqual(await read(base), base);
   for (const providers of [null, false, 0, '', 1, [], { codex: [] }])
-    assert.deepEqual(await read({ ...base, providers }), { ...base, providers }, 'optional legacy empty inputs are not rewritten');
+    await assert.rejects(read({ ...base, providers }), /invalid_provider_override/);
   for (const [change, message] of [
+    [{ extra: true }, 'invalid_device_config'],
     [{ token: 'short' }, 'weak_token'], [{ mode: 'other' }, 'unsupported_mode'],
     [{ cwd: 'relative' }, 'Node directories must be absolute'],
     [{ caFile: 'relative' }, 'Node directories must be absolute'],
@@ -107,13 +109,12 @@ test('device config keeps optional compatibility while rejecting unsafe director
 test('provider dependencies are local explicit selections and cannot replace execution identity or policy', () => {
   const inherited = {
     PATH: '/usr/bin', HOME: '/home/example', TMPDIR: '/tmp/example', TEMP: '/tmp/example',
-    CODEX_HOME: '/home/example/.codex', DSH_HOME: '/home/example/.dsh',
+    CODEX_HOME: '/home/example/.codex',
     HTTPS_PROXY: 'http://inherited.example:8080', NODE_EXTRA_CA_CERTS: '/inherited/ca.pem',
     NODE_OPTIONS: '--require=untrusted.js', HARNESS_DOCK_TOKEN: 'synthetic-controller-secret',
   };
   const daemon = daemonEnvironment(inherited);
   assert.equal(daemon.CODEX_HOME, inherited.CODEX_HOME);
-  assert.equal(daemon.DSH_HOME, inherited.DSH_HOME);
   assert.equal(daemon.HARNESS_DOCK_TOKEN, undefined);
   assert.equal(daemon.NODE_OPTIONS, undefined);
   assert.equal(daemon.HTTPS_PROXY, undefined, 'dependency inheritance requires an explicit local selection');
@@ -125,7 +126,7 @@ test('provider dependencies are local explicit selections and cannot replace exe
   assert.deepEqual(providerEnvironment({ environment: {} }, {}), {});
   assert.deepEqual(providerEnvironment({ environment: Object.fromEntries(providerDependencyVariables.map(key => [key, 'selected'])) }, {}),
     Object.fromEntries(providerDependencyVariables.map(key => [key, 'selected'])));
-  for (const key of ['PATH', 'HOME', 'CODEX_HOME', 'CODEX_PATH', 'CODEX_APP_TOOLS_PIPE_PATH', 'DSH_HOME', 'NODE_OPTIONS', 'HARNESS_DOCK_TOKEN', 'API_TOKEN'])
+  for (const key of ['PATH', 'HOME', 'CODEX_HOME', 'CODEX_PATH', 'CODEX_APP_TOOLS_PIPE_PATH', 'NODE_OPTIONS', 'HARNESS_DOCK_TOKEN', 'API_TOKEN'])
     assert.throws(() => providerEnvironment({ environment: { [key]: 'synthetic-private-value' } }, inherited), { message: 'invalid_provider_environment' });
   for (const environment of [null, [], 'all', { HTTPS_PROXY: 1 }, { HTTPS_PROXY: 'bad\0value' }, { HTTPS_PROXY: 'x'.repeat(16_385) }])
     assert.throws(() => providerEnvironment({ environment } as never, inherited), { message: 'invalid_provider_environment' });
@@ -136,11 +137,10 @@ test('device config protects selected dependency values and returns them without
   const base = { mode: 'device', nodeId: randomUUID(), token: token(), endpoint: 'ws://127.0.0.1:1/', cwd: directory, stateDir: join(directory, 'state') };
   const config = { ...base, providers: {
     codex: { environment: { HTTPS_PROXY: 'http://proxy.example:8080', NODE_EXTRA_CA_CERTS: '/local/ca.pem' } },
-    'deepseek-harness': { environment: { NO_PROXY: 'localhost' } },
   } };
   await writeFile(path, JSON.stringify(config), { mode: 0o600 });
   assert.deepEqual(await readConfig(path), config);
-  assert.equal(providerEnvironment(config.providers['deepseek-harness'], {}).HTTPS_PROXY, undefined, 'selections are scoped to one Provider');
+  assert.equal(providerEnvironment(undefined, {}).HTTPS_PROXY, undefined, 'selections do not become inherited dependencies');
   if (process.platform !== 'win32') {
     await chmod(path, 0o644);
     await assert.rejects(readConfig(path), { message: 'provider_environment_config_requires_owner_only' });

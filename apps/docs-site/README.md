@@ -74,7 +74,7 @@ SDK 接入：启动预览后访问 `/sdk/`。
 
 ### drivers
 
-扩展 Harness：启动预览后访问 `/drivers/`。
+Codex 驱动：启动预览后访问 `/drivers/`。
 
 ### support
 

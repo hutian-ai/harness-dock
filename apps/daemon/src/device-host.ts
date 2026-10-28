@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { arch, hostname, platform, release } from 'node:os';
-import { readdir } from 'node:fs/promises';
 import {
   discoverProviders, createProviderAdapters, boundedObservation, observeStartup, startStartupSpan,
   type ProviderAdapters, type ProviderAdapter, type ProviderCapabilities, type McpInvocation,
@@ -45,7 +44,7 @@ function canonical(value: unknown): string {
 function executionInput(value: unknown): DeviceExecuteInput {
   const input = object(value);
   for (const key of Object.keys(input)) if (!['provider', 'runId', 'sessionKey', 'prompt', 'model', 'config', 'resumeSessionId', 'previousRunId', 'retainSession', 'tools'].includes(key)) throw new Error('unsupported_execution_field');
-  if (!['codex', 'deepseek-harness'].includes(String(input.provider))) throw new Error('unsupported_provider');
+  if (input.provider !== 'codex') throw new Error('unsupported_provider');
   identity(input.runId);
   for (const key of ['sessionKey', 'model', 'resumeSessionId', 'previousRunId']) if (input[key] !== undefined) identity(input[key]);
   if (typeof input.prompt !== 'string' || !input.prompt || input.prompt.length > 1_000_000) throw new Error('invalid_prompt');
@@ -65,7 +64,7 @@ function executionInput(value: unknown): DeviceExecuteInput {
   return input as unknown as DeviceExecuteInput;
 }
 
-type ActiveExecution = { sessionKey: string; provider: ProviderKey; nativeSessionId?: string; adapter: ProviderAdapter; runId: string; controller: AbortController; promise: Promise<unknown>; cancellationRequested: boolean; historyTruncated: boolean; steer?: (text: string) => Promise<'accepted' | 'rejected' | 'unknown'> };
+type ActiveExecution = { sessionKey: string; provider: ProviderKey; nativeSessionId?: string; adapter: ProviderAdapter; runId: string; controller: AbortController; promise: Promise<unknown>; historyTruncated: boolean; steer?: (text: string) => Promise<'accepted' | 'rejected' | 'unknown'> };
 
 /** Owns device processes and evidence independently of any controller connection. */
 export class DeviceHost {
@@ -320,14 +319,13 @@ export class DeviceHost {
       }
       const adapter = retained.adapter;
       const config = input.config ?? {};
-      const callerSkillsPresent = (await readdir(prepared.directories.skillDirectory)).length > 0;
-      adapter.validate({ model: input.model, config, resumeSessionId: input.resumeSessionId, callerSkillsPresent });
+      adapter.validate({ model: input.model, config });
       const controller = new AbortController();
       const environment = adapter.environment({ sessionKey: prepared.sessionKey, workdir: prepared.directories.workdir,
         config, skillDirectory: prepared.directories.skillDirectory });
       const record: StoredExecution = { runId: input.runId, provider: input.provider, input: fingerprint, state: 'running', environment };
       this.#store.admit(record); // Persist before any provider process or prompt is started.
-      const active = { runId: input.runId, sessionKey: key, provider: input.provider, nativeSessionId: input.resumeSessionId, adapter, controller, cancellationRequested: false, historyTruncated: false, promise: Promise.resolve<unknown>(null), steer: undefined as ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | undefined };
+      const active = { runId: input.runId, sessionKey: key, provider: input.provider, nativeSessionId: input.resumeSessionId, adapter, controller, historyTruncated: false, promise: Promise.resolve<unknown>(null), steer: undefined as ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | undefined };
       this.#active.set(input.runId, active);
       active.promise = (async () => {
         const signal = AbortSignal.any([controller.signal, this.#lifetime.signal]);
@@ -382,8 +380,8 @@ export class DeviceHost {
           const result = await adapter.execute({ runId: input.runId, sessionKey: prepared.sessionKey,
             prompt: input.prompt, model: input.model, config, resumeSessionId: input.resumeSessionId,
             previousRunId: input.previousRunId, retainSession: input.retainSession ?? false,
-            workdir: prepared.directories.workdir, skillDirectory: prepared.directories.skillDirectory, callerSkillsPresent,
-            signal, cancellationRequested: () => active.cancellationRequested, tools: input.tools, invocation,
+            workdir: prepared.directories.workdir, skillDirectory: prepared.directories.skillDirectory,
+            signal, tools: input.tools, invocation,
             ready, observe: (kind, payload) => observations.write(kind, payload), permission,
             steering: steer => { active.steer = steer ?? undefined; void this.#call(input.runId, 'steering', { available: Boolean(steer) }).catch(() => {}); },
           }, environment);
@@ -424,7 +422,7 @@ export class DeviceHost {
     this.#assertOpen();
     identity(runId);
     const active = this.#active.get(runId);
-    if (active) { active.cancellationRequested = true; active.controller.abort(new Error('cancel_requested')); return { requested: true }; }
+    if (active) { active.controller.abort(new Error('cancel_requested')); return { requested: true }; }
     return { requested: false, state: this.#store.get(runId)?.state ?? null };
   }
   async steer(runId: string, text: string) {

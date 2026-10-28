@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { runBoundedCommand } from './process-command.ts';
-import type { DiscoveredProvider, ProviderKey } from './discovery.ts';
+import type { DiscoveredProvider } from './discovery.ts';
 
 type Candidate = { path: string; source: NonNullable<DiscoveredProvider['source']> };
 
@@ -13,14 +13,14 @@ export async function usableFile(path: string, nodeScript = false): Promise<bool
   } catch { return false; }
 }
 
-export async function installedVersion(path: string, provider: ProviderKey): Promise<string | null> {
+export async function installedVersion(path: string): Promise<string | null> {
   try {
     const canonical = await realpath(path);
     let directory = dirname(canonical);
     for (let depth = 0; depth < 6; depth += 1) {
       try {
         const pkg = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')) as { name?: string; version?: string };
-        const expected = provider === 'codex' ? /^@openai\/codex$/u : /deepseek|dsh/iu;
+        const expected = /^@openai\/codex$/u;
         if (typeof pkg.name === 'string' && expected.test(pkg.name) && typeof pkg.version === 'string') return pkg.version;
       } catch { /* A CLI can be a native executable with no package metadata. */ }
       const parent = dirname(directory);
@@ -28,14 +28,12 @@ export async function installedVersion(path: string, provider: ProviderKey): Pro
       directory = parent;
     }
   } catch { /* Missing metadata does not imply a missing installation. */ }
-  if (provider === 'codex') {
-    try {
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-        ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SYSTEMROOT'].includes(key.toUpperCase())));
-      const result = await runBoundedCommand(path, ['--version'], { env, timeoutMs: 5_000, maxOutputCharacters: 4_096 });
-      return result.exitCode === 0 ? result.stdout.trim().replace(/^codex-cli\s+/u, '') : null;
-    } catch { /* Installation discovery is not protocol readiness. */ }
-  }
+  try {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SYSTEMROOT'].includes(key.toUpperCase())));
+    const result = await runBoundedCommand(path, ['--version'], { env, timeoutMs: 5_000, maxOutputCharacters: 4_096 });
+    return result.exitCode === 0 ? result.stdout.trim().replace(/^codex-cli\s+/u, '') : null;
+  } catch { /* Installation discovery is not protocol readiness. */ }
   return null;
 }
 
