@@ -40,10 +40,38 @@ export interface ProviderExecution {
 export interface ProviderAdapter {
   inspect(signal: AbortSignal): Promise<ProviderInspection>;
   validate(input: Pick<ProviderExecution, 'model' | 'config' | 'resumeSessionId' | 'callerSkillsPresent'>): void;
-  environment(input: Pick<ProviderExecution, 'sessionKey' | 'workdir' | 'skillDirectory' | 'config'>): CodexHostEnvironment | undefined;
-  execute(input: ProviderExecution, environment?: CodexHostEnvironment): Promise<unknown>;
+  /** Private, durable provider context. The device stores it without interpreting it. */
+  environment(input: Pick<ProviderExecution, 'sessionKey' | 'workdir' | 'skillDirectory' | 'config'>): unknown;
+  execute(input: ProviderExecution, environment?: unknown): Promise<unknown>;
   close(): Promise<void>;
   forgetSession(sessionKey: string): Promise<void>;
+}
+export interface ProviderAdapterOptions {
+  cwd: string; stateDir: string; environment: NodeJS.ProcessEnv; inspection?: unknown;
+}
+/** Provider selection and native recovery stay behind the same driver boundary. */
+export interface ProviderAdapters {
+  create(provider: DiscoveredProvider, options: ProviderAdapterOptions, scope: 'inspection' | 'session'): ProviderAdapter;
+  reconcile(provider: string, context: unknown, runId: string, signal: AbortSignal): Promise<{ state: 'unknown' | 'completed' | 'failed' | 'cancelled' } | null>;
+  close(): Promise<void>;
+}
+export function createProviderAdapters(codex: CodexHostPort | (() => CodexHostPort) = () => new CodexHost()): ProviderAdapters {
+  const createCodex = typeof codex === 'function' ? codex : () => codex;
+  const recoveryHost = createCodex();
+  let inspectionOwnsHost = false;
+  return {
+    create(provider, options, scope) {
+      if (provider.key === 'codex' && scope === 'inspection') inspectionOwnsHost = true;
+      return createProviderAdapter(provider, { ...options, codex: scope === 'inspection' ? recoveryHost : createCodex() });
+    },
+    async reconcile(provider, context, runId, signal) {
+      // Retain the existing on-disk environment shape, including records written
+      // before this driver boundary existed. No discovery, prompt or fallback.
+      if (provider !== 'codex' || !context) return null;
+      return recoveryHost.reconcile(context as CodexHostEnvironment, runId, signal);
+    },
+    async close() { if (!inspectionOwnsHost) await recoveryHost.close(); },
+  };
 }
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const interactions = ['options', 'form', 'url'] as const;
@@ -58,7 +86,7 @@ export function createProviderAdapter(provider: DiscoveredProvider, options: {
 }): ProviderAdapter {
   if (provider.key === 'codex') {
     let inspection = options.inspection as CodexInspection;
-    const environment: ProviderAdapter['environment'] = input => ({
+    const environment = (input: Parameters<ProviderAdapter['environment']>[0]): CodexHostEnvironment => ({
       cwd: input.workdir, codexHome: provider.home!, codexBin: provider.executable!,
       stateDir: join(options.stateDir, 'providers', 'codex', digest(input.sessionKey), 'execution'),
       sandbox: 'workspace-write', skillDirectory: input.skillDirectory,
@@ -82,7 +110,7 @@ export function createProviderAdapter(provider: DiscoveredProvider, options: {
       environment,
       async execute(input, selectedEnvironment) {
         return options.codex.execute({
-          environment: selectedEnvironment!, runId: input.runId, prompt: input.prompt, model: input.model,
+          environment: selectedEnvironment as CodexHostEnvironment, runId: input.runId, prompt: input.prompt, model: input.model,
           mode: typeof input.config.mode === 'string' ? input.config.mode : undefined,
           effort: typeof input.config.effort === 'string' ? input.config.effort : undefined,
           resumeThreadId: input.resumeSessionId, previousRunId: input.previousRunId, retainSession: input.retainSession,

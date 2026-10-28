@@ -1,60 +1,34 @@
-# Contributing
+# 贡献指南
 
-harness-dock connects a controller SDK to an independent device Daemon and native
-Agent harnesses. Read [scope](docs/standalone-v1.md), [support](docs/support.md) and
-[release criteria](docs/releasing.md) before proposing a change. The only currently
-supported Provider is Codex on macOS arm64. Retained Lobi/DeepSeek implementations
-are unsupported; historical experiments do not expand this support commitment.
+harness-dock 是跨机器原生 Harness 接入与执行基础设施。先阅读 [架构](docs/architecture.md)、[支持范围](docs/support.md) 和 [构建与分发](docs/releasing.md)。当前受支持的设备为 macOS arm64 + Codex。
 
-## Development
+## 开发环境
 
-Use Node.js 22.19+ and pnpm 12.15.0. Install pnpm with
-`npm install --global pnpm@12.15.0`, then run:
+使用 Node.js 22.19+、pnpm 12.15.0：
 
 ```sh
+npm install --global pnpm@12.15.0
 pnpm install --frozen-lockfile
 pnpm check
 ```
 
-`pnpm check` builds the workspace, checks scripts/tests and runs deterministic
-boundary tests. Do not run concurrent workspace builds: injected workspace
-dependencies can be replaced during a build. Real Provider checks require local
-login and model access, run separately, and are recorded in `docs/validation.md`.
-Never add Provider credentials to CI. Offline distribution checks are:
+pnpm check 构建 workspace、检查脚本/测试类型并运行确定性控制边界测试。不要并行构建共享工作区，或直接修改现用 daemon 的运行目录。使用 TypeScript ESM、显式相对扩展名和 type-only imports。
 
-```sh
-pnpm bundle .local/bundles/contribution
-node --import tsx scripts/accept-bundle.ts .local/bundles/contribution --offline
-```
+真实 Codex 检查为 `pnpm accept:codex`，需要原生登录和模型额度；不自动执行，不在 CI 配置 Provider 凭据。独立离线分发检查见 [验证](docs/validation.md)。
 
-Choose a new bundle destination for each run. For code style, use TypeScript ESM,
-explicit relative extensions and type-only imports. Keep tests focused on
-observable behavior at control boundaries. Document protocol changes, capabilities,
-failure semantics and evidence limits in the same pull request.
+## 设计边界
 
-## Boundaries to preserve
+- Daemon 拥有 Provider 进程和待批审批，独立于连接。恢复连接不重派 prompt、工具或权限决定。
+- 缺少完成证据保持 unknown；取消请求或观察文本不证明终态。
+- Harness 拥有原生工具、插件、skills、memory 与权限，dock 使用具名薄适配连接原生环境。
+- 公共 wire 类型位于 protocol/client，调用方不依赖 daemon/drivers 或设备凭据。
+- 配置、会话、日志、服务地址、个人标识和验证原始产物留在 ignored 的 .local/。
+- package 保持 private，公开发布、服务部署与仓库可见性变更分别授权。
 
-- The Daemon owns Provider processes and pending approvals, independently of a
-  connection. Reconnection never resubmits prompts, tools or permission decisions.
-- Missing completion evidence stays unknown. Cancel requests alone do not prove
-  cancellation. Resume failure does not create a replacement session.
-- Harnesses own their tools, plugins, skills, memory and native permissions. Dock
-  selects the environment and routes required native interactions.
-- Keep credentials, logs, sessions, local service addresses, personal identifiers
-  and experimental output in ignored `.local/`. Use example domains in docs.
-- Keep packages private. npm publishing and changes to repository visibility are
-  separate maintainer actions. Do not include sibling repositories in releases.
+## 变更与报告
 
-## Reports and pull requests
+使用合成内容复现问题，说明源码提交、平台、Node/pnpm、预期/实际行为和能力限制。不要附完整配置、日志、原生认证或私人 prompt。漏洞按 [SECURITY.md](SECURITY.md) 私下报告。
 
-For ordinary bugs, include the revision, OS/architecture, Node/pnpm versions,
-sanitized reproduction and expected/actual behavior. Distinguish installation,
-protocol readiness, actual model execution and native-tool behavior. Do not attach
-complete logs, pairing files, authentication or personal conversation content.
-Use [SECURITY.md](SECURITY.md) for vulnerabilities.
+测试覆盖可观察控制边界；修改协议、能力和失败语义时同步更新文档，明确区分确定性、离线安装、真实 Provider 与实际部署证据。
 
-Keep changes narrow. Explain the user-visible result, validation and remaining
-limits. Contribute only code you have permission to license under this project's
-MIT license; retain applicable third-party notices. Configure a repository-scoped
-maintainer identity without a personal email before committing. No CLA or external
-signing service is required.
+提交使用仓库维护身份，不含个人邮箱。保留第三方许可和补丁来源；只提交有权按项目 MIT 许可贡献的内容。

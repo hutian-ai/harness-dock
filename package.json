@@ -16,9 +16,9 @@
     "daemon": "node --import tsx apps/daemon/src/cli.ts",
     "dev:daemon": "node --import tsx apps/daemon/src/cli.ts run .local/device/config.json",
     "accept:codex": "pnpm build && node --import tsx scripts/accept-codex.ts",
-    "accept:lobi": "pnpm build && node --import tsx scripts/accept-lobi.ts",
-    "accept:deepseek": "pnpm build && node --import tsx scripts/accept-deepseek.ts",
     "bundle": "pnpm build && node --import tsx scripts/bundle.ts",
+    "package:local": "node --import tsx scripts/package-release.ts",
+    "client": "node --import tsx packages/client/src/cli.ts",
     "server": "node --import tsx apps/server/src/cli.ts"
   },
   "devDependencies": {

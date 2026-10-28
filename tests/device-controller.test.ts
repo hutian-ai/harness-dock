@@ -99,7 +99,7 @@ test('device disconnect aborts callbacks and rejects uncertain mutations without
   });
   const first = await connect(controller.endpoint, pairing);
   await first.callback('execution.callback', {});
-  const mutation = peer.request('execute', { runId: randomUUID() });
+  const mutation = peer.request('execute', { provider: 'codex', runId: randomUUID(), prompt: 'synthetic' });
   const rejectedMutation = assert.rejects(mutation, /outcome may be unknown/);
   await until(() => first.requests.length === 1);
   first.socket.terminate();
@@ -127,10 +127,10 @@ test('pending overload disconnects only that device and never replays its mutati
   const first = await connect(controller.endpoint, a), other = await connect(controller.endpoint, b);
   t.after(() => { first.socket.terminate(); other.socket.terminate(); });
   const peer = controller.node(a.nodeId)!;
-  const requests = [peer.request('execute', { runId: 'one' }), peer.request('execute', { runId: 'two' })];
+  const requests = [peer.request('execute', { provider: 'codex', runId: 'one', prompt: 'synthetic' }), peer.request('execute', { provider: 'codex', runId: 'two', prompt: 'synthetic' })];
   const settled = Promise.allSettled(requests);
   await until(() => first.requests.length === 2);
-  await assert.rejects(peer.request('execute', { runId: 'three' }), /device_pending_limit/);
+  await assert.rejects(peer.request('execute', { provider: 'codex', runId: 'three', prompt: 'synthetic' }), /device_pending_limit/);
   assert.ok((await settled).every(result => result.status === 'rejected' && /outcome may be unknown/.test(String(result.reason))));
   await until(() => !peer.connected);
   const healthy = controller.node(b.nodeId)!.request('inventory');

@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      prepare_artifacts:
+        description: Prepare downloadable candidate artifacts (no release, image push or deployment)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,6 +45,27 @@ jobs:
         run: pnpm bundle .local/ci-bundle
       - name: Verify offline distribution without Provider credentials
         run: node --import tsx scripts/accept-bundle.ts .local/ci-bundle --offline
+      - name: Build Linux server image locally (never push or run)
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_artifacts && runner.os == 'Linux'
+        run: docker build -t "harness-dock-server:$GITHUB_SHA" .local/ci-bundle/server
+      - name: Prepare local candidate archives
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_artifacts
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            pnpm package:local --bundles .local/ci-bundle --output .local/ci-artifacts --server-image "harness-dock-server:$GITHUB_SHA"
+          else
+            test "$(node -p process.arch)" = arm64
+            pnpm package:local --bundles .local/ci-bundle --output .local/ci-artifacts
+          fi
+      - name: Retain candidate artifacts for explicit download
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-${{ matrix.os }}-${{ github.sha }}
+          path: .local/ci-artifacts/
+          retention-days: 14
+          if-no-files-found: error
 
   audit:
     name: Known dependency advisories

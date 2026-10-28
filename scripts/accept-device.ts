@@ -17,6 +17,14 @@ export async function until(check: () => boolean | Promise<boolean>, label: stri
   const deadline = Date.now() + timeoutMs;
   while (!await check()) { if (Date.now() >= deadline) throw new Error(`timeout:${label}`); await delay(50); }
 }
+/** Only a confirmed pre-admission busy rejection is retryable here. This helper
+ * never sends execute, and a lost response immediately stops the acceptance. */
+export async function prepareAfterIdle(peer: { request(method: 'prepare', params: { runId: string; sessionKey: string; files: [] }): Promise<unknown> }, input: { runId: string; sessionKey: string; files: [] }): Promise<void> {
+  await until(async () => {
+    try { await peer.request('prepare', input); return true; }
+    catch (error) { if (error instanceof Error && error.message === 'busy') return false; throw error; }
+  }, 'idle_release_before_preparation');
+}
 /** Real provider acceptance always uses an isolated workdir and a distinct node/application identity. */
 export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harness', paths = {
   daemon: resolve('apps/daemon/dist/cli.js'), server: resolve('apps/server/dist/index.js'), client: resolve('packages/client/dist/index.js'),
@@ -122,7 +130,7 @@ export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harnes
     // Codex cold resume must survive idle resource release.
     if (provider === 'codex') await delay(3000);
     activeRun = randomUUID();
-    await peer.request('prepare', { runId: activeRun, sessionKey, files: [] });
+    await prepareAfterIdle(peer, { runId: activeRun, sessionKey, files: [] });
     const second = await peer.request<Result>('execute', { ...input, runId: activeRun, previousRunId: firstRun,
       resumeSessionId: first.result.threadId ?? first.result.sessionId,
       prompt: 'Without calling tools, reply only with the context marker I asked you to remember in the previous turn.' }, 240000);

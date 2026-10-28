@@ -14,6 +14,7 @@ import {
   isLoopback,
   type DeviceNodeSummary,
   type DeviceTransportLimits,
+  type DeviceMethod, type DeviceRequestArgs, type DeviceRequestResult,
 } from '@harness-dock/protocol';
 
 /** A callback belongs to the authenticated connection that received it. */
@@ -54,6 +55,8 @@ export class DevicePeer {
   summary(): DeviceNodeSummary {
     return { nodeId: this.nodeId, label: this.label, daemonId: this.daemonId, connected: this.connected };
   }
+  request<M extends DeviceMethod>(method: M, ...args: DeviceRequestArgs<M>): Promise<DeviceRequestResult<M>>;
+  request<T = never>(method: [T] extends [never] ? never : string, params?: object, timeoutMs?: number): Promise<T>;
   async request<T>(method: string, params: object = {}, timeoutMs = 30_000): Promise<T> {
     const connection = this.connection;
     if (!connection || !this.connected) throw new DockError('device_disconnected');
