@@ -3,13 +3,12 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { LobiAcpExecutor } from "../packages/drivers/src/lobi.ts";
 import { DeepSeekAcpExecutor } from "../packages/drivers/src/deepseek.ts";
 import { ACP_PROBE_TOOLS } from "../packages/drivers/src/acp-types.ts";
 import type { McpToolCall } from "../packages/drivers/src/mcp-bridge.ts";
 import type { ToolDelivery } from "../packages/drivers/src/tool-delivery.ts";
 
-const cases = ["lobi", "deepseek-harness"] as const;
+const cases = ["deepseek-harness"] as const;
 
 for (const key of cases) {
   test(
@@ -55,25 +54,10 @@ const close=()=>{if(mcp)mcp.kill();process.exit(0)}; lines.on('close',close);pro
       await chmod(executable, 0o700);
       const command = async () => ({
         exitCode: 0,
-        stdout: key === "deepseek-harness" ? "0.1.2-rc.1" : "0.1.95",
+        stdout: "0.1.2-rc.1",
         stderr: "",
       });
-      const driver =
-        key === "lobi"
-          ? new LobiAcpExecutor({
-              env: process.env,
-              executable,
-              probeCommand: command,
-              probeAcp: async () => ({
-                protocolVersion: 1,
-                loadSession: true,
-                resumeSession: true,
-                models: ["test-model"],
-                modes: ["plan", "build"],
-                mcpTools: true,
-              }),
-            })
-          : new DeepSeekAcpExecutor({
+      const driver = new DeepSeekAcpExecutor({
               env: process.env,
               executable,
               probeCommand: command,

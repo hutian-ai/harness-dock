@@ -136,11 +136,11 @@ test('device config protects selected dependency values and returns them without
   const base = { mode: 'device', nodeId: randomUUID(), token: token(), endpoint: 'ws://127.0.0.1:1/', cwd: directory, stateDir: join(directory, 'state') };
   const config = { ...base, providers: {
     codex: { environment: { HTTPS_PROXY: 'http://proxy.example:8080', NODE_EXTRA_CA_CERTS: '/local/ca.pem' } },
-    lobi: { environment: { NO_PROXY: 'localhost' } },
+    'deepseek-harness': { environment: { NO_PROXY: 'localhost' } },
   } };
   await writeFile(path, JSON.stringify(config), { mode: 0o600 });
   assert.deepEqual(await readConfig(path), config);
-  assert.equal(providerEnvironment(config.providers.lobi, {}).HTTPS_PROXY, undefined, 'selections are scoped to one Provider');
+  assert.equal(providerEnvironment(config.providers['deepseek-harness'], {}).HTTPS_PROXY, undefined, 'selections are scoped to one Provider');
   if (process.platform !== 'win32') {
     await chmod(path, 0o644);
     await assert.rejects(readConfig(path), { message: 'provider_environment_config_requires_owner_only' });

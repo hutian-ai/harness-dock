@@ -1,6 +1,6 @@
 # 贡献指南
 
-harness-dock 是跨机器原生 Harness 接入与执行基础设施。先阅读 [架构](docs/architecture.md)、[支持范围](docs/support.md) 和 [构建与分发](docs/releasing.md)。当前受支持的设备为 macOS arm64 + Codex。
+harness-dock 是跨机器原生 Harness 接入与执行基础设施。先阅读 [架构](apps/docs-site/README.md#architecture)、[支持范围](apps/docs-site/README.md#support) 和 [构建与分发](apps/docs-site/README.md#distribution)。当前受支持的设备为 macOS arm64 + Codex。
 
 ## 开发环境
 
@@ -14,7 +14,7 @@ pnpm check
 
 pnpm check 构建 workspace、检查脚本/测试类型并运行确定性控制边界测试。不要并行构建共享工作区，或直接修改现用 daemon 的运行目录。使用 TypeScript ESM、显式相对扩展名和 type-only imports。
 
-真实 Codex 检查为 `pnpm accept:codex`，需要原生登录和模型额度；不自动执行，不在 CI 配置 Provider 凭据。独立离线分发检查见 [验证](docs/validation.md)。
+真实 Codex 检查为 `pnpm accept:codex`，需要原生登录和模型额度；不自动执行，不在 CI 配置 Provider 凭据。独立离线分发检查见 [验证](apps/docs-site/README.md#verification)。
 
 ## 设计边界
 

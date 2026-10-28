@@ -5,7 +5,7 @@
 The project is preparing its first developer Alpha; no public stable release or
 long-term support branch exists. Security fixes target the current development
 candidate and, after publication, the latest Alpha. Supported environments and
-unaccepted native capabilities are listed in [docs/support.md](docs/support.md).
+unaccepted native capabilities are listed in [support guide](apps/docs-site/README.md#support).
 
 ## Reporting a vulnerability
 

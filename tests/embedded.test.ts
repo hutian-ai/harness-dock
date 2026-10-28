@@ -15,7 +15,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 test('embedding excludes host credentials while retaining the configured execution environment', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dock-embedded-env-'));
   const fixture = join(root, 'agent.mjs');
-  const name = 'HUTIAN_EMBEDDED_TEST_SECRET';
+  const name = 'DOCK_EMBEDDED_TEST_SECRET';
   const previous = process.env[name];
   const inheritedNames = ['ACPX_AUTH_DOCK_AMBIENT', 'ACPX_AUTH_DOCK_LATE', 'LC_DOCK_SECRET', 'XDG_DOCK_SECRET'];
   const inheritedPrevious = new Map(inheritedNames.map(key => [key, process.env[key]]));
@@ -168,7 +168,7 @@ test('device idle release waits for an active approval and fences shutdown again
   }
   const host = new DeviceHost({ mode: 'device', nodeId: 'synthetic-idle-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/',
     cwd: root, stateDir: join(root, 'state'), resources: { idleTimeoutMs: 30 },
-    providers: { codex: { executable, home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } }, createProviderAdapters(new HeldCodex()));
+    providers: { codex: { executable, home: root }, 'deepseek-harness': { disabled: true } } }, createProviderAdapters(new HeldCodex()));
   t.after(async () => { allow('deny'); finishClose(); await host.close(); });
   host.bind(async (_method, value) => {
     if ((value as { kind: string }).kind === 'permission') { permissionRequested = true; return approval; }
@@ -219,7 +219,7 @@ test('device admission and approval fences survive duplicate requests, cancellat
   const nativeInspection = { models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }],
     config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: true } };
   const host = new DeviceHost({ mode: 'device', nodeId: 'control-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxConcurrentExecutions: 1 },
-    providers: { codex: { executable, home: root, environment: { HTTPS_PROXY: 'http://proxy.example.test:8080' } }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } }, createProviderAdapters({
+    providers: { codex: { executable, home: root, environment: { HTTPS_PROXY: 'http://proxy.example.test:8080' } }, 'deepseek-harness': { disabled: true } } }, createProviderAdapters({
     inspect: async environment => {
       assert.equal(environment.environment?.HTTPS_PROXY, 'http://proxy.example.test:8080');
       assert.equal(environment.codexHome, root);

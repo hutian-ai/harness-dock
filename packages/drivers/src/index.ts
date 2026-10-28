@@ -1,6 +1,5 @@
 export { ExecaError } from 'execa';
 export { observeStartup, startStartupSpan } from './startup-trace.ts';
-export { LobiAcpExecutor, type LobiAcpOptions } from './lobi.ts';
 export { DeepSeekAcpExecutor, type DeepSeekAcpOptions } from './deepseek.ts';
 export { AcpProbeError, type AcpExecutor, type AcpInspection, type AcpExecutionInput, type AcpExecutionResult, type AcpFileChangeEvent } from './acp-types.ts';
 export { runBoundedCommand } from './process-command.ts';

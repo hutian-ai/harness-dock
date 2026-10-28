@@ -1,10 +1,9 @@
-import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { installedVersion, pathCandidates, usableFile } from './installation-lookup.ts';
 import { discoverCodexInstallation } from './codex-environment.ts';
 
-export type ProviderKey = 'codex' | 'lobi' | 'deepseek-harness';
+export type ProviderKey = 'codex' | 'deepseek-harness';
 export interface ProviderOverride {
   executable?: string;
   home?: string;
@@ -33,20 +32,8 @@ export interface DiscoveredProvider {
 type Candidate = { path: string; source: NonNullable<DiscoveredProvider['source']> };
 const providers: { key: ProviderKey; displayName: string; command: string; home: string; homeEnv?: string }[] = [
   { key: 'codex', displayName: 'Codex', command: 'codex', home: '.codex', homeEnv: 'CODEX_HOME' },
-  { key: 'lobi', displayName: 'Lobi', command: 'codewiz', home: '.codewiz' },
   { key: 'deepseek-harness', displayName: 'DeepSeek Harness', command: 'dsh', home: '.dsh', homeEnv: 'DSH_HOME' },
 ];
-
-async function managedLobi(home: string): Promise<Candidate[]> {
-  const root = join(home, '.codewiz', 'acp-servers', 'codewiz-cli');
-  try {
-    const versions = (await readdir(root, { withFileTypes: true }))
-      .filter(entry => entry.isDirectory() && /^\d+\.\d+\.\d+/u.test(entry.name))
-      .map(entry => entry.name)
-      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-    return versions.map(version => ({ path: join(root, version, 'node_modules', '@xhs', 'codewiz', 'bin', 'codewiz'), source: 'managed' }));
-  } catch { return []; }
-}
 
 /** Discover supported installations without reading credentials, opening login, or sending model prompts. */
 export async function discoverProviders(options: ProviderDiscoveryOptions = {}): Promise<DiscoveredProvider[]> {
@@ -71,7 +58,6 @@ export async function discoverProviders(options: ProviderDiscoveryOptions = {}):
         candidates = (await pathCandidates(executableOverride, environment, options.signal)).map(candidate => ({ ...candidate, source: 'configured' }));
       }
     } else {
-      if (provider.key === 'lobi') candidates.push(...await managedLobi(home));
       const localInstallation = (await Promise.all(candidates.map(candidate => usableFile(candidate.path, /\.[cm]?js$/u.test(candidate.path))))).some(Boolean);
       candidates.push(...await pathCandidates(provider.command, environment, options.signal, !localInstallation));
 

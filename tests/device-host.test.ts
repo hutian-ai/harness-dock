@@ -30,7 +30,7 @@ test('an approval holds only its own session; parallel cancellation, output and 
   let starts = 0;
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 },
-    providers: { codex: { executable, home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } },
+    providers: { codex: { executable, home: root }, 'deepseek-harness': { disabled: true } },
   }, createProviderAdapters(() => ({
     inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: false } }),
     reconcile: async () => null, close: async () => {},
@@ -281,11 +281,11 @@ console.log('0.0.0');
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
     endpoint: 'ws://127.0.0.1:48518/', cwd: root, stateDir: join(root, 'state'),
     providers: { codex: { disabled: true },
-      lobi: { executable }, 'deepseek-harness': { executable, home: providerHome } } });
+      'deepseek-harness': { executable, home: providerHome } } });
   t.after(() => host.close());
   await host.inventory();
   const observations = (await readFile(output, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-  assert.equal(observations.length, 4); // Version and command checks for both ACP Providers.
+  assert.equal(observations.length, 2); // Version and command checks for the configured ACP Provider.
   for (const observation of observations) {
     assert.equal(observation.secret, undefined);
     assert.equal(observation.path, process.env.PATH);

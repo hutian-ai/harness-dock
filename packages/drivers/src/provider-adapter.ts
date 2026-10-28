@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { CodexHost, type CodexHostEnvironment } from './codex-host.ts';
 import type { CodexInspection } from './codex.ts';
-import { LobiAcpExecutor } from './lobi.ts';
 import { DeepSeekAcpExecutor } from './deepseek.ts';
 import type { AcpExecutor, AcpInspection } from './acp-types.ts';
 import type { DiscoveredProvider } from './discovery.ts';
@@ -125,9 +124,7 @@ export function createProviderAdapter(provider: DiscoveredProvider, options: {
   }
   const env = { ...options.environment, ...(provider.key === 'deepseek-harness' ? { DSH_HOME: provider.home! } : {}) };
   let inspection = options.inspection as AcpInspection | undefined;
-  const executor: AcpExecutor = provider.key === 'lobi'
-    ? new LobiAcpExecutor({ executable: provider.executable!, env, inspection })
-    : new DeepSeekAcpExecutor({ executable: provider.executable!, env, inspection });
+  const executor: AcpExecutor = new DeepSeekAcpExecutor({ executable: provider.executable!, env, inspection });
   return {
     async inspect(signal) {
       inspection = await executor.probe(signal);

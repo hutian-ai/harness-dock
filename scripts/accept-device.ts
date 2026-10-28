@@ -26,7 +26,7 @@ export async function prepareAfterIdle(peer: { request(method: 'prepare', params
   }, 'idle_release_before_preparation');
 }
 /** Real provider acceptance always uses an isolated workdir and a distinct node/application identity. */
-export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harness', paths = {
+export async function acceptDevice(provider: 'codex' | 'deepseek-harness', paths = {
   daemon: resolve('apps/daemon/dist/cli.js'), server: resolve('apps/server/dist/index.js'), client: resolve('packages/client/dist/index.js'),
 }, options: { deepseekEnvironment?: 'isolated' | 'default' } = {}) {
   process.umask(0o077);
@@ -39,7 +39,7 @@ export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harnes
   const node = { nodeId: randomUUID(), token: randomBytes(32).toString('hex') };
   const app = { clientId: randomUUID(), token: randomBytes(32).toString('hex'), nodeIds: [node.nodeId] };
   const server = new DockServer({ nodes: [node], clients: [app], devicePort: 0, clientPort: 0 });
-  const acp = provider === 'lobi' || provider === 'deepseek-harness';
+  const acp = provider === 'deepseek-harness';
   const isolatedDeepseek = provider === 'deepseek-harness' && options.deepseekEnvironment !== 'default';
   // Only temporary homes own credential copies. The default home is never cleaned.
   const nativeHome = isolatedDeepseek ? {
@@ -71,7 +71,7 @@ export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harnes
     }
     await writeFile(configFile, JSON.stringify({ mode: 'device', ...node, endpoint: server.deviceEndpoint, cwd: work, stateDir,
       resources: { idleTimeoutMs: provider === 'codex' ? 2000 : 60000 },
-      providers: { ...Object.fromEntries(['codex', 'lobi', 'deepseek-harness'].filter(key => key !== provider).map(key => [key, { disabled: true }])), ...(nativeHome ? { [provider]: { home: nativeHome.target } } : {}) } }), { mode: 0o600 });
+      providers: { ...Object.fromEntries(['codex', 'deepseek-harness'].filter(key => key !== provider).map(key => [key, { disabled: true }])), ...(nativeHome ? { [provider]: { home: nativeHome.target } } : {}) } }), { mode: 0o600 });
     daemon = spawn(process.execPath, [paths.daemon, 'run', configFile], { stdio: ['ignore', 'pipe', 'pipe'] });
     for (const stream of [daemon.stdout, daemon.stderr]) stream!.on('data', bytes => { log = (log + String(bytes)).slice(-65536); });
     exited = new Promise(resolve => daemon!.once('exit', (code, signal) => { daemonExited = true; resolve({ code, signal }); }));
@@ -88,7 +88,7 @@ export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harnes
     assert.equal(selected.capabilities?.protocol, 'acp');
     assert.equal(selected.capabilities?.browser, 'unverified');
     assert.equal(selected.capabilities?.resultQuery, provider === 'codex' ? 'native' : 'unsupported');
-    const preferred = provider === 'lobi' ? 'codewiz/claude-sonnet-5-5' : provider === 'deepseek-harness' ? 'deepseek-v4-flash' : 'gpt-5.6-sol';
+    const preferred = provider === 'deepseek-harness' ? 'deepseek-v4-flash' : 'gpt-5.6-sol';
     const model = selected.models.includes(preferred) ? preferred : selected.models[0];
     evidence.model = model;
     console.log(JSON.stringify({ provider, phase: 'inventory_ready', model }));
