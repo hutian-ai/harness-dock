@@ -57,4 +57,4 @@ try {
   if (execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()) revision += '+dirty';
 } catch { /* Source archives have no Git metadata. */ }
 await writeReleaseManifest(join(root, 'daemon'), revision);
-console.log(`Local bundles ready: ${root}. Use node <daemon>/dist/cli.js help or node <server>/dist/cli.js run <server.json>, or node <controller>/dist/device-console.js <client.json>.`);
+console.log(`Local bundles ready: ${root}. Use node <daemon>/dist/cli.js help or node <server>/dist/cli.js run <server.json>, or node <controller>/dist/cli.js help.`);

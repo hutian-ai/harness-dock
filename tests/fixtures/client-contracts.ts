@@ -11,8 +11,8 @@ export async function publicContracts(peer: ServerPeer, direct: DevicePeer) {
   const result: DeviceExecutionResponse = await peer.request('execute', { provider: inventory.providers[0]!.key, runId: 'run', prompt: 'synthetic' });
   const outputs: DeviceOutput[] = await direct.request('collect', { runId: 'run' });
   const snapshot = await peer.request('getExecution', { runId: 'run' });
-  await peer.request('reconcile', { runId: 'run', provider: 'codex', sessionKey: 'session' });
-  // @ts-expect-error legacy hints cannot replace the persisted execution identity
+  await peer.request('reconcile', { runId: 'run' });
+  // @ts-expect-error native context cannot replace the persisted execution identity
   await peer.request('reconcile', { provider: 'codex', sessionKey: 'session' });
   if (snapshot) snapshot.state satisfies 'running' | 'completed' | 'cancelled' | 'failed' | 'unknown';
   const legacy = await peer.request<{ ownProjection: boolean }>('inventory');

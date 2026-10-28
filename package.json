@@ -12,7 +12,6 @@
     "build": "pnpm -r build",
     "test": "node --test --test-concurrency=1 --import tsx tests/*.test.ts",
     "check": "pnpm build && tsc -p tsconfig.tests.json && pnpm test",
-    "demo:devices": "node --import tsx packages/client/src/device-console.ts",
     "daemon": "node --import tsx apps/daemon/src/cli.ts",
     "dev:daemon": "node --import tsx apps/daemon/src/cli.ts run .local/device/config.json",
     "accept:codex": "pnpm build && node --import tsx scripts/accept-codex.ts",
@@ -29,7 +28,6 @@
     "typescript": "6.0.3",
     "ws": "8.22.0",
     "@modelcontextprotocol/client": "2.3.0",
-    "@agentclientprotocol/sdk": "1.4.0",
     "execa": "10.0.1"
   }
 }

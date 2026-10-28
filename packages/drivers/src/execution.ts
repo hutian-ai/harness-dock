@@ -9,20 +9,6 @@ export interface NativePermissionRequest {
 }
 export type NativePermissionDecision = 'allow' | 'deny' | NativeInteractionResponse;
 
-/** Exact clients select an ID. Legacy decisions only map to one unambiguous,
- * one-time option; they never grant an always permission or guess by order. */
-export function nativePermissionOption(
-  options: NonNullable<NativePermissionRequest['options']>,
-  decision: NativePermissionDecision | undefined,
-) {
-  const candidates = decision && typeof decision === 'object' && 'optionId' in decision
-    ? options.filter(option => option.optionId === decision.optionId)
-    : decision === 'allow' || decision === 'deny'
-      ? options.filter(option => option.kind === (decision === 'allow' ? 'allow_once' : 'reject_once'))
-      : [];
-  return candidates.length === 1 ? candidates[0] : undefined;
-}
-
 export function nativeElicitationForm(request: unknown): NativePermissionRequest['form'] | undefined {
   if (!request || typeof request !== 'object') return;
   const raw = request as Record<string, unknown>;
@@ -52,15 +38,4 @@ export interface HarnessExecutionInput {
   onReady(sessionId: string): Promise<void>;
   onEvent(event: CodexEvent): Promise<void>;
   permission?(request: NativePermissionRequest, signal: AbortSignal, responseSent: Promise<void>): Promise<NativePermissionDecision>;
-}
-export interface HarnessExecutionResult {
-  state: 'unknown' | 'completed' | 'failed' | 'cancelled';
-  error?: string;
-  stopReason?: string;
-}
-export interface HarnessExecutor {
-  readonly unsupported?: readonly string[];
-  inspect(signal: AbortSignal): Promise<unknown>;
-  execute(input: HarnessExecutionInput): Promise<HarnessExecutionResult>;
-  close(): Promise<void>;
 }

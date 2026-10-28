@@ -87,8 +87,7 @@ export interface DeviceRequestMap {
   getExecution: { params: { runId: string }; result: DeviceExecutionSnapshot | null };
   events: { params: { runId: string; after?: number }; result: DeviceExecutionEvent[] };
   /** null means no confirmed native evidence (including unsupported native query). */
-  /** Legacy context hints are accepted but ignored; the persisted run selects its provider/context. */
-  reconcile: { params: { runId: string; provider?: string; sessionKey?: string }; result: DeviceExecutionResponse | null };
+  reconcile: { params: { runId: string }; result: DeviceExecutionResponse | null };
   cancel: { params: { runId: string }; result: { requested: boolean; state?: DeviceExecutionState | null } };
   steer: { params: { runId: string; text: string }; result: 'accepted' | 'rejected' | 'unknown' };
   collect: { params: { runId: string }; result: DeviceOutput[] };

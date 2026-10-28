@@ -75,8 +75,10 @@ test("Codex discovery honors the local installation and never substitutes a bund
   await writeFile(executable, '#!/bin/sh\nprintf "codex-cli native-test\\n"\n');
   await chmod(executable, 0o700);
   const options = { homeDirectory: directory, environment: { PATH: directory },
-    overrides: { 'deepseek-harness': { disabled: true } } };
-  const [found] = await discoverProviders(options);
+    overrides: {} };
+  const providers = await discoverProviders(options);
+  assert.deepEqual(providers.map(provider => provider.key), ['codex']);
+  const [found] = providers;
   assert.equal(found?.executable, await realpath(executable));
   assert.equal(found?.source, 'path');
   assert.equal(found?.version, 'native-test');

@@ -1,14 +1,12 @@
 export { ExecaError } from 'execa';
 export { observeStartup, startStartupSpan } from './startup-trace.ts';
-export { DeepSeekAcpExecutor, type DeepSeekAcpOptions } from './deepseek.ts';
-export { AcpProbeError, type AcpExecutor, type AcpInspection, type AcpExecutionInput, type AcpExecutionResult, type AcpFileChangeEvent } from './acp-types.ts';
 export { runBoundedCommand } from './process-command.ts';
 export { CodexHost, prepareCodexEnvironment, hasCodexFinalAnswer, type CodexHostEnvironment, type CodexHostInput } from './codex-host.ts';
 export { createMcpBridge, type McpBridge, type McpInvocation, type McpToolCall, type McpToolDefinition, type McpToolResult } from './mcp-bridge.ts';
 export { ToolDeliveryTracker, type ToolDelivery } from './tool-delivery.ts';
 export { CodexExecutor, createCodexRuntime, type CodexExecutionConfig, type CodexExecutionInput, type CodexEvidence, type CodexEvent, type CodexInspection, type CodexMessage, type CodexTokens } from './codex.ts';
 export { nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
-export type { HarnessExecutor, HarnessExecutionInput, HarnessExecutionResult, NativePermissionRequest, NativePermissionDecision, NativeInteractionResponse } from './execution.ts';
+export type { HarnessExecutionInput, NativePermissionRequest, NativePermissionDecision, NativeInteractionResponse } from './execution.ts';
 export { discoverProviders, type ProviderKey, type ProviderOverride, type ProviderDiscoveryOptions, type DiscoveredProvider } from './discovery.ts';
 export { discoverCodexInstallation } from './codex-environment.ts';
 export { AnswerBudget, boundedObservation, readBoundedText, MAX_ANSWER_BYTES, MAX_OBSERVATION_BYTES } from './output-limits.ts';

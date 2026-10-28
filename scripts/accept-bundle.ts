@@ -88,5 +88,5 @@ const cli = async (...args: string[]) => (await exec(cliPath, args, { cwd: direc
 assert.match(await cli('help'), /Default config: .local.device.config.json/);
 assert.equal((await verifyRelease(join(directory, 'daemon'))).id, release.id);
 await checkNotices(dirname(dirname(clientEntry)));
-if (!offline) await acceptDevice('codex', { daemon: cliPath, client: join(consumer, 'dist/index.js'), server: join(directory, 'server/dist/index.js') });
+if (!offline) await acceptDevice({ daemon: cliPath, client: join(consumer, 'dist/index.js'), server: join(directory, 'server/dist/index.js') });
 console.log(`PASS outside-checkout offline SDK archive install/ci, types, dependency isolation, applied patches, licenses and installed Daemon${offline ? '' : ' and real Codex'}: ${directory}`);

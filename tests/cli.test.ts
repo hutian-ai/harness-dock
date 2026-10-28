@@ -19,7 +19,7 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   const paths = JSON.parse(await cli('init', '--home', home, '--cwd', cwd,
     '--endpoint', 'ws://127.0.0.1:1/'));
   const config = await readConfig(paths.configPath);
-  config.providers = Object.fromEntries(['codex', 'deepseek-harness'].map(key => [key, { disabled: true }]));
+  config.providers = Object.fromEntries(['codex'].map(key => [key, { disabled: true }]));
   await writeFile(paths.configPath, JSON.stringify(config));
   t.after(async () => { await control(config, 'stop'); await rm(root, { recursive: true, force: true }); });
   const original = await readFile(paths.configPath, 'utf8');

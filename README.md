@@ -4,7 +4,7 @@ harness-dock 是跨机器的原生 Harness 接入与执行基础设施。应用�
 
 每台设备运行独立 Daemon，设备与调用方主动连接自托管 server。调用方无需管理远程 Provider 进程、登录文件或设备上的工具安装。
 
-**当前支持：macOS arm64 设备上的 Codex。** server 可部署在 Linux；项目处于开发者 Alpha，采用私有源码与候选运行包分发，尚无 npm registry 发布。
+**最小版本：仅支持 macOS arm64 设备上的 Codex。** server 可部署在 Linux；项目处于开发者 Alpha，采用私有源码与候选运行包分发，尚无 npm registry 发布。
 
 ## 适用场景
 
