@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CodexHost } from '../packages/drivers/src/codex-host.ts';
-import { createProviderAdapter, type ProviderExecution } from '../packages/drivers/src/provider-adapter.ts';
+import { createProviderAdapter, createProviderAdapters, type ProviderExecution } from '../packages/drivers/src/provider-adapter.ts';
 import type { AcpInspection } from '../packages/drivers/src/acp-types.ts';
 
 for (const key of ['lobi', 'deepseek-harness'] as const) {
@@ -41,3 +41,24 @@ for (const key of ['lobi', 'deepseek-harness'] as const) {
       await assert.rejects(adapter.execute({ ...input, config: { mode: 'plan' } }), /mode is unavailable/);
   });
 }
+
+test('native recovery keeps legacy provider context and never probes or dispatches', async () => {
+  const context = { cwd: '/synthetic/work', codexHome: '/synthetic/native', codexBin: '/synthetic/codex', stateDir: '/synthetic/state', sandbox: 'workspace-write' as const };
+  const result = { runId: 'original-run', fingerprint: 'synthetic', state: 'completed' as const, messages: [] };
+  let queries = 0;
+  const adapters = createProviderAdapters({
+    inspect: async () => assert.fail('recovery must not inspect'),
+    execute: async () => assert.fail('recovery must not dispatch'),
+    reconcile: async (environment, runId, signal) => {
+      queries++; assert.equal(environment, context); assert.equal(runId, result.runId); signal.throwIfAborted(); return result;
+    },
+    close: async () => {},
+  });
+  const signal = new AbortController().signal;
+  assert.equal(await adapters.reconcile('lobi', context, result.runId, signal), null);
+  assert.equal(await adapters.reconcile('codex', undefined, result.runId, signal), null);
+  assert.equal(queries, 0);
+  assert.equal(await adapters.reconcile('codex', context, result.runId, signal), result);
+  assert.equal(queries, 1);
+  await adapters.close();
+});

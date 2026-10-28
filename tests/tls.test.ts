@@ -9,7 +9,8 @@ import WebSocket from 'ws';
 import { DeviceController } from '../packages/client/src/index.ts';
 import { DeviceHost } from '../apps/daemon/src/device-host.ts';
 import { DeviceConnection } from '../apps/daemon/src/device-main.ts';
-import { assertEndpoint, DEVICE_PROTOCOL_VERSION, DEVICE_PROTOCOL_HEADER } from '../packages/protocol/src/index.ts';
+import { assertEndpoint, DEVICE_PROTOCOL_VERSION, DEVICE_PROTOCOL_HEADER, queryServerHealth } from '../packages/protocol/src/index.ts';
+import { DockServer } from '../apps/server/src/index.ts';
 
 test('TLS trust, node identity and plaintext boundaries; authenticated WSS reconnects', async (t) => {
   const token = randomBytes(32).toString('hex'), nodeId = randomUUID();
@@ -22,6 +23,10 @@ test('TLS trust, node identity and plaintext boundaries; authenticated WSS recon
   t.after(() => rm(dir, { recursive: true, force: true }));
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem'), '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost'], { stdio: 'ignore' });
   const cert = await readFile(join(dir, 'cert.pem'), 'utf8');
+  const server = new DockServer({ nodes: [], clients: [], devicePort: 0, clientPort: 0, tls: { cert, key: await readFile(join(dir, 'key.pem'), 'utf8') } });
+  await server.ready; t.after(() => server.close());
+  await assert.rejects(queryServerHealth(server.clientEndpoint));
+  assert.equal((await queryServerHealth(server.clientEndpoint, cert)).status, 'ok');
   const client = new DeviceController({ nodes: [{ token, nodeId }], port: 0, tls: { cert, key: await readFile(join(dir, 'key.pem'), 'utf8') } });
   await client.ready;
   t.after(() => client.close());

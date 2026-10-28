@@ -16,7 +16,7 @@ scan or a claim that a package's declared license covers every possible use.
 | Package | Version | License | Changes |
 | --- | --- | --- | --- |
 | acpx | 0.21.1 | MIT | [Patch and upgrade boundaries](patches/README.md) |
-| @agentclientprotocol/codex-acp | 2.1.1 | Apache-2.0 | [Patch and upgrade boundaries](patches/README.md) |
+| @agentclientprotocol/codex-acp | 2.3.0 | Apache-2.0 | [Patch and upgrade boundaries](patches/README.md) |
 
 The daemon distribution includes the original patch files in `patches/` and a
 copy of their explanation. The patches identify modified upstream files. Preserve
@@ -29,10 +29,10 @@ these notices and the upstream license files when redistributing modified builds
   package's `LICENSE.md`.
 - The platform-specific `@openclaw/fs-safe-*` packages use the matching
   `@openclaw/fs-safe` package's MIT `LICENSE`.
-- The `@openai/codex@0.159.3` wrapper and its platform package omit standalone
+- The `@openai/codex@0.164.0` wrapper and its platform package omit standalone
   license files from their npm archives. The daemon therefore includes the
-  original [LICENSE](https://github.com/openai/codex/blob/rust-v0.159.3/LICENSE)
-  and [NOTICE](https://github.com/openai/codex/blob/rust-v0.159.3/NOTICE) under
+  original [LICENSE](https://github.com/openai/codex/blob/rust-v0.164.0/LICENSE)
+  and [NOTICE](https://github.com/openai/codex/blob/rust-v0.164.0/NOTICE) under
   `third-party/openai-codex/`. The upstream NOTICE identifies Ratatui-derived code;
   its MIT notice is included there as well. Sources and hashes are recorded beside
   these files. Changing that dependency version requires reviewing this supplement.

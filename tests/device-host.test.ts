@@ -1,3 +1,4 @@
+import { createProviderAdapters } from '../packages/drivers/src/provider-adapter.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -30,7 +31,7 @@ test('an approval holds only its own session; parallel cancellation, output and 
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 },
     providers: { codex: { executable, home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } },
-  }, () => ({
+  }, createProviderAdapters(() => ({
     inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: false } }),
     reconcile: async () => null, close: async () => {},
     execute: async input => {
@@ -47,7 +48,7 @@ test('an approval holds only its own session; parallel cancellation, output and 
         threadId: `thread:${input.runId}`, turnId: input.runId,
         messages: [{ id: input.runId, phase: 'final_answer', text: input.runId }] } as CodexEvidence;
     },
-  }));
+  })));
   t.after(async () => { approve.resolve(); host.cancel('cancel'); await host.close(); await rm(root, { recursive: true, force: true }); });
   host.bind(async (_method, raw) => {
     const value = raw as { runId: string; kind: string };

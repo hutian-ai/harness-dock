@@ -1,0 +1,244 @@
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -27964,6 +27964,10 @@
+ var DRAINED_MARKER_METHOD = "codex-acp/stdoutDrained";
+ function startCodexConnection(codexPath, env, appServerStartupArgs = ["app-server"], options = {}) {
+   const spawnEnv = env ?? process.env;
++  const extraArgs = JSON.parse(spawnEnv.CODEX_ACP_APP_SERVER_ARGS ?? "[]");
++  if (!Array.isArray(extraArgs) || extraArgs.length > 64 || !extraArgs.every(arg => typeof arg === "string") ||
++      Buffer.byteLength(JSON.stringify(extraArgs), "utf8") > 65536) throw new Error("Invalid CODEX_ACP_APP_SERVER_ARGS");
++  appServerStartupArgs = [...appServerStartupArgs, ...extraArgs];
+   let codex;
+   if (codexPath) {
+     codex = process.platform === "win32" ? (0, import_cross_spawn.default)(codexPath, appServerStartupArgs, { env: spawnEnv }) : spawn(codexPath, appServerStartupArgs, { env: spawnEnv });
+@@ -33839,10 +33843,8 @@
+ 
+ // src/ContentChunks.ts
+ function createMessagePhaseMeta(phase, airClient) {
+-  if (!phase) {
+-    return void 0;
+-  }
+-  return airOnlyMeta(airClient, AIR_MESSAGE_PHASE_KEY, phase);
++  if (phase !== "commentary" && phase !== "final_answer") return void 0;
++  return { ...airOnlyMeta(airClient, AIR_MESSAGE_PHASE_KEY, phase), "harness-dock": { version: 1, phase } };
+ }
+ function createUserMessageChunk(content, messageId, meta3) {
+   if (messageId) {
+@@ -35759,9 +35761,20 @@
+     if (handledBySubagents) return;
+     if (ignoredBySubagents) return;
+     if (updateEvent === void 0) updateEvent = await this.createUpdateEvent(notification);
+-    if (updateEvent) {
+-      await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
+-    }
++    let nativeItem;
++    if (notification.params.threadId === this.sessionState.sessionId &&
++        (notification.method === "item/started" || notification.method === "item/completed")) {
++      const item = this.dockItemDetails(notification.params.item);
++      if (item) nativeItem = { threadId: notification.params.threadId, turnId: notification.params.turnId,
++        stage: notification.method === "item/started" ? "started" : "completed", item };
++    }
++    if (nativeItem && updateEvent && (updateEvent.sessionUpdate === "tool_call" || updateEvent.sessionUpdate === "tool_call_update")) {
++      updateEvent = { ...updateEvent, _meta: { ...updateEvent._meta,
++        "harness-dock": { version: 1, nativeItem } } };
++      nativeItem = null;
++    }
++    if (updateEvent) await this.session.update(updateEvent, this.subagents.notificationSessionId(notification));
++    if (nativeItem) await this.session.update(this.dockEvent({ kind: "item", ...nativeItem }));
+   }
+   async waitForNativeSubagentSession(childThreadId) {
+     return await this.subagents.waitForMaterializedSession(childThreadId);
+@@ -35869,14 +35882,17 @@
+             }
+           }
+         }
+-        return null;
++        if (notification.params.threadId !== this.sessionState.sessionId) return null;
++        return this.dockEvent({ kind: "diff", threadId: notification.params.threadId, turnId: notification.params.turnId,
++          diff: Buffer.byteLength(notification.params.diff, "utf8") <= AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES ? notification.params.diff : null });
+       case "error":
+         return await this.createErrorEvent(notification.params);
+       case "turn/started":
+         this.sessionState.interruptTurnId = notification.params.turn.id;
+         this.sessionState.currentTurnId ??= notification.params.turn.id;
+         await this.flushPendingErrors();
+-        return null;
++        if (notification.params.threadId !== this.sessionState.sessionId) return null;
++        return this.dockEvent({ kind: "turn_started", threadId: notification.params.threadId, turnId: notification.params.turn.id });
+       case "turn/completed":
+         await this.plans.flush();
+         this.plans.clearTurn();
+@@ -35891,8 +35907,13 @@
+         this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
+         this.sessionState.openToolCalls.clear();
+         return null;
+-      case "thread/tokenUsage/updated":
+-        return this.createUsageUpdate(notification.params);
++      case "thread/tokenUsage/updated": {
++        const update = this.createUsageUpdate(notification.params);
++        if (notification.params.threadId !== this.sessionState.sessionId) return update;
++        if (update) await this.session.update(update);
++        return this.dockEvent({ kind: "usage", threadId: notification.params.threadId,
++          turnId: notification.params.turnId ?? this.sessionState.currentTurnId, total: notification.params.tokenUsage.total });
++      }
+       case "thread/name/updated":
+         if (isStaleAutomaticTitleEcho(this.sessionState, normalizeSessionTitle(notification.params.threadName))) {
+           this.sessionState.titleGen?.observeRename();
+@@ -35958,8 +35979,7 @@
+         this.completeRetryIncidentOnTurnProgress();
+         return this.createReasoningDeltaEvent(notification.params);
+       case "item/reasoning/textDelta":
+-        this.completeRetryIncidentOnTurnProgress();
+-        return this.createReasoningDeltaEvent(notification.params);
++        return null;
+       case "item/reasoning/summaryPartAdded":
+         this.completeRetryIncidentOnTurnProgress();
+         return this.createReasoningSectionBreakEvent(notification.params);
+@@ -36198,7 +36218,10 @@
+         return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
+       case "agentMessage":
+         this.rememberAgentMessagePhase(event.item);
+-        return null;
++        if (event.threadId !== this.sessionState.sessionId) return null;
++        return { sessionUpdate: "session_info_update", _meta: { "harness-dock": { version: 1, messageCompleted: {
++          messageId: event.item.id, providerTurnId: event.turnId, phase: event.item.phase ?? null, text: event.item.text
++        } } } };
+       case "plan":
+         return await this.createCompletedPlanEvent(event.item);
+       case "exitedReviewMode":
+@@ -36224,7 +36247,7 @@
+     this.itemStreams.agentMessagePhases.set(item.id, item.phase);
+   }
+   createCompletedReasoningEvent(item) {
+-    const parts = item.summary.length > 0 ? item.summary : item.content;
++    const parts = item.summary;
+     const text = parts.filter((part) => part.length > 0).join("\n\n");
+     if (text.length === 0) {
+       return null;
+@@ -36462,6 +36485,21 @@
+       data.additionalDetails = error62.additionalDetails;
+     }
+     return data;
++  }
++  // ACP already carries tool inputs/results. Only missing native identity and facts are added here.
++  dockItemDetails(item) {
++    if (!["commandExecution", "mcpToolCall", "dynamicToolCall", "webSearch", "fileChange", "reasoning"].includes(item.type)) return null;
++    const result = { id: item.id, type: item.type };
++    if (item.type !== "reasoning") {
++      for (const key of ["status", "durationMs"]) if (item[key] !== undefined) result[key] = item[key];
++    }
++    if (item.type === "commandExecution") Object.assign(result, { command: item.command, cwd: item.cwd, commandActions: item.commandActions });
++    if (item.type === "dynamicToolCall") Object.assign(result, { tool: item.tool, success: item.success });
++    if (item.type === "fileChange") result.changes = (item.changes ?? []).map(change => ({ path: change.path, kind: change.kind.type }));
++    return Buffer.byteLength(JSON.stringify(result), "utf8") <= 262144 ? result : { id: item.id, type: item.type };
++  }
++  dockEvent(event) {
++    return { sessionUpdate: "session_info_update", _meta: { "harness-dock": { version: 1, event } } };
+   }
+   handleTokenUsageUpdated(params) {
+     this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
+@@ -39954,12 +39992,14 @@
+     const instructions = await this.resolveSessionInstructions(request, previousInstructions);
+     const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+     await this.refreshSkills(request.cwd, additionalDirectories);
+-    const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
++    const [sessionConfig, modelProvider] = await Promise.all([
++      this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []), this.getResumeModelProvider()
++    ]);
+     const response = await this.resumeThreadWithInstructions({
+       excludeTurns: true,
+       config: sessionConfig.config,
+       cwd: request.cwd,
+-      modelProvider: await this.getResumeModelProvider(),
++      modelProvider,
+       threadId: request.sessionId,
+       ...instructions?.text !== void 0 ? { developerInstructions: instructions.developerInstructions } : {}
+     }, request, previousInstructions);
+@@ -40333,7 +40373,9 @@
+     if (!cwd) {
+       return;
+     }
+-    const skillExtraRoots = additionalRoots.map((root) => path9.join(root, ".agents", "skills"));
++    const extraRoots = JSON.parse(process.env.CODEX_ACP_SKILL_ROOTS ?? "[]");
++    if (!Array.isArray(extraRoots) || extraRoots.length > 64 || !extraRoots.every(root => typeof root === "string" && path9.isAbsolute(root))) throw new Error("Invalid CODEX_ACP_SKILL_ROOTS");
++    const skillExtraRoots = [...new Set([...additionalRoots.map((root) => path9.join(root, ".agents", "skills")), ...extraRoots])];
+     if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
+       await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
+       this.skillExtraRoots = skillExtraRoots;
+@@ -40422,7 +40464,7 @@
+       approvalPolicy: agentMode.approvalPolicy,
+       approvalsReviewer: agentMode.approvalsReviewer,
+       sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+-      summary: disableSummary ? "none" : "auto",
++      summary: disableSummary ? "none" : ["auto", "concise", "detailed", "none"].includes(this.config.model_reasoning_summary) ? this.config.model_reasoning_summary : "auto",
+       effort,
+       model: modelId.model,
+       serviceTier,
+@@ -48071,6 +48113,57 @@
+     if (appServer) await appServer;
+     return { trusted: await this.runWithProcessCheck(() => trustCodexHooks(this.codexAcpClient.appServerClient, cwd, hooks)) };
+   }
++  // Local, versioned harness-dock extension. No arbitrary app-server RPC forwarding.
++  async dockControl(params) {
++    return await this.runWithProcessCheck(async () => {
++      const client = this.codexAcpClient.appServerClient;
++      if (params.operation === "inspect") {
++        let nativeHost;
++        if (params.hostStatus === true) {
++          if (typeof params.threadId !== "string" || !this.sessions.has(params.threadId)) throw RequestError.invalidParams();
++          nativeHost = { status: "unavailable" };
++          try {
++            const status = await client.listMcpServerStatus({ threadId: params.threadId, limit: 100, detail: "toolsAndAuthOnly" });
++            const server = status.data.find(server => server.name === "codex_app");
++            nativeHost.status = !server ? "disabled" : server.runtimeStatus === "connected" && !server.toolsError ? "connected" : "unavailable";
++          } catch { /* Optional desktop MCP diagnostics do not disable the harness. */ }
++        }
++        const [{ config }, models] = await Promise.all([
++          client.configRead({ includeLayers: false, cwd: process.cwd() }),
++          this.codexAcpClient.fetchAvailableModels()
++        ]);
++        return { models, nativeHost, config: {
++          approvalPolicy: config.approval_policy,
++          sandbox: config.sandbox_mode,
++          nativeMemoryDisabled: config.features?.memories === false &&
++            config.memories?.generate_memories === false && config.memories?.use_memories === false
++        } };
++      }
++      if (typeof params.threadId !== "string" || !params.threadId ||
++          typeof params.turnId !== "string" || !params.turnId) throw RequestError.invalidParams();
++      if (params.operation === "read_turn") {
++        const { thread } = await client.threadReadWithHistory(params.threadId);
++        const turn = thread.turns.find((item) => item.id === params.turnId);
++        return { threadId: thread.id, turn: turn ? {
++          id: turn.id, status: turn.status, error: turn.error,
++          messages: turn.items.filter((item) => item.type === "agentMessage").map((item) => ({
++            id: item.id, phase: item.phase ?? null, text: item.text
++          }))
++        } : null };
++      }
++      if (params.operation === "steer") {
++        if (typeof params.text !== "string" || !params.text) throw RequestError.invalidParams();
++        const session = this.sessions.get(params.threadId);
++        if (!session || session.currentTurnId !== params.turnId) return { accepted: false };
++        const result = await this.codexAcpClient.steerTurn({
++          threadId: params.threadId, turnId: params.turnId,
++          prompt: [{ type: "text", text: params.text }]
++        });
++        return { accepted: result.turnId === params.turnId, turnId: result.turnId };
++      }
++      throw RequestError.invalidParams();
++    });
++  }
+   async extMethod(method, params) {
+     const methodRequest = { method, params };
+     if (!isExtMethodRequest(methodRequest)) {
+@@ -52087,7 +52180,7 @@
+       }
+     });
+   };
+-  const v1Agent = agent({ name: package_default.name }).onConnect((connection) => attachAgent(createAgent(connection.client), connection.signal)).onRequest(methods.agent.initialize, (ctx) => getAgent().initialize(ctx.params)).onRequest(methods.agent.session.new, (ctx) => getAgent().newSession(ctx.params)).onRequest(methods.agent.session.load, (ctx) => getAgent().loadSession(ctx.params)).onRequest(methods.agent.session.fork, (ctx) => getAgent().forkSession(ctx.params)).onRequest(methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params)).onRequest(methods.agent.session.delete, (ctx) => getAgent().deleteSession(ctx.params)).onRequest(methods.agent.session.resume, (ctx) => getAgent().resumeSession(ctx.params)).onRequest(methods.agent.session.close, (ctx) => getAgent().closeSession(ctx.params)).onRequest(methods.agent.session.setMode, (ctx) => getAgent().setSessionMode(ctx.params)).onRequest(methods.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOption(ctx.params)).onRequest(methods.agent.authenticate, (ctx) => getAgent().authenticate(ctx.params, ctx.requestId)).onRequest(methods.agent.logout, (ctx) => getAgent().logout(ctx.params)).onRequest(methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params)).onRequest(methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params)).onRequest(methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params)).onRequest(methods.agent.session.prompt, (ctx) => getAgent().prompt(ctx.params, ctx.signal)).onNotification(methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params)).onRequest("authentication/status", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/status", ctx.params)).onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params)).onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params)).onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params)).onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params)).onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd)).onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks)).onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params)).onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params)).onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true)).onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false)).onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params)).onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
++  const v1Agent = agent({ name: package_default.name }).onConnect((connection) => attachAgent(createAgent(connection.client), connection.signal)).onRequest(methods.agent.initialize, (ctx) => getAgent().initialize(ctx.params)).onRequest(methods.agent.session.new, (ctx) => getAgent().newSession(ctx.params)).onRequest(methods.agent.session.load, (ctx) => getAgent().loadSession(ctx.params)).onRequest(methods.agent.session.fork, (ctx) => getAgent().forkSession(ctx.params)).onRequest(methods.agent.session.list, (ctx) => getAgent().listSessions(ctx.params)).onRequest(methods.agent.session.delete, (ctx) => getAgent().deleteSession(ctx.params)).onRequest(methods.agent.session.resume, (ctx) => getAgent().resumeSession(ctx.params)).onRequest(methods.agent.session.close, (ctx) => getAgent().closeSession(ctx.params)).onRequest(methods.agent.session.setMode, (ctx) => getAgent().setSessionMode(ctx.params)).onRequest(methods.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOption(ctx.params)).onRequest(methods.agent.authenticate, (ctx) => getAgent().authenticate(ctx.params, ctx.requestId)).onRequest(methods.agent.logout, (ctx) => getAgent().logout(ctx.params)).onRequest(methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params)).onRequest(methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params)).onRequest(methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params)).onRequest(methods.agent.session.prompt, (ctx) => getAgent().prompt(ctx.params, ctx.signal)).onNotification(methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params)).onRequest("_harness-dock/control", { parse: value => value }, (ctx) => getAgent().dockControl(ctx.params)).onRequest("authentication/status", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/status", ctx.params)).onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params)).onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent().extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params)).onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params)).onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params)).onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd)).onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks)).onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params)).onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params)).onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true)).onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false)).onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params)).onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
+   const v2Agent = agent2({ name: package_default.name }).onConnect((connection) => attachAgent(createAgent(new AcpV2Connection(connection.client)), connection.signal)).onRequest(methods2.agent.initialize, (ctx) => getAgent().initializeV2(ctx.params)).onRequest(methods2.agent.session.new, (ctx) => getAgent().newSessionV2(ctx.params)).onRequest(methods2.agent.session.list, (ctx) => getAgent().listSessions(ctx.params)).onRequest(methods2.agent.session.delete, (ctx) => getAgent().deleteSession(ctx.params)).onRequest(methods2.agent.session.resume, (ctx) => getAgent().resumeSessionV2(ctx.params)).onRequest(methods2.agent.session.fork, (ctx) => getAgent().forkSessionV2(ctx.params)).onRequest(methods2.agent.session.close, (ctx) => getAgent().closeSession(ctx.params)).onRequest(methods2.agent.session.setConfigOption, (ctx) => getAgent().setSessionConfigOptionV2(ctx.params)).onRequest(methods2.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId)).onRequest(methods2.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params)).onRequest(methods2.agent.session.prompt, (ctx) => getAgent().promptV2(ctx.params, ctx.signal)).onNotification(methods2.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params)).onRequest(methods2.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params)).onRequest(methods2.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params)).onRequest(methods2.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params)).onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent().extMethod(SESSION_STEERING_METHOD, ctx.params)).onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent().extMethod(GOAL_CONTROL_METHOD, ctx.params)).onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent().extMethod(ASYNC_TASK_STOP_METHOD, ctx.params)).onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent().sessionIndex.rename(ctx.params)).onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, true)).onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent().sessionIndex.setArchived(ctx.params, false)).onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params)).onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
+   return agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
+ }

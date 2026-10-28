@@ -1,17 +1,17 @@
 # harness-dock
 
-harness-dock 是供 调用方应用 等应用调用的本地 Agent 接入基础设施。每台执行设备运行独立 Daemon，server 管理连接与配对，调用方使用 client SDK；三者可同机或分别部署。人日常使用调用方应用或原生客户端，dock 的本机入口用于安装、配对、权限引导和诊断。
+harness-dock 是跨机器的原生 Harness 接入与执行基础设施，让应用、Agent 和自动化流程通过统一 SDK 使用不同设备上的 Harness。每台执行设备运行独立 Daemon，server 管理连接与配对；三者可同机或分别部署。调用方应用 是调用方之一，SDK 不依赖其业务模型。人日常使用调用方应用或原生客户端，dock 的本机入口用于安装、配对、权限引导和诊断。
 
 **当前仅支持 Codex，设备端支持环境为 macOS arm64。** 项目代码采用 [MIT](LICENSE)，当前为私有分发的开发者 Alpha 候选，没有公开 Release、npm 发布或托管云服务。安装、使用和真实验收入口均以 Codex 为准；其他 Provider 的仓内保留实现不属于当前支持范围，详见支持矩阵。
 
 [支持矩阵](docs/support.md) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [变更记录](CHANGELOG.md) · [发布与设备验收](docs/releasing.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
-Codex 拥有模型循环、工具、插件和原生权限。dock 通过 ACP 与具名薄适配接入 Codex，负责跨设备派发、观察、审批归属和恢复；原生能力接入缺失时明确报告，不在 dock 中另建浏览器、电脑操作或工具宿主。
+Harness 拥有模型循环、工具、插件和原生权限。dock 以 ACP 为默认接入协议，通过 ACPX 和具名薄适配连接当前受支持的 Codex，负责跨设备派发、观察、审批归属和恢复。通用定位不代表任意 ACP Harness 已获支持；新增 Harness 仍需适配和真实验收。原生能力接入缺失时明确报告，不在 dock 中另建浏览器、电脑操作或工具宿主。
 
 Harness 内部后续 Agent、工具调用及权限范围继续由 Harness 自己处理。dock 负责正确启动/连接所选原生环境，必要时转发原生审批；当前 Codex 路径经 ACP 启动执行实例，并非接管桌面 App 已运行的聊天。后台实例缺少某项原生依赖时，先核对启动与连接条件，只对已确认的缺口补薄适配；原生拒绝保持如实报告，不据此另建桌面授权机制。
 
 ```text
-调用方应用 / 其他中台 ── ServerClient ──→ harness-dock server
+应用 / Agent / 自动化 ── ServerClient ──→ harness-dock server
                                         ↑ 设备主动连接
                               ┌─────────┴─────────┐
                          家用电脑 Daemon     其他设备 Daemon
@@ -32,6 +32,8 @@ Codex 使用本机选择的安装/home，保留原生配置、登录、插件与
 
 ## 本机开始
 
+普通安装用户先看 **[独立安装与首次验证](docs/quickstart.md)**：按 server 部署者、设备用户、应用开发者分开操作，直接使用候选运行包，无需源码构建。当前不公开发布、不发布 npm；维护者制备和私下交付候选。以下为开发者本机源码闭环。
+
 需要 macOS arm64、Node.js 22.19+、pnpm 12.15.0，以及已安装并完成本机登录的 Codex。真实执行会访问模型服务。
 
 首次安装或从 pnpm 11 升级时，先通过 `npm install --global pnpm@12.15.0` 完成 pnpm 原生执行文件安装，再运行下面的命令。不要跳过该工具自身的安装脚本。
@@ -50,6 +52,8 @@ pnpm demo:devices .local/control/client.json
 ```
 
 `init` 生成互相独立的设备和应用凭据，文件权限为 0600；不要提交或输出凭据。server 前台运行，云端 server 由 Docker Compose 管理其进程。
+
+P0 CLI 增加 `server init --public-endpoint`、`server deploy`、`server pair`、两端 `doctor` 和显式 `client test`。配对管理仅写私有配置，运行服务是否加载由健康摘要比对；不自动更新或重启服务。`--version` 仅查询版本。具体命令、精确原生审批和失败后的只读查回见上述安装入口。
 
 控制台命令：`nodes`、`inventory`、`run codex 回复 hello`、`status`、`allow <审批 ID>`、`deny <审批 ID>`、`reply <审批 ID> <JSON>`、`cancel`、`quit`。多设备时用 `use <nodeId>` 选择设备。原生审批用 `reply <ID> {"optionId":"原始 ID"}`，原生提问用 `reply <ID> {"action":"accept","content":{...}}`；二值 allow 不能替代原生选择。
 
@@ -103,6 +107,8 @@ inventory 保留原有 `inspection`，并增量提供 `capabilities` 与 `readin
 
 `request(method, params, timeoutMs)` 不自动重试。节点方法为 `inventory / prepare / execute / getExecution / events / reconcile / cancel / steer / collect / release / forgetSession`。设备协议 v3，server-client 协议 v1，版本不符明确拒绝。`DeviceController` 是 server 内部的设备入口，也可用于不经过中继的局部集成。
 
+SDK 按方法推导参数和结果，公开执行身份、状态、能力、原生审批和工具回调类型；调用方无需引用 Daemon 或 drivers。显式 `request<T>` 兼容已有调用，但自选类型不能替代运行时校验。能力差异、未知结果及完整接入示例见 [SDK 契约](docs/sdk.md)。
+
 Skill 字节通过 `prepare` 传到设备，执行前按 `capabilities.callerSkills` 校验；结果文件通过 `collect` 回传；`release` 只删除该次输出。`forgetSession` 仅在引用该会话的执行均安全释放后删除托管会话目录，保留执行去重身份。
 
 ## 长期资源管理
@@ -115,7 +121,7 @@ Provider 空闲 10 分钟回收。Codex 可重新加载原 thread；单轮文本
 
 ## Codex 执行与结果
 
-Codex 使用固定 ACPX 0.21.1 / Codex ACP 2.1.1，以及设备选择的本机 Codex 安装/home 与原生登录；支持明确的 `final_answer`、严格插话和原 turn 的只读查回。
+Codex 使用固定 ACPX / Codex ACP（版本见 [Driver 依赖](packages/drivers/package.json)），以及设备选择的本机 Codex 安装/home 与原生登录；支持明确的 `final_answer`、严格插话和原 turn 的只读查回。
 
 文本增量不是权威最终答案。Provider 支持的能力、探测失败和真实验收证据分别记录。固定补丁见 [补丁说明](patches/README.md)。
 

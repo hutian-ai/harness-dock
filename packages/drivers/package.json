@@ -14,7 +14,7 @@
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@agentclientprotocol/codex-acp": "2.1.1",
+    "@agentclientprotocol/codex-acp": "2.3.0",
     "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/server": "2.3.0",
     "acpx": "0.21.1",

@@ -1,6 +1,6 @@
 # 成熟模块复用评估（2026-10-12）
 
-当前结论（2026-10-28）：当前仅支持 macOS arm64 上的 Codex，保持本地 Agent 接入基础设施定位；Codex 经固定 ACPX/Codex ACP 与具名薄适配连接，设备网络继续 ws + json-rpc-2.0，云端 server 用 Docker Compose。Lobi/DeepSeek 只保留未支持的源码，ZCode 接入已移除。下文保留具名历史取舍，不构成当前支持或继续实施项。
+当前结论（2026-10-28）：定位为供应用、Agent 和自动化流程使用的跨机器原生 Harness 接入与执行基础设施，调用方应用 是调用方之一。当前仅支持 macOS arm64 上的 Codex，经固定 ACPX/Codex ACP 与具名薄适配连接，设备网络继续 ws + json-rpc-2.0，云端 server 用 Docker Compose。Lobi/DeepSeek 只保留未支持的源码，ZCode 接入已移除。下文保留具名历史取舍，不构成当前支持或继续实施项。
 
 ## 2026-10-28：ACPX 0.21.1 与补丁收缩
 

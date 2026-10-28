@@ -27,6 +27,8 @@ test('server config retains defaults, explicit ephemeral ports and field-specifi
   assert.equal(base.host, '127.0.0.1');
   assert.equal(base.devicePort, 48518); assert.equal(base.clientPort, 48519);
   assert.equal(base.tls, undefined);
+  assert.deepEqual(parseServerConfig({ nodes: [], clients: [] }).nodes, []);
+  assert.deepEqual(parseServerConfig({ nodes: [], clients: [{ ...input.clients[0], nodeIds: [] }] }).clients[0]!.nodeIds, []);
   assert.deepEqual(parseServerConfig({ ...input, devicePort: 0, clientPort: 0 }).nodes, input.nodes);
   assert.ok(!Object.hasOwn(parseServerConfig({ ...input, nodes: [{ ...input.nodes[0], label: undefined }] }).nodes[0]!, 'label'));
   assert.equal(parseServerConfig({ ...input, host: '0.0.0.0', tls: { keyFile: 'key.pem', certFile: 'cert.pem' } }).tls?.keyFile, 'key.pem');
@@ -39,12 +41,12 @@ test('server config retains defaults, explicit ephemeral ports and field-specifi
     [{ ...input, host: '' }, 'invalid_config'],
     ...[-1, 65_536, 1.5, '48518', null].map(value => [{ ...input, devicePort: value }, 'invalid_port'] as [unknown, string]),
     [{ ...input, devicePort: 10, clientPort: 10 }, 'duplicate_listen_port'],
-    [{ ...input, nodes: [] }, 'invalid_pairing_count'],
-    [{ ...input, clients: [] }, 'invalid_pairing_count'],
+    [{ ...input, nodes: [] }, 'unknown_node_grant'],
+    [{ ...input, clients: [] }, 'unowned_node'],
     [{ ...input, nodes: [{ ...input.nodes[0], token: 'short' }] }, 'invalid_token'],
     [{ ...input, nodes: [{ ...input.nodes[0], token: 'a'.repeat(513) }] }, 'invalid_config'],
     [{ ...input, nodes: [{ ...input.nodes[0], label: '' }] }, 'invalid_config'],
-    [{ ...input, clients: [{ ...input.clients[0], nodeIds: [] }] }, 'invalid_node_grants'],
+    [{ ...input, clients: [{ ...input.clients[0], nodeIds: [] }] }, 'unowned_node'],
   ];
   for (const [value, kind] of cases) assert.throws(() => parseServerConfig(value), { kind });
 });

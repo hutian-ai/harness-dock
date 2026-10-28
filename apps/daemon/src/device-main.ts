@@ -3,7 +3,7 @@ import { delimiter, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { JSONRPCClient, JSONRPCServer, JSONRPCServerAndClient } from 'json-rpc-2.0';
-import { assertEndpoint, DEVICE_PROTOCOL_HEADER, DEVICE_PROTOCOL_VERSION, DeviceInboundBudget, DeviceTransport } from '@harness-dock/protocol';
+import { assertEndpoint, DEVICE_PROTOCOL_HEADER, DEVICE_PROTOCOL_VERSION, DeviceInboundBudget, DeviceTransport, diagnosticError } from '@harness-dock/protocol';
 import type { DeviceConfig } from './config.ts';
 import { DeviceHost } from './device-host.ts';
 import { serveControl } from './local-control.ts';
@@ -18,6 +18,7 @@ export class DeviceConnection {
   readonly #inbound = new DeviceInboundBudget();
   #stopped = false;
   #attempts = 0;
+  connectionError?: string;
   constructor(readonly host: DeviceHost, readonly config: DeviceConfig, readonly ca?: string) { assertEndpoint(config.endpoint); }
   get connected() { return this.#socket?.readyState === WebSocket.OPEN; }
   connect(): void {
@@ -61,6 +62,7 @@ export class DeviceConnection {
     socket.on('pong', () => { alive = true; });
     socket.on('open', () => {
       this.#attempts = 0;
+      this.connectionError = undefined;
       unbind = this.host.bind((method, params, timeoutMs = 30_000) => transport.request(() => client.timeout(timeoutMs).request(method, params)));
       this.#heartbeat = heartbeat = setInterval(() => {
         if (!alive) socket.terminate();
@@ -71,7 +73,10 @@ export class DeviceConnection {
     socket.on('message', data => {
       void transport.receive(data.toString(), message => peer.receiveAndSend(message)).catch(() => {});
     });
-    socket.on('error', error => { if (this.#attempts === 0) console.error(`Device connection failed: ${error.message}`); });
+    socket.on('error', error => {
+      this.connectionError = error.message.startsWith('Unexpected server response:') ? 'handshake_rejected: check pairing, occupied identity and protocol' : diagnosticError(error);
+      if (this.#attempts === 0) console.error(`Device connection failed: ${this.connectionError}`);
+    });
     socket.on('close', () => {
       transport.close(); clearInterval(heartbeat);
       if (this.#socket !== socket) return;
@@ -101,6 +106,7 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
   try {
     closeControl = await serveControl(config, () => ({ nodeId: config.nodeId, daemonId: host.daemonId,
       pid: process.pid, connected: connection.connected, endpoint: config.endpoint,
+      ...(connection.connectionError ? { connectionError: connection.connectionError } : {}),
       entrypoint: fileURLToPath(new URL('./cli.js', import.meta.url)), runtime: process.execPath,
       ...host.maintenanceStatus() }), stop, () => {
         const closing = host.closeIfIdle();

@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { arch, hostname, platform, release } from 'node:os';
 import { readdir } from 'node:fs/promises';
 import {
-  CodexHost, discoverProviders, createProviderAdapter, boundedObservation, observeStartup, startStartupSpan,
-  type CodexHostEnvironment, type ProviderAdapter, type ProviderCapabilities, type McpInvocation,
-  type McpToolDefinition, type DiscoveredProvider, type ProviderKey, type NativePermissionRequest, type NativePermissionDecision,
+  discoverProviders, createProviderAdapters, boundedObservation, observeStartup, startStartupSpan,
+  type ProviderAdapters, type ProviderAdapter, type ProviderCapabilities, type McpInvocation,
+  type DiscoveredProvider, type ProviderKey, type NativePermissionRequest, type NativePermissionDecision,
 } from '@harness-dock/drivers';
 import type { DeviceConfig } from './config.ts';
+import type { DeviceInventory, DeviceExecuteInput as PublicExecuteInput } from '@harness-dock/protocol';
 import { providerEnvironment } from './provider-environment.ts';
 import { collectFiles, digest, prepareDirectories, releaseDirectories, verifySkillFiles, managedStateBytes, forgetSessionDirectories, type DeviceFile } from './device-files.ts';
 import { DeviceStore, type StoredExecution } from './device-store.ts';
@@ -14,18 +15,13 @@ import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts
 import { ObservationWriter } from './observation-writer.ts';
 
 export type DeviceCallback = (method: string, params: unknown, timeoutMs?: number) => Promise<unknown>;
-export interface DeviceExecuteInput {
-  provider: ProviderKey; runId: string; sessionKey?: string; prompt: string; model?: string;
-  config?: Record<string, unknown>; resumeSessionId?: string; previousRunId?: string; retainSession?: boolean;
-  tools?: { name: string; definitions: McpToolDefinition[] };
-}
+export interface DeviceExecuteInput extends Omit<PublicExecuteInput, 'provider'> { provider: ProviderKey }
 interface InventoryProvider {
   key: ProviderKey; displayName: string; status: 'ready' | 'not_found' | 'unavailable' | 'disabled';
   version: string | null; models: string[]; inspection?: unknown; error?: string;
   readiness?: { level: 'protocol'; checkedAt: string; modelExecutionVerified: false };
   capabilities?: ProviderCapabilities;
 }
-type CodexHostPort = Pick<CodexHost, 'inspect' | 'execute' | 'reconcile' | 'close'>;
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_request');
   return value as Record<string, unknown>;
@@ -76,8 +72,6 @@ export class DeviceHost {
   readonly daemonId = randomUUID();
   readonly nodeId: string;
   readonly #store: DeviceStore;
-  readonly #codex: CodexHostPort;
-  readonly #createCodex: () => CodexHostPort;
   readonly #discovered = new Map<ProviderKey, DiscoveredProvider>();
   readonly #sessions = new Map<string, { sessionKey: string; provider: ProviderKey; adapter: ProviderAdapter }>();
   readonly #limits: DeviceResourceLimits;
@@ -96,10 +90,8 @@ export class DeviceHost {
   #closed = false;
   #callback?: DeviceCallback;
   readonly #active = new Map<string, ActiveExecution>();
-  constructor(readonly config: DeviceConfig, codex: CodexHostPort | (() => CodexHostPort) = () => new CodexHost()) {
+  constructor(readonly config: DeviceConfig, private readonly providers: ProviderAdapters = createProviderAdapters()) {
     this.nodeId = config.nodeId;
-    this.#createCodex = typeof codex === 'function' ? codex : () => codex;
-    this.#codex = this.#createCodex();
     this.#limits = resourceLimits(config.resources);
     this.#store = new DeviceStore(config.nodeId, config.stateDir, config.resources);
     this.#store.expireDetails();
@@ -147,7 +139,7 @@ export class DeviceHost {
     const results = await Promise.allSettled([
       ...[...this.#adapters.values()].map(adapter => adapter.close()),
       ...[...this.#sessions.values()].map(session => session.adapter.close()),
-      ...(!this.#adapters.has('codex') ? [this.#codex.close()] : []),
+      this.providers.close(),
     ]);
     const failure = results.find(result => result.status === 'rejected');
     this.#sessions.clear();
@@ -230,8 +222,8 @@ export class DeviceHost {
               await session.adapter.close(); this.#sessions.delete(sessionKey);
             }
             await adapter?.close();
-            adapter = createProviderAdapter(provider, { cwd: this.config.cwd, stateDir: this.config.stateDir,
-              environment, codex: this.#codex });
+            adapter = this.providers.create(provider, { cwd: this.config.cwd, stateDir: this.config.stateDir,
+              environment }, 'inspection');
             this.#adapters.set(provider.key, adapter); this.#adapterKeys.set(provider.key, key);
           }
           const inspection = await adapter.inspect(signal);
@@ -245,7 +237,7 @@ export class DeviceHost {
     });
     try { return await this.#probing; } finally { this.#probing = undefined; }
   }
-  #inventory() {
+  #inventory(): DeviceInventory {
     return { nodeId: this.nodeId, daemonId: this.daemonId, workdir: this.config.cwd,
       platform: { platform: platform(), arch: arch(), release: release(), hostname: hostname() },
       activeRunIds: this.activeRunIds, unresolvedRunIds: this.#store.unresolved(), resources: this.#limits,
@@ -320,10 +312,10 @@ export class DeviceHost {
           const idle = [...this.#sessions].find(([, session]) => ![...this.#active.values()].some(active => active.adapter === session.adapter));
           if (idle) { await idle[1].adapter.close(); this.#sessions.delete(idle[0]); }
         }
-        retained = { sessionKey: key, provider: input.provider, adapter: createProviderAdapter(this.#discovered.get(input.provider)!, {
+        retained = { sessionKey: key, provider: input.provider, adapter: this.providers.create(this.#discovered.get(input.provider)!, {
           cwd: this.config.cwd, stateDir: this.config.stateDir,
-          environment: providerEnvironment(this.config.providers?.[input.provider]), codex: this.#createCodex(), inspection: available.inspection,
-        }) };
+          environment: providerEnvironment(this.config.providers?.[input.provider]), inspection: available.inspection,
+        }, 'session') };
         this.#sessions.set(adapterKey, retained);
       }
       const adapter = retained.adapter;
@@ -449,9 +441,8 @@ export class DeviceHost {
     if (!record) return null;
     if (record.detailsExpired) throw new Error('execution_details_expired');
     if (['completed', 'failed', 'cancelled'].includes(record.state)) return { provider: record.provider, result: record.result };
-    if (record.provider !== 'codex' || !record.environment) return null;
     return this.#maintain(async () => {
-      const result = await this.#codex.reconcile(record.environment as CodexHostEnvironment, runId, AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(30_000)]));
+      const result = await this.providers.reconcile(record.provider, record.environment, runId, AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(30_000)]));
       if (result) { record.state = result.state; record.result = result; this.#store.save(record); }
       return result ? { provider: record.provider, result } : null;
     });
@@ -482,7 +473,7 @@ export class DeviceHost {
     return this.#maintain(async () => {
       // Durable invalidation precedes deletion; interrupted cleanup remains safely retryable.
       const forgotten = this.#store.forgetSession(sessionKey);
-      if (!this.#adapters.has('codex')) await this.#codex.close();
+      await this.providers.close();
       for (const [key, session] of this.#sessions) if (session.sessionKey === sessionKey) {
         await session.adapter.forgetSession(sessionKey); await session.adapter.close(); this.#sessions.delete(key);
       }

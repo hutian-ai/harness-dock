@@ -8,7 +8,7 @@ import { decodeCodexEvent, decodeCodexEvents, type CodexEvent } from '../package
 
 const sessionStatus = { type: 'status', text: 'session updated', tag: 'session_info_update' } as const;
 
-async function fixtureTurn(rawSessionUpdates: boolean) {
+async function fixtureTurn(rawSessionUpdates: boolean, text = 'synthetic') {
   await mkdir('.local', { recursive: true });
   const directory = await mkdtemp(resolve('.local/runtime-test-'));
   const runtime = createAcpRuntime({
@@ -32,7 +32,7 @@ async function fixtureTurn(rawSessionUpdates: boolean) {
       handle,
       requestId: 'fixture-run',
       mode: 'prompt',
-      text: 'synthetic',
+      text,
       rawSessionUpdates,
     });
     void turn.promptStarted.catch(() => { });
@@ -138,10 +138,45 @@ test('decoder keeps native usage validation and allows only the existing native 
     assert.deepEqual(decodeCodexEvent(native({ kind: 'usage', total: { ...total, inputTokens: value } })), sessionStatus);
   }
   for (const type of ['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'webSearch', 'fileChange', 'reasoning']) {
-    const item = { id: '', type, customDetail: 'retained' };
+    const item = { id: '', type, customDetail: 'must-not-forward', content: ['raw-reasoning'] };
     assert.deepEqual(decodeCodexEvent(native({ kind: 'item', stage: 'completed', item })), {
-      type: 'codex_event', threadId: 'thread', turnId: 'turn', kind: 'item', stage: 'completed', item,
+      type: 'codex_event', threadId: 'thread', turnId: 'turn', kind: 'item', stage: 'completed', item: { id: '', type },
     });
   }
   assert.deepEqual(decodeCodexEvent(native({ kind: 'item', stage: 'completed', item: { id: 'future', type: 'future' } })), sessionStatus);
+});
+
+test('native display reuses ordered standard ACP tool facts, including partial updates and binary filtering', async () => {
+  const events: CodexEvent[] = [];
+  for await (const event of decodeCodexEvents(iterable(await fixtureTurn(true, 'standard-facts')))) events.push(event);
+  const native = events.filter(event => event.type === 'codex_event' && event.kind === 'item');
+  assert.equal(native.length, 6);
+  const command = native[1];
+  assert.ok(command?.type === 'codex_event' && command.kind === 'item');
+  assert.deepEqual(command.item, { id: 'command', type: 'commandExecution', command: 'cat note.txt', cwd: '/sandbox', status: 'completed',
+    durationMs: 25, exitCode: 0, commandActions: [{ type: 'read', name: 'note.txt', path: '/sandbox/note.txt' }], aggregatedOutput: 'from ACP' });
+  const mcp = native[3];
+  assert.ok(mcp?.type === 'codex_event' && mcp.kind === 'item');
+  assert.deepEqual(mcp.item, { id: 'mcp', type: 'mcpToolCall', status: 'completed', server: 'fixture', tool: 'read', arguments: { path: 'note.txt' },
+    durationMs: 3, result: { content: [{ type: 'text', text: 'MCP result' }] } });
+  const dynamic = native[5];
+  assert.ok(dynamic?.type === 'codex_event' && dynamic.kind === 'item');
+  assert.deepEqual(dynamic.item, { id: 'dynamic', type: 'dynamicToolCall', tool: 'fixture', status: 'completed', arguments: { key: 'retained' }, success: true,
+    contentItems: [{ type: 'text', text: 'x'.repeat(16000) + '\n…输出已截断' }] });
+  assert.equal(JSON.stringify(native).includes('must-not-forward'), false);
+  // Every native start/end follows the corresponding upstream tool event, without replacing it.
+  for (let i = 0; i < events.length; i++) if (events[i]?.type === 'codex_event') assert.equal(events[i - 1]?.type, 'tool_call');
+});
+
+test('native tool metadata cannot cross session/item identities or turn unknown categories into observations', async () => {
+  const nativeItem = { threadId: 'fixture-session', turnId: 'turn', stage: 'started', item: { id: 'tool', type: 'commandExecution' } };
+  const updates = [
+    { ...nativeItem, threadId: 'child-session' },
+    { ...nativeItem, stage: 'future' },
+    { ...nativeItem, item: { id: 'other-tool', type: 'commandExecution' } },
+    ...['future', '__proto__', 'constructor'].map(type => ({ ...nativeItem, item: { id: 'tool', type } })),
+  ].map(value => envelope({ sessionUpdate: 'tool_call', toolCallId: 'tool', _meta: extension({ nativeItem: value }) }));
+  const events = [];
+  for await (const event of decodeCodexEvents(iterable(updates))) events.push(event);
+  assert.deepEqual(events, updates.map(() => sessionStatus));
 });

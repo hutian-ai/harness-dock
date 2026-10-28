@@ -4,6 +4,8 @@ import WebSocket from 'ws';
 import {
   assertEndpoint, DeviceInboundBudget, DeviceTransport, DEVICE_TRANSPORT_LIMITS,
   DockError, id, type DeviceNodeSummary,
+  type DeviceMethod, type DeviceRequestArgs, type DeviceRequestResult,
+  type DeviceExecutionCallback, type DeviceExecutionCallbackResult,
 } from '@harness-dock/protocol';
 import type { DeviceRequestHandler } from './device-controller.ts';
 import {
@@ -26,6 +28,7 @@ interface Connection {
   serverId?: string;
   sequence: number;
 }
+export type ExecutionCallbackHandler<TResult = DeviceExecutionCallbackResult> = (params: DeviceExecutionCallback, context: Parameters<DeviceRequestHandler>[1]) => TResult | Promise<TResult>;
 
 /** A remote node is a stable identity; neither reconnection nor a status event dispatches work. */
 export class ServerPeer {
@@ -38,6 +41,9 @@ export class ServerPeer {
   get connected(): boolean { return this.state.connected && this.owner.connected; }
   get daemonId(): string | undefined { return this.state.daemonId; }
   summary(): DeviceNodeSummary { return { ...this.state, connected: this.connected }; }
+  request<M extends DeviceMethod>(method: M, ...args: DeviceRequestArgs<M>): Promise<DeviceRequestResult<M>>;
+  /** Compatibility for callers that explicitly supply their own response type. */
+  request<T = never>(method: [T] extends [never] ? never : string, params?: object, timeoutMs?: number): Promise<T>;
   request<T>(method: string, params: object = {}, timeoutMs = 30_000): Promise<T> {
     return this.owner.request<T>(this, method, params, timeoutMs);
   }
@@ -46,6 +52,10 @@ export class ServerPeer {
     if (this.handlers.has(method)) throw new DockError('device_handler_already_registered');
     this.handlers.set(method, handler);
     return () => { if (this.handlers.get(method) === handler) this.handlers.delete(method); };
+  }
+  /** Typed entrypoint without changing the existing transport handler contract. */
+  onExecutionCallback(handler: ExecutionCallbackHandler<unknown>): () => void {
+    return this.onRequest(SERVER_CALLBACK_METHOD, handler as DeviceRequestHandler);
   }
   /** Transport hooks, not execution APIs. */
   update(summary: DeviceNodeSummary): void { this.state = summary; }
