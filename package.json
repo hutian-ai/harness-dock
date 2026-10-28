@@ -19,6 +19,8 @@
     "accept:lobi": "pnpm build && node --import tsx scripts/accept-lobi.ts",
     "accept:deepseek": "pnpm build && node --import tsx scripts/accept-deepseek.ts",
     "bundle": "pnpm build && node --import tsx scripts/bundle.ts",
+    "package:local": "node --import tsx scripts/package-release.ts",
+    "client": "node --import tsx packages/client/src/cli.ts",
     "server": "node --import tsx apps/server/src/cli.ts"
   },
   "devDependencies": {

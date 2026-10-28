@@ -17,6 +17,14 @@ export async function until(check: () => boolean | Promise<boolean>, label: stri
   const deadline = Date.now() + timeoutMs;
   while (!await check()) { if (Date.now() >= deadline) throw new Error(`timeout:${label}`); await delay(50); }
 }
+/** Only a confirmed pre-admission busy rejection is retryable here. This helper
+ * never sends execute, and a lost response immediately stops the acceptance. */
+export async function prepareAfterIdle(peer: { request(method: 'prepare', params: { runId: string; sessionKey: string; files: [] }): Promise<unknown> }, input: { runId: string; sessionKey: string; files: [] }): Promise<void> {
+  await until(async () => {
+    try { await peer.request('prepare', input); return true; }
+    catch (error) { if (error instanceof Error && error.message === 'busy') return false; throw error; }
+  }, 'idle_release_before_preparation');
+}
 /** Real provider acceptance always uses an isolated workdir and a distinct node/application identity. */
 export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harness', paths = {
   daemon: resolve('apps/daemon/dist/cli.js'), server: resolve('apps/server/dist/index.js'), client: resolve('packages/client/dist/index.js'),
@@ -122,7 +130,7 @@ export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harnes
     // Codex cold resume must survive idle resource release.
     if (provider === 'codex') await delay(3000);
     activeRun = randomUUID();
-    await peer.request('prepare', { runId: activeRun, sessionKey, files: [] });
+    await prepareAfterIdle(peer, { runId: activeRun, sessionKey, files: [] });
     const second = await peer.request<Result>('execute', { ...input, runId: activeRun, previousRunId: firstRun,
       resumeSessionId: first.result.threadId ?? first.result.sessionId,
       prompt: 'Without calling tools, reply only with the context marker I asked you to remember in the previous turn.' }, 240000);
@@ -135,6 +143,20 @@ export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harnes
     console.log(JSON.stringify({ provider, phase: 'same_session_completed' }));
     await peer.request('release', { runId: activeRun });
     const events = await peer.request<unknown[]>('events', { runId: firstRun, after: 0 }); assert(events.length > 0);
+    if (provider === 'codex') {
+      const observations = (events as { payload?: Record<string, unknown> }[]).map(event => event.payload).filter(event => event !== undefined);
+      const items = observations.filter(event => event.type === 'codex_event' && event.kind === 'item');
+      const completed = items.find(event => event.stage === 'completed' && (event.item as Record<string, unknown>)?.tool === 'synthetic_marker');
+      assert(completed, 'native MCP completion must survive standard ACP projection');
+      const item = completed.item as Record<string, unknown>;
+      assert(items.some(event => event.stage === 'started' && (event.item as Record<string, unknown>)?.id === item.id));
+      assert.equal(completed.threadId, first.result.threadId);
+      assert.equal(completed.turnId, first.result.turnId);
+      assert.notEqual(item.arguments, undefined);
+      assert((JSON.stringify(item.result) ?? '').includes(toolMarker), 'projected native tool result must retain its text');
+      assert(observations.some(event => event.type === 'tool_call' && event.toolCallId === item.id));
+      evidence.observationProjection = { nativeItemEvents: items.length, matchingStandardTool: true, mcpTextPreserved: true };
+    }
     const beforeReconnect = trace.length;
     sdk.disconnect(); await until(() => !sdk.connected, 'SDK_disconnect');
     await until(() => sdk.connected && peer.connected, 'SDK_reconnect');

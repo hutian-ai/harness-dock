@@ -1,0 +1,2 @@
+# A blank patch context line contains a required leading space.
+patches/*.patch -whitespace

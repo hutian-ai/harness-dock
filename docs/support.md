@@ -11,7 +11,7 @@ package 继续保持 private；源码与独立构建包是首版分发方式，�
 
 | 范围 | 首版定位 | 当前证据与限制 |
 | --- | --- | --- |
-| macOS arm64 + Codex | 当前唯一受支持的 Provider/设备组合 | 本机已登录安装的 SDK/server/独立 Daemon 真实链路、仓外安装通过；另一台设备及全新安装待验收 |
+| macOS arm64 + Codex | 当前唯一受支持的 Provider/设备组合 | 本机已登录安装的 SDK/server/独立 Daemon 真实链路、仓外安装通过；另一台设备及干净用户首装待验收 |
 | macOS Intel | 待验证 | 未完成当前候选的目标平台安装与真实 Provider 验收 |
 | Linux server | 自托管 server | 历史 ECS Docker Compose/WSS 具名证据有效；当前候选须另做目标版本部署验收 |
 | Linux 设备端 | 实验性 | CI 中的构建/合成测试不代表原生 Provider 执行或设备管理已验收 |
@@ -20,8 +20,8 @@ package 继续保持 private；源码与独立构建包是首版分发方式，�
 | ZCode | 已移除 | 历史记录只描述当时实现 |
 | Provider Docker/Podman | 后置实验 | 不作为 v1 门禁；云端 server 的 Docker 部署单独成立 |
 
-需要 Node.js 22.19+、pnpm 12.15.0；Codex 使用本机所选安装/home 和已有登录。
-固定适配依赖为 ACPX 0.21.1 / Codex ACP 2.1.1，补丁边界见
+预构建运行包需要 Node.js 22.19+，安装入口见[独立安装与首次验证](quickstart.md)；只有源码维护/构建需要 Git 和 pnpm 12.15.0。Codex 使用本机所选安装/home 和已有登录。
+固定适配依赖为 ACPX / Codex ACP，版本以 [Driver 依赖](../packages/drivers/package.json) 为准，补丁边界见
 [patches/README.md](../patches/README.md)。模型可用性与额度属于原生账户条件。
 
 ## 能力证据

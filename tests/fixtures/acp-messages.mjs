@@ -14,6 +14,25 @@ for await (const line of createInterface({ input: process.stdin })) {
   if (request.method === 'initialize')
     result = { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] };
   else if (request.method === 'session/new') result = { sessionId };
+  else if (request.method === 'session/prompt' && request.params.prompt?.[0]?.text === 'standard-facts') {
+    const tool = (toolCallId, stage, item, facts) => update({ sessionUpdate: stage === 'started' ? 'tool_call' : 'tool_call_update', toolCallId, ...facts,
+      _meta: { ...facts._meta, ...extension({ nativeItem: { threadId: sessionId, turnId: 'provider-turn', stage, item: { id: toolCallId, ...item } } }) } });
+    tool('command', 'started', { type: 'commandExecution', status: 'inProgress', command: 'cat note.txt', cwd: '/sandbox',
+      commandActions: [{ type: 'read', name: 'note.txt', path: '/sandbox/note.txt', secret: 'must-not-forward' }] },
+      { title: 'Read file', kind: 'read', status: 'in_progress' });
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'command', _meta: { terminal_output_delta: { data: 'from ', terminal_id: 'command' } } });
+    tool('command', 'completed', { type: 'commandExecution', status: 'completed', durationMs: 25 },
+      { status: 'completed', rawOutput: { exit_code: 0 }, _meta: { terminal_output_delta: { data: 'ACP', terminal_id: 'command' } } });
+    tool('mcp', 'started', { type: 'mcpToolCall', status: 'inProgress' }, { title: 'mcp.fixture.read', kind: 'execute', status: 'in_progress',
+      rawInput: { server: 'fixture', tool: 'read', arguments: { path: 'note.txt' } } });
+    tool('mcp', 'completed', { type: 'mcpToolCall', status: 'completed', durationMs: 3 }, { status: 'completed',
+      rawOutput: { result: { content: [{ type: 'text', text: 'MCP result' }, { type: 'image', data: 'must-not-forward' }] }, error: null } });
+    tool('dynamic', 'started', { type: 'dynamicToolCall', status: 'inProgress', tool: 'fixture' },
+      { title: 'fixture', kind: 'execute', status: 'in_progress', rawInput: { arguments: { key: 'retained' } } });
+    tool('dynamic', 'completed', { type: 'dynamicToolCall', status: 'completed', success: true }, { status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: 'x'.repeat(16001) } }, { type: 'content', content: { type: 'image', data: 'must-not-forward' } }] });
+    result = { stopReason: 'end_turn' };
+  }
   else if (request.method === 'session/prompt') {
     update({
       sessionUpdate: 'agent_message_chunk',

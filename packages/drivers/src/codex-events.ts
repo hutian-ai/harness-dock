@@ -1,4 +1,5 @@
 import type { AcpRuntimeEvent } from 'acpx/runtime';
+import { mergeCodexItem, projectCodexItem } from './codex-policy.ts';
 
 type StandardEvent = Exclude<AcpRuntimeEvent, { type: 'session_update' }>;
 type MessagePhase = 'commentary' | 'final_answer';
@@ -32,7 +33,8 @@ function dockProviderEvent(payload: Record<string, unknown>): Extract<CodexEvent
   if (event.kind === 'item' && (event.stage === 'started' || event.stage === 'completed') && isRecord(event.item)
     && typeof event.item.id === 'string' && typeof event.item.type === 'string'
     && ['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'webSearch', 'fileChange', 'reasoning'].includes(event.item.type)) {
-    return { ...base, kind: 'item', stage: event.stage, item: event.item };
+    const item = projectCodexItem(event.item);
+    return item ? { ...base, kind: 'item', stage: event.stage, item } : null;
   }
   if (event.kind === 'diff' && (event.diff === null || typeof event.diff === 'string')) return { ...base, kind: event.kind, diff: event.diff };
   if (event.kind === 'usage' && isRecord(event.total)) {
@@ -70,8 +72,30 @@ export function decodeCodexEvent(event: AcpRuntimeEvent): CodexEvent | null {
 
 /** Retain the runtime queue order and its stream-close/cancellation behavior. */
 export async function* decodeCodexEvents(events: AsyncIterable<AcpRuntimeEvent>): AsyncGenerator<CodexEvent> {
+  // Only active native tools are retained, with display-bounded fields. A missed end cannot grow the cache forever.
+  const items = new Map<string, Record<string, unknown>>();
   for await (const event of events) {
     const decoded = decodeCodexEvent(event);
     if (decoded) yield decoded;
+    if (event.type !== 'session_update') continue;
+    const { update, sessionId } = event;
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') continue;
+    if (typeof update.toolCallId !== 'string') continue;
+    const key = JSON.stringify([sessionId, update.toolCallId]);
+    const metadata = dockMessageMeta(update)?.nativeItem;
+    const native = isRecord(metadata) && metadata.threadId === sessionId && typeof metadata.turnId === 'string'
+      && (metadata.stage === 'started' || metadata.stage === 'completed') && isRecord(metadata.item)
+      && metadata.item.id === update.toolCallId ? metadata : undefined;
+    const details = native && isRecord(native.item) ? native.item : items.get(key);
+    if (!details) continue;
+    const item = mergeCodexItem(details, update, items.get(key));
+    if (!item) continue;
+    if (native?.stage === 'completed' || update.status === 'completed' || update.status === 'failed') items.delete(key);
+    else {
+      if (!items.has(key) && items.size >= 128) items.delete(items.keys().next().value!);
+      items.set(key, item);
+    }
+    if (!native) continue;
+    yield { type: 'codex_event', kind: 'item', threadId: sessionId, turnId: native.turnId as string, stage: native.stage as 'started' | 'completed', item };
   }
 }

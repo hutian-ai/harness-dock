@@ -8,9 +8,21 @@ see [support](docs/support.md) and [release gates](docs/releasing.md).
 
 ### Included in the candidate
 
+- Clarify cross-machine native Harness infrastructure for independent consumers.
+  Add inferred SDK method contracts and native interaction types; keep provider
+  recovery context/query selection inside drivers without changing stored records
+  or replaying execution. Codex/macOS arm64 support remains unchanged.
+
+- P0 onboarding: candidate archives with checksums, separated public endpoint and
+  deployment file generation, resumable device setup, file-based pairing lifecycle,
+  layered diagnostics and an explicit two-turn native approval test with a standalone SDK example.
+
 - Upgrade ACPX to 0.21.1. Use upstream exact permission option IDs and environment
   transport; retain a strict explicit-allowlist guard and the remaining bounded
-  dock extensions. Codex ACP remains at 2.1.1.
+  dock extensions.
+
+- Use Codex ACP 2.3.0 and refresh the bundled Codex 0.164.0 license provenance
+  against its fixed upstream revision; keep the version and file-hash gates.
 
 - Independent server/client SDK/device Daemon, paired outbound connections,
   verified remote TLS and separate device/controller credentials.

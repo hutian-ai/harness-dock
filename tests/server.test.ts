@@ -80,7 +80,10 @@ test('server enforces unique ownership, grants, method allowlist and separate cr
   assert.throws(() => parseServerConfig({ ...options, extra: true }), /unknown_config_field/);
   const server = new DockServer(options);
   t.after(() => server.close()); await server.ready;
-  assert.deepEqual(await (await fetch(server.clientEndpoint.replace('ws:', 'http:') + 'healthz')).json(), { status: 'ok' });
+  const health = await (await fetch(server.clientEndpoint.replace('ws:', 'http:') + 'healthz')).json();
+  assert.equal(health.status, 'ok');
+  assert.equal(health.deviceProtocol, DEVICE_PROTOCOL_VERSION);
+  assert.match(health.configRevision, /^[a-f0-9]{64}$/);
   const valid = clientHeaders(clientA);
   await rejected(server.clientEndpoint, { ...valid, authorization: `Bearer ${a.token}` });
   await rejected(server.clientEndpoint, { ...valid, [SERVER_PROTOCOL_HEADER]: '999' });
@@ -113,7 +116,7 @@ test('remote SDK routes callbacks, aborts obsolete decisions and never replays e
   const peer = sdk.node(pairing.nodeId)!;
   assert.equal(peer.connected, true);
   const seen: AbortSignal[] = [];
-  const unbind = peer.onRequest('execution.callback', async (params, context) => {
+  const unbind = peer.onExecutionCallback(async (params, context) => {
     seen.push(context.signal);
     if ((params as { kind: string }).kind === 'permission') {
       await new Promise<void>(resolve => context.signal.addEventListener('abort', () => resolve(), { once: true }));
@@ -123,7 +126,7 @@ test('remote SDK routes callbacks, aborts obsolete decisions and never replays e
   });
   t.after(unbind);
   const runId = randomUUID();
-  const pending = peer.request('execute', { runId });
+  const pending = peer.request('execute', { provider: 'codex', runId, prompt: 'synthetic' });
   const uncertain = assert.rejects(pending, /disconnected|unknown/);
   await until(() => first.requests.length === 1);
   const accepted = await first.call('execution.callback', { runId, kind: 'ready' });

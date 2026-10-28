@@ -19,6 +19,17 @@
 
 ## 在隔离候选中验证
 
+P0 可以先制备本地候选归档，不改变仓库可见性、不创建 Release、不推送镜像：
+
+```sh
+pnpm bundle .local/bundles/p0-candidate
+pnpm package:local --bundles .local/bundles/p0-candidate --output .local/distribution/p0-candidate
+```
+
+输出三种运行包、离线 SDK、release.json 和 SHA256SUMS。脚本拒绝覆盖输出目录，检查 bundle 根目录与版本；摘要不是来源认证，公开前仍需要隐私与来源复核。设备包以实际构建平台/架构命名；Linux CI 的设备包明确标记为实验，不能作为新增设备支持。
+
+CI 默认仍只运行检查；只有维护者显式手动选择 prepare_artifacts 才生成可下载的 candidate artifact。Linux job 仅构建并导出 server 镜像，不登录 registry、不推送、不运行或部署服务。该流程尚须实际 CI 读回，文件存在不表示成功运行。
+
 不要对现用 daemon release 执行包管理器，也不要在共享源码中并行构建。先将
 当前候选复制到 ignored `.local/` 下的新目录或独立临时目录，不带原 node_modules、
 凭据、会话、实验输出和相邻仓库。版本管理中的源码及明确需要的未跟踪源码须一并

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { prepareCodexEnvironment } from "../packages/drivers/src/codex-host.ts";
 import { discoverProviders } from "../packages/drivers/src/discovery.ts";
+import { codexAdapterEnvironment } from '../packages/drivers/src/codex-policy.ts';
 
 const temporaryPaths: string[] = [];
 
@@ -14,6 +15,20 @@ afterEach(async () => {
       .splice(0)
       .map((temporaryPath) => rm(temporaryPath, { recursive: true, force: true })),
   );
+});
+
+test('adapter policy preserves explicit native options and adds caller skills without workspace grants', () => {
+  const configured = { model_reasoning_summary: 'detailed', hooks: { enabled: true }, sandbox_mode: 'read-only' };
+  const environment = { CODEX_CONFIG: JSON.stringify(configured), CODEX_ACP_SKILL_ROOTS: JSON.stringify(['/native/extra']), CODEX_ACP_APP_SERVER_ARGS: JSON.stringify(['-c', 'synthetic=true']) };
+  const selected = codexAdapterEnvironment({ cwd: '/work', codexHome: '/native', stateDir: '/state', skillDirectory: '/caller/skills', environment });
+  assert.deepEqual(JSON.parse(selected.CODEX_CONFIG!), configured);
+  assert.deepEqual(JSON.parse(selected.CODEX_ACP_SKILL_ROOTS!), ['/native/extra', '/caller/skills']);
+  assert.deepEqual(JSON.parse(selected.CODEX_ACP_APP_SERVER_ARGS!), ['-c', 'synthetic=true']);
+  assert.equal(JSON.parse(selected.CODEX_CONFIG!).sandbox_workspace_write, undefined);
+  assert.equal(JSON.parse(environment.CODEX_ACP_SKILL_ROOTS).length, 1);
+  const defaults = codexAdapterEnvironment({ cwd: '/work', codexHome: '/native', stateDir: '/state' });
+  assert.deepEqual(JSON.parse(defaults.CODEX_CONFIG!), { model_reasoning_summary: 'concise' });
+  assert.deepEqual(JSON.parse(defaults.CODEX_ACP_APP_SERVER_ARGS!), []);
 });
 
 test("native preparation preserves configuration, authentication and skill directories", async () => {
@@ -83,9 +98,9 @@ test('native desktop host validates its local socket and keeps task identities o
   process.env.CODEX_THREAD_ID = 'another-chat'; process.env.CODEX_INTERACTION_CLIENT_ID = 'another-client';
   try{
     await prepareCodexEnvironment(environment);
-    const fixture=join(directory,'agent.mjs');await writeFile(fixture,`import{createInterface}from'node:readline';for await(const line of createInterface({input:process.stdin})){const q=JSON.parse(line);if(q.id===undefined)continue;const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{pipe:process.env.CODEX_APP_TOOLS_PIPE_PATH,node:process.env.CODEX_MCP_NODE_PATH,bootstrap:process.env.HARNESS_DOCK_CODEX_DESKTOP_HOST,threadId:process.env.CODEX_THREAD_ID??null,interactionClient:process.env.CODEX_INTERACTION_CLIENT_ID??null};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');}`);
+    const fixture=join(directory,'agent.mjs');await writeFile(fixture,`import{createInterface}from'node:readline';for await(const line of createInterface({input:process.stdin})){const q=JSON.parse(line);if(q.id===undefined)continue;const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{pipe:process.env.CODEX_APP_TOOLS_PIPE_PATH,node:process.env.CODEX_MCP_NODE_PATH,args:JSON.parse(process.env.CODEX_ACP_APP_SERVER_ARGS),threadId:process.env.CODEX_THREAD_ID??null,interactionClient:process.env.CODEX_INTERACTION_CLIENT_ID??null};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');}`);
     const runtime=createCodexRuntime(environment,[process.execPath,fixture]);
-    try{assert.deepEqual(await runtime.dockControl({command:{operation:'inspect'},signal:AbortSignal.timeout(5000)}),{pipe:pipePath,node:process.execPath,bootstrap:'1',threadId:null,interactionClient:null});}finally{await runtime.shutdown();}
+    try{assert.deepEqual(await runtime.dockControl({command:{operation:'inspect'},signal:AbortSignal.timeout(5000)}),{pipe:pipePath,node:process.execPath,args:process.platform==='darwin'?['-c','plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true','-c','plugins.code-review@openai-bundled.mcp_servers.code-review.enabled=true']:[],threadId:null,interactionClient:null});}finally{await runtime.shutdown();}
     await assert.rejects(prepareCodexEnvironment({...environment,desktopHost:{pipePath:fixture,nodePath:process.execPath}}),/codex_desktop_host_pipe_unavailable/);
   }finally{
     for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
