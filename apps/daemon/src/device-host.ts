@@ -257,6 +257,9 @@ export class DeviceHost {
         return previous.directories;
       }
       if ([...this.#active.values()].some(active => active.sessionKey === sessionKey)) throw new Error('session_busy');
+      if (this.#store.get(runId)) throw new Error('preparation_identity_conflict');
+      // No admission exists: only the owned run directory can be left by an interrupted preparation.
+      await releaseDirectories(this.config.stateDir, runId);
       await observeStartup(runId, 'device_prepare_capacity', () => this.#capacity(runId));
       const directories = await observeStartup(runId, 'device_prepare_files', () => prepareDirectories(this.config.stateDir, runId, sessionKey, (input.files ?? []) as DeviceFile[], this.config.cwd));
       await observeStartup(runId, 'device_prepare_persist', async () => { this.#store.prepare(runId, { input: fingerprint, sessionKey, directories }); });
@@ -304,6 +307,8 @@ export class DeviceHost {
       const available = this.#providers?.find(item => item.key === input.provider);
       if (!probeAdapter || available?.status !== 'ready') throw new Error('provider_unavailable');
       if (input.model && !available.models.includes(input.model)) throw new Error('model_unavailable');
+      const config = input.config ?? {};
+      probeAdapter.validate({ model: input.model, config });
       const adapterKey = `${input.provider}:${key}`;
       let retained = this.#sessions.get(adapterKey);
       if (!retained) {
@@ -318,8 +323,6 @@ export class DeviceHost {
         this.#sessions.set(adapterKey, retained);
       }
       const adapter = retained.adapter;
-      const config = input.config ?? {};
-      adapter.validate({ model: input.model, config });
       const controller = new AbortController();
       const environment = adapter.environment({ sessionKey: prepared.sessionKey, workdir: prepared.directories.workdir,
         config, skillDirectory: prepared.directories.skillDirectory });
@@ -457,7 +460,11 @@ export class DeviceHost {
     return this.#maintain(async () => {
       if (this.#active.has(runId)) throw new Error('busy');
       const prepared = this.#store.preparation(identity(runId));
-      if (!prepared || prepared.released) return null;
+      if (!prepared) {
+        if (!this.#store.get(runId)) await releaseDirectories(this.config.stateDir, runId);
+        return null;
+      }
+      if (prepared.released) return null;
       const execution = this.#store.get(runId);
       if (execution?.state === 'running' || execution?.state === 'unknown') throw new Error('unresolved_execution');
       await releaseDirectories(this.config.stateDir, runId);
