@@ -84,3 +84,7 @@ pnpm check
 真实 Codex 验收需要本机登录及模型额度，显式执行 `pnpm accept:codex`。其他命令与贡献约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 代码采用 [MIT](LICENSE)，依赖许可见 [第三方说明](THIRD_PARTY_NOTICES.md)。安全问题按 [SECURITY.md](SECURITY.md) 私下报告。
+
+## 产品文档站
+
+面向使用者的产品介绍、安装、使用与 SDK 指南位于 [`docs-site/`](docs-site/README.md)。本地运行 `node docs-site/build.mjs` 后执行 `node docs-site/serve.mjs` 预览；GitHub Pages 配置与首次启用条件见文档站说明。
