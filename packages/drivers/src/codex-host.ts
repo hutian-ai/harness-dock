@@ -4,6 +4,7 @@ import { isAbsolute, relative, sep } from 'node:path';
 import { CodexExecutor, type CodexEvidence, type CodexInspection, type CodexExecutionConfig, type CodexExecutionInput } from './codex.ts';
 import { resolveCodexEnvironment } from './codex-environment.ts';
 import { createMcpBridge, type McpInvocation, type McpToolDefinition } from './mcp-bridge.ts';
+import { observeStartup } from './startup-trace.ts';
 
 /** Frozen provider environment. The caller owns the identity used to choose this home. */
 export interface CodexHostEnvironment extends Omit<CodexExecutionConfig, 'mcpServers'> {
@@ -77,7 +78,7 @@ export class CodexHost<TDelivery = unknown> {
     let bridge: Awaited<ReturnType<typeof createMcpBridge<TDelivery>>> | null = null;
     try {
       signal.throwIfAborted();
-      const resolved = await resolveCodexEnvironment(input.environment, signal);
+      const resolved = await observeStartup(input.runId, 'native_environment', () => resolveCodexEnvironment(input.environment, signal));
       const { serviceTier, ...environment } = resolved;
       const key = createHash('sha256').update(JSON.stringify({
         environment,

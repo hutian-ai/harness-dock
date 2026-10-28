@@ -11,6 +11,7 @@ type DriverKey = "deepseek-harness" | "lobi";
 type Scenario =
   | "spawn_failed"
   | "setup_cancel"
+  | "slow_setup"
   | "unconfirmed"
   | "cancelled"
   | "completed"
@@ -58,8 +59,8 @@ lines.on("line", line => {
  if(request.method) record({method:request.method});
  if(scenario === "setup_cancel") return;
  const reply = result => send({jsonrpc:"2.0",id:request.id,result});
- if(request.method === "initialize") {record({clientCapabilities:request.params.clientCapabilities});reply({protocolVersion:1,agentCapabilities:{loadSession:true},userAgent:"fake"});}
- if(request.method === "session/new") reply({sessionId:"session-1",configOptions:[{id:"model",name:"Model",category:"model",type:"select",currentValue:"test-model",options:[{value:"test-model",name:"Test"}]}],modes:{availableModes:[{id:"build",name:"Build"}]}});
+ if(request.method === "initialize") {record({clientCapabilities:request.params.clientCapabilities});const respond=()=>reply({protocolVersion:1,agentCapabilities:{loadSession:true},userAgent:"fake"});if(scenario==="slow_setup")setTimeout(respond,8000);else respond();}
+ if(request.method === "session/new") {const respond=()=>reply({sessionId:"session-1",configOptions:[{id:"model",name:"Model",category:"model",type:"select",currentValue:"test-model",options:[{value:"test-model",name:"Test"}]}],modes:{availableModes:[{id:"build",name:"Build"}]}});if(scenario==="slow_setup")setTimeout(respond,8000);else respond();}
  if(request.method === "session/set_mode") reply({});
  if(request.method === "session/prompt") {
   promptId = request.id;
@@ -67,6 +68,7 @@ lines.on("line", line => {
   if(scenario === "refusal") return reply({stopReason:"refusal"});
   if(scenario === "unrequested_cancel") return reply({stopReason:"cancelled"});
   if(scenario === "cache_usage") return finish(false);
+  if(scenario === "slow_setup") return finish(false);
   if(scenario.startsWith("elicitation_")) send({jsonrpc:"2.0",id:900,method:"elicitation/create",params:{sessionId:"session-1",message:"Native question",...(scenario==="elicitation_form"?{mode:"form",requestedSchema:{type:"object",properties:{answer:{type:"string",enum:["left","right"]}},required:["answer"]}}:{mode:"url",url:"https://example.test/authorize",elicitationId:"native-auth"})}});
   else if(["permission", "permission_default", "permission_error", "permission_once", "permission_callback_cancel", "permission_exact", "permission_exact_always", "permission_unknown_option", "permission_ambiguous"].includes(scenario)) requestPermission();
   else send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"session-1",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"test-active"}}}});
@@ -209,6 +211,12 @@ lines.on("close",()=>process.exit(0));
 }
 
 for (const key of ["deepseek-harness", "lobi"] as const) {
+  if (key === "lobi") test("ACP initialization and session creation retain independent 15-second budgets", { timeout: 25_000 }, async () => {
+    const { result, observations } = await runScenario(key, "slow_setup");
+    assert.equal(result.state, "completed");
+    assert.equal(observations.filter(entry => entry.method === "session/new").length, 1);
+    assert.equal(observations.filter(entry => entry.method === "session/prompt").length, 1);
+  });
   test(`${key} turns a spawn failure into one failed terminal`, async () => {
     const { result, starts } = await runScenario(key, "spawn_failed");
     assert.equal(starts, 1);

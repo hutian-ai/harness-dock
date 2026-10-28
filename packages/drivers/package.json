@@ -2,6 +2,7 @@
   "name": "@harness-dock/drivers",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -15,13 +16,15 @@
   "dependencies": {
     "@agentclientprotocol/codex-acp": "2.1.1",
     "@agentclientprotocol/sdk": "1.4.0",
-    "@modelcontextprotocol/server": "2.1.0",
+    "@modelcontextprotocol/server": "2.3.0",
     "acpx": "0.19.4",
-    "diff": "8.0.2",
-    "execa": "10.0.1",
-    "zcode-acp-server": "0.68.2"
+    "diff": "8.0.3",
+    "execa": "10.0.1"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_NOTICES.json"
   ]
 }

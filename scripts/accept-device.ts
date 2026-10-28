@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { DeviceExecuteInput } from '../apps/daemon/src/device-host.ts';
 
 interface Result { provider: string; result: { state: string; resumed?: boolean; threadId?: string; sessionId?: string; turnId?: string; text?: string; exactFinalAnswer?: boolean; messages?: { phase: string | null; text: string }[] } }
-interface Inventory { providers: { key: string; status: string; models: string[]; error?: string; warmSessionId?: string | null;
+interface Inventory { providers: { key: string; status: string; models: string[]; error?: string;
   readiness?: { level: string; modelExecutionVerified: boolean };
   capabilities?: { protocol: string; sessionResume: string; resultQuery: string; callerSkills: boolean; exactFinalAnswer: boolean; browser: string } }[] }
 interface Callback { runId: string; kind: string; payload?: { type?: string; id?: string; name?: string; status?: string; callId?: string; context?: unknown; canAllow?: boolean; success?: boolean; options?: {optionId:string;kind:string}[] } }
@@ -18,7 +18,7 @@ export async function until(check: () => boolean | Promise<boolean>, label: stri
   while (!await check()) { if (Date.now() >= deadline) throw new Error(`timeout:${label}`); await delay(50); }
 }
 /** Real provider acceptance always uses an isolated workdir and a distinct node/application identity. */
-export async function acceptDevice(provider: 'codex' | 'zcode' | 'lobi' | 'deepseek-harness', paths = {
+export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harness', paths = {
   daemon: resolve('apps/daemon/dist/cli.js'), server: resolve('apps/server/dist/index.js'), client: resolve('packages/client/dist/index.js'),
 }, options: { deepseekEnvironment?: 'isolated' | 'default' } = {}) {
   process.umask(0o077);
@@ -34,10 +34,7 @@ export async function acceptDevice(provider: 'codex' | 'zcode' | 'lobi' | 'deeps
   const acp = provider === 'lobi' || provider === 'deepseek-harness';
   const isolatedDeepseek = provider === 'deepseek-harness' && options.deepseekEnvironment !== 'default';
   // Only temporary homes own credential copies. The default home is never cleaned.
-  const nativeHome = provider === 'zcode' ? {
-    source: process.env.ZCODE_HOME ?? join(homedir(), '.zcode'), target: join(root, 'zcode-home'),
-    files: ['v2/credentials.json', 'provider_config.json', 'config.json'],
-  } : isolatedDeepseek ? {
+  const nativeHome = isolatedDeepseek ? {
     source: process.env.DSH_HOME ?? join(homedir(), '.dsh'), target: join(root, 'deepseek-home'),
     files: ['settings.yaml', '.credentials.yaml', '.env'],
   } : undefined;
@@ -66,7 +63,7 @@ export async function acceptDevice(provider: 'codex' | 'zcode' | 'lobi' | 'deeps
     }
     await writeFile(configFile, JSON.stringify({ mode: 'device', ...node, endpoint: server.deviceEndpoint, cwd: work, stateDir,
       resources: { idleTimeoutMs: provider === 'codex' ? 2000 : 60000 },
-      providers: { ...Object.fromEntries(['codex', 'lobi', 'deepseek-harness', 'zcode'].filter(key => key !== provider).map(key => [key, { disabled: true }])), ...(nativeHome ? { [provider]: { home: nativeHome.target } } : {}) } }), { mode: 0o600 });
+      providers: { ...Object.fromEntries(['codex', 'lobi', 'deepseek-harness'].filter(key => key !== provider).map(key => [key, { disabled: true }])), ...(nativeHome ? { [provider]: { home: nativeHome.target } } : {}) } }), { mode: 0o600 });
     daemon = spawn(process.execPath, [paths.daemon, 'run', configFile], { stdio: ['ignore', 'pipe', 'pipe'] });
     for (const stream of [daemon.stdout, daemon.stderr]) stream!.on('data', bytes => { log = (log + String(bytes)).slice(-65536); });
     exited = new Promise(resolve => daemon!.once('exit', (code, signal) => { daemonExited = true; resolve({ code, signal }); }));
@@ -83,20 +80,6 @@ export async function acceptDevice(provider: 'codex' | 'zcode' | 'lobi' | 'deeps
     assert.equal(selected.capabilities?.protocol, 'acp');
     assert.equal(selected.capabilities?.browser, 'unverified');
     assert.equal(selected.capabilities?.resultQuery, provider === 'codex' ? 'native' : 'unsupported');
-    if (provider === 'zcode') {
-      assert.equal(selected.capabilities?.sessionResume, 'warm');
-      assert.equal(selected.capabilities?.exactFinalAnswer, false);
-      assert.equal(selected.capabilities?.callerSkills, false);
-      const unsupportedRun = randomUUID(), unsupportedSession = randomUUID();
-      await peer.request('prepare', { runId: unsupportedRun, sessionKey: unsupportedSession,
-        files: [{ path: 'caller/SKILL.md', contentBase64: Buffer.from('synthetic skill').toString('base64') }] });
-      await assert.rejects(peer.request('execute', { provider, runId: unsupportedRun, sessionKey: unsupportedSession,
-        prompt: 'must not dispatch' }), /zcode_caller_skills_unsupported/);
-      assert.equal(await peer.request('getExecution', { runId: unsupportedRun }), null);
-      await peer.request('release', { runId: unsupportedRun });
-      await peer.request('forgetSession', { sessionKey: unsupportedSession });
-      evidence.callerSkillsRejectedBeforeAdmission = true;
-    }
     const preferred = provider === 'lobi' ? 'codewiz/claude-sonnet-5-5' : provider === 'deepseek-harness' ? 'deepseek-v4-flash' : 'gpt-5.6-sol';
     const model = selected.models.includes(preferred) ? preferred : selected.models[0];
     evidence.model = model;
@@ -122,7 +105,6 @@ export async function acceptDevice(provider: 'codex' | 'zcode' | 'lobi' | 'deeps
       tools: { name: 'acceptance', definitions: [{ name: 'synthetic_marker', description: 'Return a synthetic marker without external side effects', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }] } };
     const first = await peer.request<Result>('execute', input, 240000); evidence.first = first;
     assert.equal(first.result.state, 'completed'); assert(text(first).includes(toolMarker));
-    if (provider === 'zcode') assert.equal(first.result.exactFinalAnswer, false);
     assert.equal(ready, 1); assert.equal(tools, 1);
     if (!acp) { assert(decisions > 0); assert(trace.some(c => c.kind === 'permissionDelivered' && c.payload?.success)); }
     if (acp) {
@@ -137,12 +119,7 @@ export async function acceptDevice(provider: 'codex' | 'zcode' | 'lobi' | 'deeps
     assert.deepEqual(await peer.request('execute', input), first);
     await assert.rejects(peer.request('execute', { ...input, prompt: 'conflicting input' }), /identity_conflict/);
     await peer.request('release', { runId: activeRun });
-    if (provider === 'zcode') {
-      const refreshed = await peer.request<Inventory>('inventory', { refresh: true }, 120000);
-      assert.equal(refreshed.providers.find(p => p.key === provider)?.warmSessionId, first.result.sessionId);
-      evidence.refreshPreservedWarmSession = true;
-    }
-    // Codex cold resume must survive idle resource release; ZCode explicitly offers warm resume only.
+    // Codex cold resume must survive idle resource release.
     if (provider === 'codex') await delay(3000);
     activeRun = randomUUID();
     await peer.request('prepare', { runId: activeRun, sessionKey, files: [] });

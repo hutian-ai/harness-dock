@@ -1,6 +1,10 @@
 # 成熟模块复用评估（2026-10-12）
 
-当前结论（2026-10-19）：保持本地 Agent 接入基础设施定位；Codex/ZCode/Lobi/DeepSeek 的执行统一使用 ACPX，Provider 差异通过具名薄适配连接；Lobi/DeepSeek 的完整能力探测局部使用官方 ACP SDK；设备网络继续 ws + json-rpc-2.0，云端用 Docker Compose。下文保留各次取舍，旧执行方案由最新一节替代。
+当前结论（2026-10-28）：当前仅支持 macOS arm64 上的 Codex，保持本地 Agent 接入基础设施定位；Codex 经固定 ACPX/Codex ACP 与具名薄适配连接，设备网络继续 ws + json-rpc-2.0，云端 server 用 Docker Compose。Lobi/DeepSeek 只保留未支持的源码，ZCode 接入已移除。下文保留具名历史取舍，不构成当前支持或继续实施项。
+
+## 2026-10-27：安全依赖与原生分发能力
+
+采用 diff 8.0.3、Zod 4.6.6、MCP server/client 2.3.0，生产及全部依赖公告扫描清零。固定 pnpm 12.15.0，以原生 hoisted deploy 和 npm bundledDependencies 交付完整运行目录与离线 SDK 归档；不维护自定义依赖解析器或锁文件改写器。运行目录移除仍指向源码的 deploy 安装元数据，daemon 随附原补丁且保留 hardlink detach/manifest。ACPX/Codex ACP 的版本、补丁和设备执行语义不变。仓外空缓存 SDK 安装/ci、公开类型、完整确定性检查与真实 Codex 链路 Local 通过，具体范围归验证记录；未发布或切换现用服务。
 
 ## Socket.IO 4.8.4：本轮不替换
 

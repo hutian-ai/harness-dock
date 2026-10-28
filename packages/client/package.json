@@ -2,6 +2,7 @@
   "name": "@harness-dock/client",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -22,6 +23,9 @@
     "harness-dock-devices": "dist/device-console.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_NOTICES.json"
   ]
 }

@@ -16,16 +16,11 @@ export async function usableFile(path: string, nodeScript = false): Promise<bool
 export async function installedVersion(path: string, provider: ProviderKey): Promise<string | null> {
   try {
     const canonical = await realpath(path);
-    const appRoot = canonical.match(/^(.*\.app\/Contents)\//u)?.[1];
-    if (provider === 'zcode' && appRoot) {
-      const plist = await readFile(join(appRoot, 'Info.plist'), 'utf8');
-      return plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/u)?.[1] ?? null;
-    }
     let directory = dirname(canonical);
     for (let depth = 0; depth < 6; depth += 1) {
       try {
         const pkg = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')) as { name?: string; version?: string };
-        const expected = provider === 'codex' ? /^@openai\/codex$/u : provider === 'lobi' ? /^@xhs\/codewiz$/u : provider === 'zcode' ? /zcode/iu : /deepseek|dsh/iu;
+        const expected = provider === 'codex' ? /^@openai\/codex$/u : provider === 'lobi' ? /^@xhs\/codewiz$/u : /deepseek|dsh/iu;
         if (typeof pkg.name === 'string' && expected.test(pkg.name) && typeof pkg.version === 'string') return pkg.version;
       } catch { /* A CLI can be a native executable with no package metadata. */ }
       const parent = dirname(directory);

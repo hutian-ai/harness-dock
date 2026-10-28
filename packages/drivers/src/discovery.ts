@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { installedVersion, pathCandidates, usableFile } from './installation-lookup.ts';
 import { discoverCodexInstallation } from './codex-environment.ts';
 
-export type ProviderKey = 'codex' | 'lobi' | 'deepseek-harness' | 'zcode';
+export type ProviderKey = 'codex' | 'lobi' | 'deepseek-harness';
 export interface ProviderOverride {
   executable?: string;
   home?: string;
@@ -35,7 +35,6 @@ const providers: { key: ProviderKey; displayName: string; command: string; home:
   { key: 'codex', displayName: 'Codex', command: 'codex', home: '.codex', homeEnv: 'CODEX_HOME' },
   { key: 'lobi', displayName: 'Lobi', command: 'codewiz', home: '.codewiz' },
   { key: 'deepseek-harness', displayName: 'DeepSeek Harness', command: 'dsh', home: '.dsh', homeEnv: 'DSH_HOME' },
-  { key: 'zcode', displayName: 'ZCode', command: 'zcode', home: '.zcode', homeEnv: 'ZCODE_HOME' },
 ];
 
 async function managedLobi(home: string): Promise<Candidate[]> {
@@ -57,7 +56,7 @@ export async function discoverProviders(options: ProviderDiscoveryOptions = {}):
     options.signal?.throwIfAborted();
     const override = options.overrides?.[provider.key];
     if (provider.key === 'codex') return discoverCodexInstallation({ environment, homeDirectory: home, override, signal: options.signal });
-    const executableOverride = override?.executable ?? (provider.key === 'zcode' ? environment.ZCODE_BIN : undefined);
+    const executableOverride = override?.executable;
     const descriptor: DiscoveredProvider = {
       key: provider.key, displayName: provider.displayName, status: 'not_found', executable: null,
       home: resolve(override?.home ?? (provider.homeEnv ? environment[provider.homeEnv] : undefined) ?? join(home, provider.home)),
@@ -73,12 +72,6 @@ export async function discoverProviders(options: ProviderDiscoveryOptions = {}):
       }
     } else {
       if (provider.key === 'lobi') candidates.push(...await managedLobi(home));
-      if (provider.key === 'zcode') {
-        if (process.platform === 'darwin') {
-          for (const applications of [join(home, 'Applications'), '/Applications'])
-            candidates.push({ path: join(applications, 'ZCode.app', 'Contents', 'Resources', 'glm', 'zcode.cjs'), source: 'app' });
-        }
-      }
       const localInstallation = (await Promise.all(candidates.map(candidate => usableFile(candidate.path, /\.[cm]?js$/u.test(candidate.path))))).some(Boolean);
       candidates.push(...await pathCandidates(provider.command, environment, options.signal, !localInstallation));
 

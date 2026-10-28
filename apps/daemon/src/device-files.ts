@@ -197,24 +197,46 @@ export async function verifySkillFiles(stateDir: string, directory: string, expe
 /** Counts only managed files, without following links into the user work directory. */
 export async function managedStateBytes(stateDir: string, maxBytes: number): Promise<number> {
   let bytes = 0, visited = 0;
-  async function visit(path: string, depth: number): Promise<void> {
+  async function readInfo(path: string) {
+    try { return await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  }
+  function inspect(path: string, depth: number) {
     if (depth > 64 || ++visited > 200_000) { bytes = maxBytes + 1; return; }
-    let info;
-    try { info = await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+    return readInfo(path);
+  }
+  async function visit(path: string, depth: number, info: Awaited<ReturnType<typeof inspect>>): Promise<void> {
+    if (!info || bytes > maxBytes) return;
+    // A directory may have changed while earlier batch entries were visited; recheck before opening it.
+    if (info.isDirectory() && !info.isSymbolicLink()) info = await readInfo(path);
+    if (!info) return;
     if (!info.isDirectory() || info.isSymbolicLink()) { bytes += info.size; return; }
     const directory = await opendir(path);
+    let batch: string[] = [];
+    const flush = async () => {
+      const paths = batch; batch = [];
+      // Finish this bounded batch before descending; recursive directories cannot multiply concurrency.
+      const items = await Promise.all(paths.map(child => inspect(child, depth + 1)));
+      for (let index = 0; index < paths.length && bytes <= maxBytes; index++) {
+        const item = items[index];
+        if (!item) continue;
+        if (!item.isDirectory() || item.isSymbolicLink()) bytes += item.size;
+        else await visit(paths[index]!, depth + 1, item);
+      }
+    };
     for await (const entry of directory) {
-      await visit(join(path, entry.name), depth + 1);
+      batch.push(join(path, entry.name));
+      if (batch.length === 32) await flush();
       if (bytes > maxBytes) return;
     }
+    await flush();
   }
-  await visit(stateDir, 0);
+  await visit(stateDir, 0, await inspect(stateDir, 0));
   return bytes;
 }
 
 /** Only derived homes and skills are removed; the configured cwd and original provider homes are never targets. */
 export async function forgetSessionDirectories(stateDir: string, sessionKey: string): Promise<void> {
   const key = digest(sessionKey);
-  for (const parts of [['sessions', key], ['providers', 'codex', key], ['providers', 'zcode', key]])
+  for (const parts of [['sessions', key], ['providers', 'codex', key]])
     await removeManagedDirectory(stateDir, join(stateDir, ...parts));
 }

@@ -2,6 +2,7 @@
   "name": "@harness-dock/server",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -13,7 +14,10 @@
     "harness-dock-server": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_NOTICES.json"
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json"
@@ -23,6 +27,6 @@
     "@harness-dock/protocol": "workspace:*",
     "ws": "8.22.0",
     "json-rpc-2.0": "1.8.1",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   }
 }
