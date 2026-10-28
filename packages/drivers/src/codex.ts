@@ -9,6 +9,7 @@ import { nativeElicitationForm, nativeElicitationResponse, type HarnessExecution
 import { AnswerBudget, MAX_EVIDENCE_BYTES, readBoundedText } from './output-limits.ts';
 import { applyNativePermissionMode, nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
 import { decodeCodexEvents } from './codex-events.ts';
+import { codexAdapterEnvironment } from './codex-policy.ts';
 import { observeStartup, startStartupSpan } from './startup-trace.ts';
 import type { CodexMessage, CodexTokens } from './codex-events.ts';
 
@@ -68,11 +69,10 @@ export function createCodexRuntime(config: CodexExecutionConfig, command?: strin
     agentRegistry: createAgentRegistry({ overrides: { codex: command ?? [config.desktopHost?.nodePath ?? config.nativeNode ?? process.execPath, createRequire(import.meta.url).resolve('@agentclientprotocol/codex-acp')] } }),
     agentProcessEnvAllow: AGENT_PROCESS_ENV_ALLOW,
     agentProcessEnv: {
-      ...config.environment,
+      ...codexAdapterEnvironment(config),
       CODEX_HOME: config.codexHome, INITIAL_AGENT_MODE: config.sandbox ?? 'workspace-write',
       ...(config.codexBin ? { CODEX_PATH: config.codexBin } : {}),
-      ...(config.skillDirectory ? { HARNESS_DOCK_SKILL_ROOT: config.skillDirectory } : {}),
-      ...(config.desktopHost ? { CODEX_APP_TOOLS_PIPE_PATH: config.desktopHost.pipePath, CODEX_MCP_NODE_PATH: config.desktopHost.nodePath, HARNESS_DOCK_CODEX_DESKTOP_HOST: '1' } : {}),
+      ...(config.desktopHost ? { CODEX_APP_TOOLS_PIPE_PATH: config.desktopHost.pipePath, CODEX_MCP_NODE_PATH: config.desktopHost.nodePath } : {}),
       ...(!config.desktopHost && config.nativeNode ? { CODEX_MCP_NODE_PATH: config.nativeNode } : {}),
     },
     mcpServers: config.mcpServers,

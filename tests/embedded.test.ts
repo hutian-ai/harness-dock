@@ -30,11 +30,11 @@ test('embedding excludes host credentials while retaining the configured executi
     await writeFile(fixture, `import {createInterface} from 'node:readline';
 for await (const line of createInterface({input:process.stdin})) {
  const q=JSON.parse(line); if(q.id===undefined)continue;
- const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{secretPresent:process.env.${name}!==undefined,inheritedNames:Object.keys(process.env).filter(key=>${JSON.stringify(inheritedNames)}.includes(key)),explicitGrant:process.env.ACPX_AUTH_DOCK_EXPLICIT,home:process.env.CODEX_HOME,pathPresent:typeof process.env.PATH==='string',binary:process.env.CODEX_PATH,skillRoot:process.env.HARNESS_DOCK_SKILL_ROOT,nativeNode:process.env.CODEX_MCP_NODE_PATH,pipePresent:process.env.CODEX_APP_TOOLS_PIPE_PATH!==undefined,proxy:process.env.HTTPS_PROXY,certificate:process.env.NODE_EXTRA_CA_CERTS};
+ const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{secretPresent:process.env.${name}!==undefined,inheritedNames:Object.keys(process.env).filter(key=>${JSON.stringify(inheritedNames)}.includes(key)),explicitGrant:process.env.ACPX_AUTH_DOCK_EXPLICIT,home:process.env.CODEX_HOME,pathPresent:typeof process.env.PATH==='string',binary:process.env.CODEX_PATH,skillRoots:JSON.parse(process.env.CODEX_ACP_SKILL_ROOTS),nativeNode:process.env.CODEX_MCP_NODE_PATH,pipePresent:process.env.CODEX_APP_TOOLS_PIPE_PATH!==undefined,proxy:process.env.HTTPS_PROXY,certificate:process.env.NODE_EXTRA_CA_CERTS};
  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');
 }`);
     const observed = await runtime.dockControl({ command: { operation: 'inspect' }, signal: AbortSignal.timeout(5000) });
-    assert.deepEqual(observed, { secretPresent: false, inheritedNames: [], explicitGrant: 'synthetic-explicit-grant', home: root, pathPresent: true, binary:'/synthetic/codex', skillRoot:'/synthetic/skills',nativeNode:'/synthetic/native-node',pipePresent:false,
+    assert.deepEqual(observed, { secretPresent: false, inheritedNames: [], explicitGrant: 'synthetic-explicit-grant', home: root, pathPresent: true, binary:'/synthetic/codex', skillRoots:['/synthetic/skills'],nativeNode:'/synthetic/native-node',pipePresent:false,
       proxy:'http://proxy.example.test:8080',certificate:'/synthetic/ca.pem' });
   } finally {
     await runtime.shutdown();

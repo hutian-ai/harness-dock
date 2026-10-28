@@ -135,6 +135,20 @@ export async function acceptDevice(provider: 'codex' | 'lobi' | 'deepseek-harnes
     console.log(JSON.stringify({ provider, phase: 'same_session_completed' }));
     await peer.request('release', { runId: activeRun });
     const events = await peer.request<unknown[]>('events', { runId: firstRun, after: 0 }); assert(events.length > 0);
+    if (provider === 'codex') {
+      const observations = (events as { payload?: Record<string, unknown> }[]).map(event => event.payload).filter(event => event !== undefined);
+      const items = observations.filter(event => event.type === 'codex_event' && event.kind === 'item');
+      const completed = items.find(event => event.stage === 'completed' && (event.item as Record<string, unknown>)?.tool === 'synthetic_marker');
+      assert(completed, 'native MCP completion must survive standard ACP projection');
+      const item = completed.item as Record<string, unknown>;
+      assert(items.some(event => event.stage === 'started' && (event.item as Record<string, unknown>)?.id === item.id));
+      assert.equal(completed.threadId, first.result.threadId);
+      assert.equal(completed.turnId, first.result.turnId);
+      assert.notEqual(item.arguments, undefined);
+      assert((JSON.stringify(item.result) ?? '').includes(toolMarker), 'projected native tool result must retain its text');
+      assert(observations.some(event => event.type === 'tool_call' && event.toolCallId === item.id));
+      evidence.observationProjection = { nativeItemEvents: items.length, matchingStandardTool: true, mcpTextPreserved: true };
+    }
     const beforeReconnect = trace.length;
     sdk.disconnect(); await until(() => !sdk.connected, 'SDK_disconnect');
     await until(() => sdk.connected && peer.connected, 'SDK_reconnect');
