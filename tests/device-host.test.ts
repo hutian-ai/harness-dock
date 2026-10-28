@@ -6,7 +6,7 @@ import { lstat, mkdtemp, mkdir, readFile, rename, rm, symlink, link, writeFile }
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { DeviceHost } from '../apps/daemon/src/device-host.ts';
-import { managedStateBytes, forgetSessionDirectories } from '../apps/daemon/src/device-files.ts';
+import { managedStateBytes, forgetSessionDirectories, prepareDirectories } from '../apps/daemon/src/device-files.ts';
 import { RotatingLog } from '../apps/daemon/src/rotating-log.ts';
 import { DeviceStore } from '../apps/daemon/src/device-store.ts';
 import { ObservationWriter } from '../apps/daemon/src/observation-writer.ts';
@@ -217,6 +217,103 @@ test('device preparation preserves identity and stable skills, and output public
   await assert.rejects(host.prepare({ runId: 'run:three', sessionKey: 'session', files }), /skill_cache_mismatch/);
   await host.release('run:two');
   assert.equal(await readFile(secret, 'utf8'), 'must not be published or deleted');
+});
+
+test('preparation retries and release recover unregistered directories without altering execution evidence', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'dock-prepare-recovery-'));
+  const config = { mode: 'device' as const, nodeId: randomUUID(), token: 'x'.repeat(32),
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 } };
+  const files = [{ path: 'skill/SKILL.md', contentBase64: Buffer.from('synthetic skill').toString('base64') }];
+  // Reproduce a restart after files were published but before their SQLite registration.
+  const first = new DeviceHost(config);
+  await first.close();
+  const retry = await prepareDirectories(config.stateDir, 'retry', 'session', files, root);
+  const release = await prepareDirectories(config.stateDir, 'release', 'session', files, root);
+  const admitted = await prepareDirectories(config.stateDir, 'admitted', 'session', files, root);
+  await writeFile(join(retry.outputDirectory, 'stale.txt'), Buffer.alloc(config.resources.maxStateBytes));
+  await writeFile(join(admitted.outputDirectory, 'evidence.txt'), 'must remain');
+  const store = new DeviceStore(config.nodeId, config.stateDir);
+  store.admit({ runId: 'admitted', provider: 'codex', input: 'synthetic', state: 'unknown' });
+  store.close();
+  const host = new DeviceHost(config);
+  t.after(async () => { await host.close(); await rm(root, { recursive: true, force: true }); });
+
+  assert.deepEqual(await host.prepare({ runId: 'retry', sessionKey: 'session', files }), retry);
+  await assert.rejects(readFile(join(retry.outputDirectory, 'stale.txt')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(retry.skillDirectory, 'skill/SKILL.md'), 'utf8'), 'synthetic skill');
+  await writeFile(join(retry.outputDirectory, 'registered.txt'), 'keep registered output');
+  assert.deepEqual(await host.prepare({ runId: 'retry', sessionKey: 'session', files }), retry);
+  assert.equal(await readFile(join(retry.outputDirectory, 'registered.txt'), 'utf8'), 'keep registered output');
+  await host.release('release');
+  await assert.rejects(lstat(dirname(release.outputDirectory)), { code: 'ENOENT' });
+  await assert.rejects(host.prepare({ runId: 'admitted', sessionKey: 'session', files }), /preparation_identity_conflict/);
+  await host.release('admitted');
+  assert.equal(await readFile(join(admitted.outputDirectory, 'evidence.txt'), 'utf8'), 'must remain');
+  assert.equal(host.getExecution('admitted')?.state, 'unknown');
+
+  const unsafe = await prepareDirectories(config.stateDir, 'unsafe', 'session', files, root);
+  const outside = join(root, 'outside');
+  await mkdir(outside);
+  await writeFile(join(outside, 'private.txt'), 'must not be deleted');
+  await rename(dirname(unsafe.outputDirectory), `${dirname(unsafe.outputDirectory)}.saved`);
+  await symlink(outside, dirname(unsafe.outputDirectory));
+  await assert.rejects(host.prepare({ runId: 'unsafe', sessionKey: 'session', files }), /unsafe_managed_directory/);
+  await assert.rejects(host.release('unsafe'), /unsafe_managed_directory/);
+  assert.equal(await readFile(join(outside, 'private.txt'), 'utf8'), 'must not be deleted');
+});
+
+test('refreshed capabilities validate reused adapters before starting another execution', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'dock-capability-refresh-'));
+  const executable = join(root, 'codex');
+  await writeFile(executable, '#!/bin/sh\necho "codex-cli 0.1.0"\n', { mode: 0o700 });
+  let effort = 'low', mode = 'original-mode', probes = 0, owners = 0;
+  const executions: { effort?: string; mode?: string }[] = [];
+  const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
+    providers: { codex: { executable, home: root } },
+  }, createProviderAdapters(() => {
+    owners++;
+    return {
+      inspect: async () => {
+        probes++;
+        return { models: [{ id: 'synthetic', efforts: [effort], serviceTiers: [] }],
+          permissionModes: [{ value: mode, name: mode }],
+          config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: false } };
+      },
+      reconcile: async () => null, close: async () => {},
+      execute: async input => {
+        executions.push({ effort: input.effort, mode: input.mode });
+        await input.onReady(`thread:${input.runId}`);
+        return { runId: input.runId, fingerprint: 'synthetic', state: 'completed', threadId: `thread:${input.runId}`,
+          turnId: input.runId, messages: [{ id: input.runId, phase: 'final_answer', text: 'synthetic' }] } as CodexEvidence;
+      },
+    };
+  }));
+  t.after(async () => { await host.close(); await rm(root, { recursive: true, force: true }); });
+  const request = (runId: string, config: { effort?: string; mode?: string }) => ({
+    provider: 'codex', runId, sessionKey: 'session', prompt: 'synthetic', model: 'synthetic', config,
+  });
+  host.bind(async () => null);
+  await host.inventory();
+  await host.prepare({ runId: 'first', sessionKey: 'session' });
+  await host.execute(request('first', { effort, mode }));
+  assert.equal(host.getExecution('first')?.state, 'completed');
+  await host.release('first');
+
+  effort = 'high'; mode = 'updated-mode';
+  await host.inventory(true);
+  await host.prepare({ runId: 'second', sessionKey: 'session' });
+  await assert.rejects(host.execute(request('second', { effort: 'low', mode })), /configuration_unavailable/);
+  await assert.rejects(host.execute(request('second', { effort, mode: 'original-mode' })), /permission_mode_unavailable/);
+  assert.equal(executions.length, 1, 'invalid configurations must not dispatch a prompt');
+  assert.equal(host.getExecution('second'), null);
+  const second = request('second', { effort, mode });
+  await host.execute(second);
+  assert.equal(host.getExecution('second')?.state, 'completed');
+  await host.execute(second);
+  assert.deepEqual(executions, [{ effort: 'low', mode: 'original-mode' }, { effort: 'high', mode: 'updated-mode' }]);
+  assert.equal(probes, 2, 'admission reuses the latest probe without starting another probe');
+  assert.equal(owners, 2, 'refresh does not replace the session adapter');
 });
 
 test('device admission is durable and restart leaves interrupted executions unknown without replay', async t => {
