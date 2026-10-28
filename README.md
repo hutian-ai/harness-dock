@@ -18,23 +18,56 @@ Harness 负责模型循环、工具、插件、skills、memory 和原生权限�
 ## 组件
 
 ```mermaid
-flowchart LR
-  A["应用 / Agent / 自动化服务"] --> SDK["client SDK"]
-  SDK --> S["server"]
-  D["设备 Daemon"] -->|"主动连接"| S
-  D --> R["Driver / ACPX"]
-  R --> H["原生 Codex"]
+flowchart TB
+  A["应用 / Agent / 自动化服务"] --> SDK["Client SDK"]
+  SDK -->|"主动建立 WSS"| S["Dock Server：身份校验、设备授权、转发"]
+  subgraph MAC["执行设备：macOS arm64"]
+    D["独立 Daemon / DeviceHost"]
+    DB[("本地 SQLite：执行身份、状态、事件")]
+    H["受管的 Codex 执行链"]
+    D <--> DB
+    D --> H
+  end
+  D -->|"主动建立 WSS"| S
 ```
+
+两条 WSS 箭头表示连接建立方向；连接建立后，请求、结果和回调双向传输。设备通常不需要开放公网入站端口。Server 负责认证和转发，执行进程与记录由设备 Daemon 持有。
 
 | 组件 | 职责 |
 | --- | --- |
 | client | 连接 server、选择获授权设备、调用执行方法与处理回调 |
 | server | 设备配对、应用访问范围、连接与请求转发 |
 | daemon | 本机安装发现、执行准入、Provider 进程、状态与托管文件 |
-| drivers | 原生环境选择与具名协议适配；当前使用 ACPX / Codex ACP |
+| drivers | dock 的 Codex 集成层：环境选择、回调、事件与结果差异；调用 ACPX |
 | protocol | 公共方法、类型、身份和传输限制 |
 
 server 是受信任的转发节点，能够读取转发内容。远程连接使用校验证书的 TLS；明文 WS 仅用于回环地址。
+
+### Codex 执行分层
+
+```mermaid
+flowchart TB
+  D["DeviceHost：准入、去重、持久化与生命周期"]
+  I["dock 集成层：ProviderAdapter → CodexHost → CodexExecutor"]
+  X["ACPX：ACP 客户端运行库"]
+  P["codex-acp：ACP Agent 端协议适配器"]
+  C["原生 Codex：模型循环、工具、会话与权限"]
+  D --> I --> X
+  X -->|"ACP 协议"| P
+  P --> C
+```
+
+**ACPX 在 `codex-acp` 上层，dock 集成层在 ACPX 上层。** 本仓库的 `packages/drivers` 命名指 dock 的集成代码；`codex-acp` 是独立依赖，负责实现 ACP 的 Agent 端。ACP 是协议，ACPX 是客户端运行库，两者职责不同。Driver 一词在本文指 dock 集成层，协议适配器明确称为 `codex-acp`。
+
+Driver 和 ACPX 库运行在 Daemon 内；由 ACPX 管理的 `codex-acp` 接入所选本机 Codex。当前固定使用这条执行路径。调用方通过连接 SDK 使用设备，原生登录、配置与工具由设备上的 Harness 管理。代码对应关系与协议边界见 [Codex 集成与 ACP 分层](apps/docs-site/README.md#drivers)。
+
+### 一轮执行与恢复
+
+调用方先 `prepare`，再 `execute`。Daemon 在启动原生执行前，把 `runId` 和输入指纹持久化到本地 SQLite；同一身份与相同输入关联原执行，不同输入拒绝。集成层通过 ACPX 的 `ensureSession`、配置和 `startTurn` 接入 Codex，过程事件、原生审批和调用方工具请求通过 Server 回到应用。
+
+终态以原生证据为准。确认结束后，调用方 `collect` 收存需要的输出，再 `release` 托管资源；业务结果仍由应用验收。应用断线不会自动结束设备执行，但依赖应用响应的工具或审批可能失败或被拒绝。重连只恢复连接与观察，不重发 prompt、工具调用或审批决定；按原 `runId` 查询 `getExecution` / `events`，必要时显式 `reconcile`。Daemon 重启后，未确认结束的记录保持 `unknown`，不自动恢复原进程。
+
+部署架构、执行时序、身份与恢复规则见 [架构与执行契约](apps/docs-site/README.md#architecture)。
 
 ## 开始使用
 
@@ -131,6 +164,7 @@ await client.close();
 - [server](apps/docs-site/README.md#server)：Linux 部署、TLS 与配对管理
 - [设备维护](apps/docs-site/README.md#installation)：安装、自启、升级与回滚
 - [架构](apps/docs-site/README.md#architecture)：职责、协议和扩展边界
+- [Codex 集成与 ACP 分层](apps/docs-site/README.md#drivers)：dock 集成层、ACPX、codex-acp 与原生 Harness
 - [支持范围](apps/docs-site/README.md#support)：平台、能力与限制
 - [资源管理](apps/docs-site/README.md#lifecycle)：容量、保留与释放
 - [验证](apps/docs-site/README.md#verification)：测试和真实执行的验收方法

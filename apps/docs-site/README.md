@@ -44,6 +44,8 @@ npm run preview
 - public/app.js：搜索、菜单、复制和主题。
 - build.mjs：静态页面、目录、导航、搜索索引和 .nojekyll。
 
+架构与驱动页使用正文内的静态 SVG 图，样式位于 `public/style.css` 的 `.doc-diagram` 规则；无需 Mermaid 脚本、CDN 或外部字体。修改时保留每张图的 title/desc、唯一 ID 和文字说明，并检查亮色、暗色与窄屏局部滚动。根 README 使用 GitHub 可渲染的 Mermaid，分层与文档站保持一致。
+
 产品与维护文档统一维护在 src/content.json；不再保留重复的 docs/ 目录。支持范围为 macOS arm64 + Codex Developer Alpha，其他 Harness 尚未支持。文档站不包含真实地址、设备身份或凭据。
 
 构建、链接检查和页面 QA 不替代产品的真实设备安装、模型执行或部署验收。
@@ -74,7 +76,7 @@ SDK 接入：启动预览后访问 `/sdk/`。
 
 ### drivers
 
-Codex 驱动：启动预览后访问 `/drivers/`。
+Codex 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分 dock 集成层、ACPX 客户端运行库、codex-acp 协议适配器与原生 Codex。
 
 ### support
 
