@@ -4,10 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DeepSeekAcpExecutor } from "../packages/drivers/src/deepseek.ts";
-import { LobiAcpExecutor } from "../packages/drivers/src/lobi.ts";
 import type { AcpExecutor, AcpPermissionRequest } from "../packages/drivers/src/acp-types.ts";
 
-type DriverKey = "deepseek-harness" | "lobi";
+type DriverKey = "deepseek-harness";
 type Scenario =
   | "spawn_failed"
   | "setup_cancel"
@@ -87,28 +86,9 @@ lines.on("close",()=>process.exit(0));
     scenario === "spawn_failed"
       ? join(directory, "missing-provider")
       : executable;
-  let driver: AcpExecutor;
-  if (key === "deepseek-harness")
-    driver = new DeepSeekAcpExecutor({
-      env: process.env,
-      executable: command,
-      models: ["test-model"],
-    });
-  else {
-    driver = new LobiAcpExecutor({
-      env: process.env,
-      executable: command,
-      probeCommand: async () => ({ exitCode: 0, stdout: "0.1.95", stderr: "" }),
-      probeAcp: async () => ({
-        protocolVersion: 1,
-        loadSession: true,
-        resumeSession: true,
-        models: ["test-model"],
-        modes: ["plan", "build"],
-      }),
-    });
-    await driver.probe(new AbortController().signal);
-  }
+  const driver: AcpExecutor = new DeepSeekAcpExecutor({
+    env: process.env, executable: command, models: ["test-model"],
+  });
   const controller = new AbortController();
   let abortedAt: number | undefined;
   controller.signal.addEventListener(
@@ -210,8 +190,8 @@ lines.on("close",()=>process.exit(0));
   }
 }
 
-for (const key of ["deepseek-harness", "lobi"] as const) {
-  if (key === "lobi") test("ACP initialization and session creation retain independent 15-second budgets", { timeout: 25_000 }, async () => {
+for (const key of ["deepseek-harness"] as const) {
+  test("ACP initialization and session creation retain independent 15-second budgets", { timeout: 25_000 }, async () => {
     const { result, observations } = await runScenario(key, "slow_setup");
     assert.equal(result.state, "completed");
     assert.equal(observations.filter(entry => entry.method === "session/new").length, 1);
@@ -225,7 +205,6 @@ for (const key of ["deepseek-harness", "lobi"] as const) {
       result.errorCode,
       {
         "deepseek-harness": "deepseek_harness_acp_start_failed",
-        lobi: "lobi_codewiz_acp_start_failed",
       }[key],
     );
   });
@@ -265,8 +244,7 @@ for (const key of ["deepseek-harness", "lobi"] as const) {
         ? { action: "accept", content: { answer: "right" } } : { action: "decline" });
     });
   }
-  // Shared ACP policies run through Lobi; every Provider retains the integration checks above.
-  if (key === "deepseek-harness") continue;
+  // Shared ACP lifecycle and permission policies use the remaining public harness adapter.
   test(
     `${key} cancels during setup without dispatching a prompt`,
     { timeout: 3_000 },
@@ -284,7 +262,7 @@ for (const key of ["deepseek-harness", "lobi"] as const) {
     async () => {
       const { result, observations } = await runScenario(key, "unconfirmed");
       assert.equal(result.state, "unknown");
-      if (key === "lobi") assert.equal(result.sessionId, "session-1");
+      assert.equal(result.sessionId, "session-1");
       assert.ok(
         observations.some((entry) => entry.method === "session/cancel"),
       );

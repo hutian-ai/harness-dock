@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs-site/**'
+      - 'apps/docs-site/**'
       - '.github/workflows/docs-pages.yml'
   pull_request:
     paths:
-      - 'docs-site/**'
+      - 'apps/docs-site/**'
       - '.github/workflows/docs-pages.yml'
   workflow_dispatch:
 
@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 5
     defaults:
       run:
-        working-directory: docs-site
+        working-directory: apps/docs-site
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -43,7 +43,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
-          path: docs-site/dist
+          path: apps/docs-site/dist
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DOCS_PAGES_ENABLED == 'true'

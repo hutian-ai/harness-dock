@@ -40,9 +40,9 @@ server 是受信任的转发节点，能够读取转发内容。远程连接使�
 
 准备 Node.js 22.19+，并在执行设备安装、登录 Codex。使用预构建运行包时不需要 Git 或 pnpm。
 
-1. 按 [快速开始](docs/quickstart.md) 初始化 server、配对设备并完成首次执行。
-2. 按 [SDK 指南](docs/sdk.md) 将设备接入自己的应用。
-3. 跨机器运行时，配置 [Linux server 与 WSS](docs/server.md)。
+1. 按 [快速开始](apps/docs-site/README.md#quickstart) 初始化 server、配对设备并完成首次执行。
+2. 按 [SDK 指南](apps/docs-site/README.md#sdk) 将设备接入自己的应用。
+3. 跨机器运行时，配置 [Linux server 与 WSS](apps/docs-site/README.md#server)。
 
 SDK 通过随候选包提供的归档安装：
 
@@ -59,19 +59,19 @@ console.table(client.listNodes());
 await client.close();
 ```
 
-完整执行、审批和恢复示例见 [SDK 指南](docs/sdk.md)。
+完整执行、审批和恢复示例见 [SDK 指南](apps/docs-site/README.md#sdk)。
 
 ## 文档
 
-- [快速开始](docs/quickstart.md)：本机闭环与首次验证
-- [SDK](docs/sdk.md)：方法、回调、执行身份与错误处理
-- [server](docs/server.md)：Linux 部署、TLS 与配对管理
-- [设备维护](docs/device.md)：安装、自启、升级与回滚
-- [架构](docs/architecture.md)：职责、协议和扩展边界
-- [支持范围](docs/support.md)：平台、能力与限制
-- [资源管理](docs/resource-lifecycle.md)：容量、保留与释放
-- [验证](docs/validation.md)：测试和真实执行的验收方法
-- [构建与分发](docs/releasing.md)：独立运行包、CI 和候选产物
+- [快速开始](apps/docs-site/README.md#quickstart)：本机闭环与首次验证
+- [SDK](apps/docs-site/README.md#sdk)：方法、回调、执行身份与错误处理
+- [server](apps/docs-site/README.md#server)：Linux 部署、TLS 与配对管理
+- [设备维护](apps/docs-site/README.md#installation)：安装、自启、升级与回滚
+- [架构](apps/docs-site/README.md#architecture)：职责、协议和扩展边界
+- [支持范围](apps/docs-site/README.md#support)：平台、能力与限制
+- [资源管理](apps/docs-site/README.md#lifecycle)：容量、保留与释放
+- [验证](apps/docs-site/README.md#verification)：测试和真实执行的验收方法
+- [构建与分发](apps/docs-site/README.md#distribution)：独立运行包、CI 和候选产物
 
 ## 从源码开发
 
@@ -87,4 +87,4 @@ pnpm check
 
 ## 产品文档站
 
-面向使用者的产品介绍、安装、使用与 SDK 指南位于 [`docs-site/`](docs-site/README.md)。本地运行 `node docs-site/build.mjs` 后执行 `node docs-site/serve.mjs` 预览；GitHub Pages 配置与首次启用条件见文档站说明。
+面向使用者的产品介绍、安装、使用与 SDK 指南位于 [`apps/docs-site/`](apps/docs-site/README.md)。本地运行 `node apps/docs-site/build.mjs` 后执行 `node apps/docs-site/serve.mjs` 预览；GitHub Pages 配置与首次启用条件见文档站说明。

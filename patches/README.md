@@ -24,8 +24,8 @@
 
 ## 维护与删除条件
 
-这些本地接缝不是任意 RPC 代理。原始 reasoning、文件补丁和二进制结果不进入受限展示 metadata；原始信封由 drivers 解码，具体契约见 [Driver 开发](../docs/drivers.md)。
+这些本地接缝不是任意 RPC 代理。原始 reasoning、文件补丁和二进制结果不进入受限展示 metadata；原始信封由 drivers 解码，具体契约见 [Driver 开发](../apps/docs-site/README.md#drivers)。
 
 升级时核对固定依赖、补丁逆向检查、公开类型、审批、精确结果、取消、续接、恢复和进程清理。上游提供等价接口后删除对应接缝，不能用会话加载代替只读查询，或用异常 fallback 绕过原生语义。
 
-验证方法见 [验证与验收](../docs/validation.md)，许可见 [第三方说明](../THIRD_PARTY_NOTICES.md)。
+验证方法见 [验证与验收](../apps/docs-site/README.md#verification)，许可见 [第三方说明](../THIRD_PARTY_NOTICES.md)。

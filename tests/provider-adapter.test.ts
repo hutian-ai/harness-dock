@@ -4,7 +4,7 @@ import { CodexHost } from '../packages/drivers/src/codex-host.ts';
 import { createProviderAdapter, createProviderAdapters, type ProviderExecution } from '../packages/drivers/src/provider-adapter.ts';
 import type { AcpInspection } from '../packages/drivers/src/acp-types.ts';
 
-for (const key of ['lobi', 'deepseek-harness'] as const) {
+for (const key of ['deepseek-harness'] as const) {
   test(`${key} carries verified probe state into fresh session adapters without widening capabilities`, async () => {
     const signal = new AbortController().signal;
     const beforeSpawn = new Error('ready_before_native_spawn');
@@ -37,8 +37,6 @@ for (const key of ['lobi', 'deepseek-harness'] as const) {
     assert.throws(() => noResume.validate(input), /session_resume_unsupported/);
     await assert.rejects(noResume.execute(input), /session resume is unavailable/);
     await assert.rejects(create().execute(input), /MCP tool transport has not been verified/);
-    if (key === 'lobi')
-      await assert.rejects(adapter.execute({ ...input, config: { mode: 'plan' } }), /mode is unavailable/);
   });
 }
 
@@ -55,7 +53,7 @@ test('native recovery keeps legacy provider context and never probes or dispatch
     close: async () => {},
   });
   const signal = new AbortController().signal;
-  assert.equal(await adapters.reconcile('lobi', context, result.runId, signal), null);
+  assert.equal(await adapters.reconcile('unregistered-provider', context, result.runId, signal), null);
   assert.equal(await adapters.reconcile('codex', undefined, result.runId, signal), null);
   assert.equal(queries, 0);
   assert.equal(await adapters.reconcile('codex', context, result.runId, signal), result);

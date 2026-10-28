@@ -45,7 +45,7 @@ function canonical(value: unknown): string {
 function executionInput(value: unknown): DeviceExecuteInput {
   const input = object(value);
   for (const key of Object.keys(input)) if (!['provider', 'runId', 'sessionKey', 'prompt', 'model', 'config', 'resumeSessionId', 'previousRunId', 'retainSession', 'tools'].includes(key)) throw new Error('unsupported_execution_field');
-  if (!['codex', 'lobi', 'deepseek-harness'].includes(String(input.provider))) throw new Error('unsupported_provider');
+  if (!['codex', 'deepseek-harness'].includes(String(input.provider))) throw new Error('unsupported_provider');
   identity(input.runId);
   for (const key of ['sessionKey', 'model', 'resumeSessionId', 'previousRunId']) if (input[key] !== undefined) identity(input[key]);
   if (typeof input.prompt !== 'string' || !input.prompt || input.prompt.length > 1_000_000) throw new Error('invalid_prompt');

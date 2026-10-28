@@ -32,7 +32,7 @@ test("extracts ACP tool diff content as a deduplicable delta event", async () =>
   );
 });
 
-test("normalizes a CodeWiz raw output patch into the shared ACP delta event", async () => {
+test("normalizes a ACP raw output patch into the shared ACP delta event", async () => {
   const path = "/workspace/new.txt";
   const update = {
     sessionUpdate: "tool_call_update",
@@ -47,7 +47,7 @@ test("normalizes a CodeWiz raw output patch into the shared ACP delta event", as
     },
   } as unknown as SessionUpdate;
 
-  const event = await acpFileChangeEvent("lobi", "session-1", update);
+  const event = await acpFileChangeEvent("acp", "session-1", update);
   assert.equal(event?.kind, "delta");
   if (event?.kind !== "delta") return;
   assert.deepEqual(event.changes, [
@@ -55,7 +55,7 @@ test("normalizes a CodeWiz raw output patch into the shared ACP delta event", as
   ]);
 });
 
-test("reconstructs the previous file text from a CodeWiz patch and current file", async () => {
+test("reconstructs the previous file text from a ACP patch and current file", async () => {
   const path = "/workspace/existing.txt";
   const update = {
     sessionUpdate: "tool_call_update",
@@ -70,7 +70,7 @@ test("reconstructs the previous file text from a CodeWiz patch and current file"
     },
   } as unknown as SessionUpdate;
 
-  const event = await acpFileChangeEvent("lobi", "session-1", update);
+  const event = await acpFileChangeEvent("acp", "session-1", update);
   assert.equal(event?.kind, "delta");
   if (event?.kind !== "delta") return;
   assert.deepEqual(event.changes, [
@@ -78,7 +78,7 @@ test("reconstructs the previous file text from a CodeWiz patch and current file"
   ]);
 });
 
-test("normalizes a CodeWiz deletion when the current file no longer exists", async () => {
+test("normalizes a ACP deletion when the current file no longer exists", async () => {
   const path = "/workspace/deleted.txt";
   const update = {
     sessionUpdate: "tool_call_update",
@@ -93,7 +93,7 @@ test("normalizes a CodeWiz deletion when the current file no longer exists", asy
   } as unknown as SessionUpdate;
 
   const event = await acpFileChangeEvent(
-    "lobi",
+    "acp",
     "session-1",
     update,
     async () => null,

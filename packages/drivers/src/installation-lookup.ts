@@ -20,7 +20,7 @@ export async function installedVersion(path: string, provider: ProviderKey): Pro
     for (let depth = 0; depth < 6; depth += 1) {
       try {
         const pkg = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')) as { name?: string; version?: string };
-        const expected = provider === 'codex' ? /^@openai\/codex$/u : provider === 'lobi' ? /^@xhs\/codewiz$/u : /deepseek|dsh/iu;
+        const expected = provider === 'codex' ? /^@openai\/codex$/u : /deepseek|dsh/iu;
         if (typeof pkg.name === 'string' && expected.test(pkg.name) && typeof pkg.version === 'string') return pkg.version;
       } catch { /* A CLI can be a native executable with no package metadata. */ }
       const parent = dirname(directory);

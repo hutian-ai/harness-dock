@@ -18,7 +18,7 @@ test('device crash preserves admission, excludes a second owner and never redisp
   await writeFile(executable, `#!${process.execPath}\nconsole.log('codex-cli 1.0.0');\n`, { mode: 0o700 });
   const config: DeviceConfig = { mode: 'device', nodeId: randomUUID(), token: 'synthetic'.repeat(5),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { executable, home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } };
+    providers: { codex: { executable, home: root }, 'deepseek-harness': { disabled: true } } };
   const input = { provider: 'codex', runId: randomUUID(), model: 'synthetic', prompt: 'synthetic' };
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
     import {DeviceHost} from './apps/daemon/src/device-host.ts';
@@ -55,13 +55,13 @@ test('device recovery delegates an opaque context for a different provider witho
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state') };
   const context = { nativeReference: 'original-turn', providerRevision: 'synthetic' };
   const store = new DeviceStore(config.nodeId, config.stateDir);
-  store.admit({ runId: 'original-run', provider: 'lobi', input: 'original-identity', state: 'running', environment: context });
+  store.admit({ runId: 'original-run', provider: 'deepseek-harness', input: 'original-identity', state: 'running', environment: context });
   store.close();
   let queries = 0, confirmed = false;
   const adapters: ProviderAdapters = {
     create: () => assert.fail('recovery must not discover, inspect or create an execution adapter'),
     reconcile: async (provider, saved, runId, signal) => {
-      queries++; assert.equal(provider, 'lobi'); assert.deepEqual(saved, context); assert.equal(runId, 'original-run');
+      queries++; assert.equal(provider, 'deepseek-harness'); assert.deepEqual(saved, context); assert.equal(runId, 'original-run');
       signal.throwIfAborted();
       return confirmed ? { state: 'completed' } : null;
     },
@@ -73,9 +73,9 @@ test('device recovery delegates an opaque context for a different provider witho
     assert.equal(await host.reconcile('original-run'), null);
     assert.equal(host.getExecution('original-run')?.state, 'unknown');
     confirmed = true;
-    assert.deepEqual(await host.reconcile('original-run'), { provider: 'lobi', result: { state: 'completed' } });
+    assert.deepEqual(await host.reconcile('original-run'), { provider: 'deepseek-harness', result: { state: 'completed' } });
     assert.equal(host.getExecution('original-run')?.state, 'completed');
-    assert.deepEqual(await host.reconcile('original-run'), { provider: 'lobi', result: { state: 'completed' } });
+    assert.deepEqual(await host.reconcile('original-run'), { provider: 'deepseek-harness', result: { state: 'completed' } });
     assert.equal(queries, 2, 'terminal reads must not query the native provider again');
   } finally { await host.close(); }
   const saved = new DeviceStore(config.nodeId, config.stateDir);
