@@ -16,25 +16,30 @@ test('embedding excludes host credentials while retaining the configured executi
   const fixture = join(root, 'agent.mjs');
   const name = 'HUTIAN_EMBEDDED_TEST_SECRET';
   const previous = process.env[name];
+  const inheritedNames = ['ACPX_AUTH_DOCK_AMBIENT', 'ACPX_AUTH_DOCK_LATE', 'LC_DOCK_SECRET', 'XDG_DOCK_SECRET'];
+  const inheritedPrevious = new Map(inheritedNames.map(key => [key, process.env[key]]));
+  for (const key of inheritedNames.filter(key => key !== 'ACPX_AUTH_DOCK_LATE')) process.env[key] = 'synthetic-parent-secret';
   const previousNode = process.env.CODEX_MCP_NODE_PATH, previousPipe = process.env.CODEX_APP_TOOLS_PIPE_PATH;
   process.env[name] = 'synthetic-secret';
   process.env.CODEX_MCP_NODE_PATH = '/synthetic/native-node';
   process.env.CODEX_APP_TOOLS_PIPE_PATH = '/synthetic/another-chat';
   const runtime = createCodexRuntime({ cwd: root, codexHome: root, stateDir: join(root, 'state'), codexBin: '/synthetic/codex', nativeNode: '/synthetic/native-node', skillDirectory: '/synthetic/skills',
-    environment: { HTTPS_PROXY: 'http://proxy.example.test:8080', NODE_EXTRA_CA_CERTS: '/synthetic/ca.pem', CODEX_HOME: '/wrong-home' } }, [process.execPath, fixture]);
+    environment: { HTTPS_PROXY: 'http://proxy.example.test:8080', NODE_EXTRA_CA_CERTS: '/synthetic/ca.pem', CODEX_HOME: '/wrong-home', ACPX_AUTH_DOCK_EXPLICIT: 'synthetic-explicit-grant' } }, [process.execPath, fixture]);
+  process.env.ACPX_AUTH_DOCK_LATE = 'synthetic-late-parent-secret';
   try {
     await writeFile(fixture, `import {createInterface} from 'node:readline';
 for await (const line of createInterface({input:process.stdin})) {
  const q=JSON.parse(line); if(q.id===undefined)continue;
- const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{secretPresent:process.env.${name}!==undefined,home:process.env.CODEX_HOME,pathPresent:typeof process.env.PATH==='string',binary:process.env.CODEX_PATH,skillRoot:process.env.HARNESS_DOCK_SKILL_ROOT,nativeNode:process.env.CODEX_MCP_NODE_PATH,pipePresent:process.env.CODEX_APP_TOOLS_PIPE_PATH!==undefined,proxy:process.env.HTTPS_PROXY,certificate:process.env.NODE_EXTRA_CA_CERTS};
+ const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{secretPresent:process.env.${name}!==undefined,inheritedNames:Object.keys(process.env).filter(key=>${JSON.stringify(inheritedNames)}.includes(key)),explicitGrant:process.env.ACPX_AUTH_DOCK_EXPLICIT,home:process.env.CODEX_HOME,pathPresent:typeof process.env.PATH==='string',binary:process.env.CODEX_PATH,skillRoot:process.env.HARNESS_DOCK_SKILL_ROOT,nativeNode:process.env.CODEX_MCP_NODE_PATH,pipePresent:process.env.CODEX_APP_TOOLS_PIPE_PATH!==undefined,proxy:process.env.HTTPS_PROXY,certificate:process.env.NODE_EXTRA_CA_CERTS};
  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');
 }`);
     const observed = await runtime.dockControl({ command: { operation: 'inspect' }, signal: AbortSignal.timeout(5000) });
-    assert.deepEqual(observed, { secretPresent: false, home: root, pathPresent: true, binary:'/synthetic/codex', skillRoot:'/synthetic/skills',nativeNode:'/synthetic/native-node',pipePresent:false,
+    assert.deepEqual(observed, { secretPresent: false, inheritedNames: [], explicitGrant: 'synthetic-explicit-grant', home: root, pathPresent: true, binary:'/synthetic/codex', skillRoot:'/synthetic/skills',nativeNode:'/synthetic/native-node',pipePresent:false,
       proxy:'http://proxy.example.test:8080',certificate:'/synthetic/ca.pem' });
   } finally {
     await runtime.shutdown();
     if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
+    for (const [key, value] of inheritedPrevious) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     if (previousNode === undefined) delete process.env.CODEX_MCP_NODE_PATH; else process.env.CODEX_MCP_NODE_PATH = previousNode;
     if (previousPipe === undefined) delete process.env.CODEX_APP_TOOLS_PIPE_PATH; else process.env.CODEX_APP_TOOLS_PIPE_PATH = previousPipe;
     await rm(root, { recursive: true });
@@ -139,6 +144,8 @@ for await (const line of createInterface({input:process.stdin})) {
 test('device idle release waits for an active approval and fences shutdown against in-flight provider close', { timeout: 10_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'dock-idle-'));
   t.after(() => rm(root, { recursive: true, force: true }));
+  const executable = join(root, 'codex');
+  await writeFile(executable, `#!${process.execPath}\nconsole.log('codex-cli 1.0.0');\n`, { mode: 0o700 });
   let allow!: (decision: 'allow' | 'deny') => void;
   const approval = new Promise<'allow' | 'deny'>(resolve => { allow = resolve; });
   let finishClose!: () => void;
@@ -160,7 +167,7 @@ test('device idle release waits for an active approval and fences shutdown again
   }
   const host = new DeviceHost({ mode: 'device', nodeId: 'synthetic-idle-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/',
     cwd: root, stateDir: join(root, 'state'), resources: { idleTimeoutMs: 30 },
-    providers: { lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } }, new HeldCodex());
+    providers: { codex: { executable, home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } }, new HeldCodex());
   t.after(async () => { allow('deny'); finishClose(); await host.close(); });
   host.bind(async (_method, value) => {
     if ((value as { kind: string }).kind === 'permission') { permissionRequested = true; return approval; }

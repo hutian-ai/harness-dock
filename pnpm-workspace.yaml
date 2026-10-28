@@ -8,4 +8,4 @@ allowBuilds:
   esbuild: true
 patchedDependencies:
   '@agentclientprotocol/codex-acp@2.1.1': patches/@agentclientprotocol__codex-acp@2.1.1.patch
-  acpx@0.19.4: patches/acpx@0.19.4.patch
+  acpx@0.21.1: patches/acpx@0.21.1.patch

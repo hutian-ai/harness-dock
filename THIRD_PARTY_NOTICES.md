@@ -15,7 +15,7 @@ scan or a claim that a package's declared license covers every possible use.
 
 | Package | Version | License | Changes |
 | --- | --- | --- | --- |
-| acpx | 0.19.4 | MIT | [Patch and upgrade boundaries](patches/README.md) |
+| acpx | 0.21.1 | MIT | [Patch and upgrade boundaries](patches/README.md) |
 | @agentclientprotocol/codex-acp | 2.1.1 | Apache-2.0 | [Patch and upgrade boundaries](patches/README.md) |
 
 The daemon distribution includes the original patch files in `patches/` and a

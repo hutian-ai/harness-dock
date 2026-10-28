@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
@@ -12,9 +12,11 @@ import type { DeviceConfig } from '../apps/daemon/src/config.ts';
 
 test('device crash preserves admission, excludes a second owner and never redispatches an unknown run', { timeout: 15000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'dock-crash-'));
+  const executable = join(root, 'codex');
+  await writeFile(executable, `#!${process.execPath}\nconsole.log('codex-cli 1.0.0');\n`, { mode: 0o700 });
   const config: DeviceConfig = { mode: 'device', nodeId: randomUUID(), token: 'synthetic'.repeat(5),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } };
+    providers: { codex: { executable, home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } };
   const input = { provider: 'codex', runId: randomUUID(), model: 'synthetic', prompt: 'synthetic' };
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
     import {DeviceHost} from './apps/daemon/src/device-host.ts';

@@ -2,6 +2,12 @@
 
 当前结论（2026-10-28）：当前仅支持 macOS arm64 上的 Codex，保持本地 Agent 接入基础设施定位；Codex 经固定 ACPX/Codex ACP 与具名薄适配连接，设备网络继续 ws + json-rpc-2.0，云端 server 用 Docker Compose。Lobi/DeepSeek 只保留未支持的源码，ZCode 接入已移除。下文保留具名历史取舍，不构成当前支持或继续实施项。
 
+## 2026-10-28：ACPX 0.21.1 与补丁收缩
+
+固定升级到 0.21.1，精确 optionId 改用已合入的上游 PR #882，子进程环境传递改用原生 agentProcessEnvAllow。删除这两处旧实现，保留一处显式允许列表严格生效的兼容修正，避免上游默认额外继承 ACPX_AUTH_*、LC_/XDG_ 等宿主变量。可信显式环境增量继续由上游 overlay 处理；不增加进程、会话或权限管理实现。
+
+其余事件、受限控制、审批投递回执、模式投影、逐操作期限和启动观察仍有当前调用方，保留具名最小接缝；Codex ACP 2.1.1 补丁不变。具体分工和删除条件归 [补丁说明](../patches/README.md)，确定性测试与实际 Codex 结果归 [验证记录](validation.md)。
+
 ## 2026-10-27：安全依赖与原生分发能力
 
 采用 diff 8.0.3、Zod 4.6.6、MCP server/client 2.3.0，生产及全部依赖公告扫描清零。固定 pnpm 12.15.0，以原生 hoisted deploy 和 npm bundledDependencies 交付完整运行目录与离线 SDK 归档；不维护自定义依赖解析器或锁文件改写器。运行目录移除仍指向源码的 deploy 安装元数据，daemon 随附原补丁且保留 hardlink detach/manifest。ACPX/Codex ACP 的版本、补丁和设备执行语义不变。仓外空缓存 SDK 安装/ci、公开类型、完整确定性检查与真实 Codex 链路 Local 通过，具体范围归验证记录；未发布或切换现用服务。

@@ -8,6 +8,10 @@ see [support](docs/support.md) and [release gates](docs/releasing.md).
 
 ### Included in the candidate
 
+- Upgrade ACPX to 0.21.1. Use upstream exact permission option IDs and environment
+  transport; retain a strict explicit-allowlist guard and the remaining bounded
+  dock extensions. Codex ACP remains at 2.1.1.
+
 - Independent server/client SDK/device Daemon, paired outbound connections,
   verified remote TLS and separate device/controller credentials.
 - Persistent execution identities, duplicate/conflict checks, session-bound native
