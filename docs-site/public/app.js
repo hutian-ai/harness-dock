@@ -7,7 +7,16 @@
   function closeMenu(){root.classList.remove('menu-open');menu.setAttribute('aria-expanded','false');menu.setAttribute('aria-label','打开导航');syncSidebar();}
   menu.addEventListener('click',function(){var open=root.classList.toggle('menu-open');menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?'关闭导航':'打开导航');syncSidebar();});
   scrim.addEventListener('click',closeMenu);
-  document.querySelector('.theme-toggle').addEventListener('click',function(){var theme=root.dataset.theme==='dark'?'light':'dark';root.dataset.theme=theme;try{localStorage.setItem('dock-theme',theme);}catch(e){}});
+  var themeButton=document.querySelector('.theme-toggle');
+  function applyTheme(theme){
+    root.dataset.theme=theme;
+    var label=theme==='dark'?'切换到浅色主题':'切换到深色主题';
+    themeButton.setAttribute('aria-label',label);
+    themeButton.setAttribute('title',label);
+    document.querySelector('meta[name="theme-color"]').content=theme==='dark'?'#09090b':'#ffffff';
+  }
+  applyTheme(root.dataset.theme==='light'?'light':'dark');
+  themeButton.addEventListener('click',function(){var theme=root.dataset.theme==='dark'?'light':'dark';applyTheme(theme);try{localStorage.setItem('dock-theme',theme);}catch(e){}});
   var toast=document.querySelector('.toast'),timer;
   function notify(text){toast.textContent=text;toast.classList.add('visible');clearTimeout(timer);timer=setTimeout(function(){toast.classList.remove('visible');},1800);}
   document.querySelectorAll('.copy-code').forEach(function(button){button.addEventListener('click',async function(){var value=button.closest('.code-block').querySelector('code').textContent;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(value);}else{var area=document.createElement('textarea');area.value=value;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();var ok=document.execCommand('copy');area.remove();if(!ok)throw new Error('copy');}button.textContent='已复制';notify('代码已复制');setTimeout(function(){button.textContent='复制';},1800);}catch(e){notify('复制未成功，请选择代码手动复制');}});});
