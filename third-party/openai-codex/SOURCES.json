@@ -1,14 +1,14 @@
 {
   "package": "@openai/codex",
-  "version": "0.159.3",
-  "revision": "8e46774a94a745ffdf676bd7a8aa36466bbd4f99",
+  "version": "0.164.0",
+  "revision": "6aaac694803004a63c6f393d153c96d22521a6b9",
   "files": {
     "LICENSE": {
-      "source": "https://github.com/openai/codex/blob/rust-v0.159.3/LICENSE",
+      "source": "https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/LICENSE",
       "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
     },
     "NOTICE": {
-      "source": "https://github.com/openai/codex/blob/rust-v0.159.3/NOTICE",
+      "source": "https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/NOTICE",
       "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
     },
     "RATATUI-LICENSE": {
