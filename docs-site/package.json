@@ -1,0 +1,9 @@
+{
+  "name": "harness-dock-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deployable product documentation for harness-dock",
+  "engines": { "node": ">=22" },
+  "scripts": { "build": "node build.mjs", "preview": "node serve.mjs", "check": "node check.mjs" }
+}
