@@ -20,12 +20,12 @@ npm run preview
 
 首次启用：
 
-1. 确认仓库可使用 GitHub Pages：公开仓库可用免费 Pages；当前私有组织仓库的套餐需要升级才能启用。
+1. 确认仓库当前可见性与账户套餐允许使用 GitHub Pages。
 2. Settings → Pages → Build and deployment → Source 选择 GitHub Actions。
 3. Settings → Secrets and variables → Actions → Variables 添加 `DOCS_PAGES_ENABLED`，值为 `true`。
 4. 在 main 推送文档更新，或在 Actions 手动运行 Docs Pages。
 
-部署变量默认未设置，因此当前仍可构建检查，不会触发已知无法使用的 Pages 部署。启用后默认入口预期为 https://hutian-ai.github.io/harness-dock/，以实际 Actions 部署输出为准。
+部署仅在变量开启且来源为 main 时执行；未开启时只构建检查。默认站点路径为 https://hutian-ai.github.io/harness-dock/，是否已部署及实际入口以 Actions 输出为准。
 
 ## 其他托管
 

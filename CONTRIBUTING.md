@@ -10,9 +10,14 @@ harness-dock 是跨机器原生 Harness 接入与执行基础设施。先阅读 
 npm install --global pnpm@12.15.0
 pnpm install --frozen-lockfile
 pnpm check
+pnpm smoke:source
 ```
 
 pnpm check 构建 workspace、检查脚本/测试类型并运行确定性控制边界测试。不要并行构建共享工作区，或直接修改现用 daemon 的运行目录。使用 TypeScript ESM、显式相对扩展名和 type-only imports。
+
+`pnpm smoke:source` 使用隔离的 `.local/` 目录、临时回环端口和禁用的 Codex，验证源码 CLI、配对、后台启停/重启、SDK 连接、托管文件和诊断。它不使用原生账号，不执行模型，也不证明独立设备或原生工具可用。
+
+提交前安装 Gitleaks（macOS 可用 `brew install gitleaks`），再运行 `pnpm check:privacy`。该检查覆盖当前源码（含未提交改动）、本地可达 Git 历史、误提交的本地运行文件、个人主目录和 URL 中的非示例 IP；扫描输出遮盖密钥。CI 固定 Gitleaks 版本与下载摘要，并取得完整提交历史。真实域名、上下文和第三方许可仍须人工复核，不把扫描通过当作全部脱敏证明。
 
 真实 Codex 检查为 `pnpm accept:codex`，需要原生登录和模型额度；不自动执行，不在 CI 配置 Provider 凭据。独立离线分发检查见 [验证](apps/docs-site/README.md#verification)。
 
