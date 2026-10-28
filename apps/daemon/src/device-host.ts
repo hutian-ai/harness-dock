@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { arch, hostname, platform, release } from 'node:os';
 import { readdir } from 'node:fs/promises';
 import {
-  CodexHost, discoverProviders, createProviderAdapter, boundedObservation,
+  CodexHost, discoverProviders, createProviderAdapter, boundedObservation, observeStartup, startStartupSpan,
   type CodexHostEnvironment, type ProviderAdapter, type ProviderCapabilities, type McpInvocation,
   type McpToolDefinition, type DiscoveredProvider, type ProviderKey, type NativePermissionRequest, type NativePermissionDecision,
 } from '@harness-dock/drivers';
@@ -49,7 +49,7 @@ function canonical(value: unknown): string {
 function executionInput(value: unknown): DeviceExecuteInput {
   const input = object(value);
   for (const key of Object.keys(input)) if (!['provider', 'runId', 'sessionKey', 'prompt', 'model', 'config', 'resumeSessionId', 'previousRunId', 'retainSession', 'tools'].includes(key)) throw new Error('unsupported_execution_field');
-  if (!['codex', 'lobi', 'deepseek-harness', 'zcode'].includes(String(input.provider))) throw new Error('unsupported_provider');
+  if (!['codex', 'lobi', 'deepseek-harness'].includes(String(input.provider))) throw new Error('unsupported_provider');
   identity(input.runId);
   for (const key of ['sessionKey', 'model', 'resumeSessionId', 'previousRunId']) if (input[key] !== undefined) identity(input[key]);
   if (typeof input.prompt !== 'string' || !input.prompt || input.prompt.length > 1_000_000) throw new Error('invalid_prompt');
@@ -162,9 +162,10 @@ export class DeviceHost {
   }
   async #capacity(runId: string): Promise<void> {
     if (this.#persistenceFailed) throw new Error('resource_exhausted:persistence_unconfirmed');
-    await this.#cleanup();
-    this.#store.assertCapacity(runId);
-    if (await managedStateBytes(this.config.stateDir, this.#limits.maxStateBytes) >= this.#limits.maxStateBytes)
+    await observeStartup(runId, 'device_capacity_cleanup', () => this.#cleanup());
+    await observeStartup(runId, 'device_capacity_records', async () => this.#store.assertCapacity(runId));
+    const stateBytes = await observeStartup(runId, 'device_capacity_state_bytes', () => managedStateBytes(this.config.stateDir, this.#limits.maxStateBytes));
+    if (stateBytes >= this.#limits.maxStateBytes)
       throw new Error('resource_exhausted:managed_state_bytes');
   }
   get activeRunIds(): string[] { return [...this.#active.keys()]; }
@@ -230,7 +231,7 @@ export class DeviceHost {
             }
             await adapter?.close();
             adapter = createProviderAdapter(provider, { cwd: this.config.cwd, stateDir: this.config.stateDir,
-              idleTimeoutMs: this.#limits.idleTimeoutMs, environment, codex: this.#codex });
+              environment, codex: this.#codex });
             this.#adapters.set(provider.key, adapter); this.#adapterKeys.set(provider.key, key);
           }
           const inspection = await adapter.inspect(signal);
@@ -250,13 +251,13 @@ export class DeviceHost {
       activeRunIds: this.activeRunIds, unresolvedRunIds: this.#store.unresolved(), resources: this.#limits,
       providers: (this.#providers ?? []).map(provider => ({ ...provider,
         sessionResumeMode: provider.capabilities?.sessionResume ?? 'unsupported',
-        ...(provider.capabilities?.sessionResume === 'warm' ? { warmSessionIdleTimeoutMs: this.#limits.idleTimeoutMs } : {}),
       })) };
   }
   async prepare(value: unknown) {
     const input = object(value), runId = identity(input.runId), sessionKey = input.sessionKey === undefined ? runId : identity(input.sessionKey);
     const fingerprint = digest(canonical({ sessionKey, files: input.files ?? [] }));
-    return this.#maintain(async () => {
+    const queuedAt = performance.now();
+    return observeStartup(runId, 'device_prepare', () => this.#maintain(() => observeStartup(runId, 'device_prepare_body', async () => {
       this.#store.assertSessionOpen(sessionKey);
       const previous = this.#store.preparation(runId);
       if (previous) {
@@ -265,11 +266,11 @@ export class DeviceHost {
         return previous.directories;
       }
       if ([...this.#active.values()].some(active => active.sessionKey === sessionKey)) throw new Error('session_busy');
-      await this.#capacity(runId);
-      const directories = await prepareDirectories(this.config.stateDir, runId, sessionKey, (input.files ?? []) as DeviceFile[], this.config.cwd);
-      this.#store.prepare(runId, { input: fingerprint, sessionKey, directories });
+      await observeStartup(runId, 'device_prepare_capacity', () => this.#capacity(runId));
+      const directories = await observeStartup(runId, 'device_prepare_files', () => prepareDirectories(this.config.stateDir, runId, sessionKey, (input.files ?? []) as DeviceFile[], this.config.cwd));
+      await observeStartup(runId, 'device_prepare_persist', async () => { this.#store.prepare(runId, { input: fingerprint, sessionKey, directories }); });
       return directories;
-    }, true);
+    }, performance.now() - queuedAt), true));
   }
   getExecution(runId: string) {
     this.#assertOpen();
@@ -289,7 +290,8 @@ export class DeviceHost {
       if (this.#active.has(input.runId)) return this.#active.get(input.runId)!.promise;
       return { provider: existing.provider, result: existing.result ?? { state: existing.state, error: 'unconfirmed_previous_execution' } };
     }
-    const admitted = await this.#maintain(async () => {
+    const queuedAt = performance.now();
+    const admitted = await observeStartup(input.runId, 'device_admission', () => this.#maintain(() => observeStartup(input.runId, 'device_admission_body', async () => {
       const duplicate = this.#store.get(input.runId);
       if (duplicate) {
         if (duplicate.input !== fingerprint) throw new Error('execution_identity_conflict');
@@ -300,7 +302,7 @@ export class DeviceHost {
       const key = input.sessionKey ?? input.runId;
       if ([...this.#active.values()].some(active => active.sessionKey === key ||
         input.resumeSessionId && active.provider === input.provider && active.nativeSessionId === input.resumeSessionId)) throw new Error('session_busy');
-      await this.#capacity(input.runId);
+      await observeStartup(input.runId, 'device_admission_capacity', () => this.#capacity(input.runId));
       this.#assertOpen();
       this.#store.assertSessionOpen(input.sessionKey ?? input.runId);
       const unresolved = this.#store.unresolved();
@@ -319,7 +321,7 @@ export class DeviceHost {
           if (idle) { await idle[1].adapter.close(); this.#sessions.delete(idle[0]); }
         }
         retained = { sessionKey: key, provider: input.provider, adapter: createProviderAdapter(this.#discovered.get(input.provider)!, {
-          cwd: this.config.cwd, stateDir: this.config.stateDir, idleTimeoutMs: this.#limits.idleTimeoutMs,
+          cwd: this.config.cwd, stateDir: this.config.stateDir,
           environment: providerEnvironment(this.config.providers?.[input.provider]), codex: this.#createCodex(), inspection: available.inspection,
         }) };
         this.#sessions.set(adapterKey, retained);
@@ -341,10 +343,12 @@ export class DeviceHost {
         const reports = new Set<Promise<unknown>>();
         let pendingPermissions = 0;
         let started = false;
+        const finishNativeStartup = startStartupSpan(input.runId, 'device_native_start');
         const ready = async (sessionId?: string) => {
           if (sessionId && [...this.#active.values()].some(other => other !== active && other.provider === input.provider && other.nativeSessionId === sessionId)) throw new Error('native_session_busy');
           active.nativeSessionId = sessionId;
-          await this.#call(input.runId, 'ready', { sessionId }); signal.throwIfAborted(); started = true;
+          finishNativeStartup();
+          await observeStartup(input.runId, 'device_ready_callback', () => this.#call(input.runId, 'ready', { sessionId })); signal.throwIfAborted(); started = true;
         };
         const invocation: McpInvocation = { signal,
           onToolCall: async call => {
@@ -396,6 +400,7 @@ export class DeviceHost {
           record.state = ['completed', 'failed', 'cancelled'].includes(String(state)) ? state as StoredExecution['state'] : 'unknown';
           record.result = result;
         } catch (error) {
+          finishNativeStartup('failed');
           record.state = started ? 'unknown' : 'failed';
           record.result = { state: record.state, error: error instanceof Error ? error.message : String(error) };
         } finally {
@@ -420,7 +425,7 @@ export class DeviceHost {
         return { provider: input.provider, result: record.result };
       })();
       return { result: active.promise };
-    }, true);
+    }, performance.now() - queuedAt), true));
     return admitted.result;
   }
   cancel(runId: string) {

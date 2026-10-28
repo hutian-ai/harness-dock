@@ -1,0 +1,19 @@
+{
+  "package": "@openai/codex",
+  "version": "0.159.3",
+  "revision": "8e46774a94a745ffdf676bd7a8aa36466bbd4f99",
+  "files": {
+    "LICENSE": {
+      "source": "https://github.com/openai/codex/blob/rust-v0.159.3/LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    },
+    "NOTICE": {
+      "source": "https://github.com/openai/codex/blob/rust-v0.159.3/NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+    },
+    "RATATUI-LICENSE": {
+      "source": "https://static.crates.io/crates/ratatui/ratatui-0.30.2.crate",
+      "sha256": "50eb43e8d742c9c61a9391e42b2184fce54dbd1893a1bb1c85b8c9ee217ab1f5"
+    }
+  }
+}

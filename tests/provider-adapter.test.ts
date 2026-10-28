@@ -16,7 +16,7 @@ for (const key of ['lobi', 'deepseek-harness'] as const) {
     const create = (inspection?: AcpInspection) => createProviderAdapter({
       key, displayName: key, status: 'installed', version: 'synthetic', source: 'configured',
       executable: '/missing-provider', home: process.cwd(), candidates: [],
-    }, { cwd: process.cwd(), stateDir: process.cwd(), idleTimeoutMs: 1000,
+    }, { cwd: process.cwd(), stateDir: process.cwd(),
       environment: {}, codex: new CodexHost(), inspection });
     const input: ProviderExecution = {
       runId: 'synthetic', sessionKey: 'synthetic', model: 'test-model', config: {}, prompt: 'never dispatched',

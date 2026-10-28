@@ -10,9 +10,6 @@ import { type CodexEvidence } from '../packages/drivers/src/codex.ts';
 import { DeviceHost } from '../apps/daemon/src/device-host.ts';
 import { AnswerBudget, MAX_ANSWER_BYTES, MAX_OBSERVATION_BYTES, boundedObservation, readBoundedText } from '../packages/drivers/src/output-limits.ts';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ZCodeExecutor } from '../packages/drivers/src/zcode.ts';
-import { createAcpRuntime, createRuntimeStore } from 'acpx/runtime';
-import { createAgentRegistry } from 'acpx/agent-registry';
 
 test('embedding excludes host credentials while retaining the configured execution environment', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dock-embedded-env-'));
@@ -163,7 +160,7 @@ test('device idle release waits for an active approval and fences shutdown again
   }
   const host = new DeviceHost({ mode: 'device', nodeId: 'synthetic-idle-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/',
     cwd: root, stateDir: join(root, 'state'), resources: { idleTimeoutMs: 30 },
-    providers: { lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } }, new HeldCodex());
+    providers: { lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } }, new HeldCodex());
   t.after(async () => { allow('deny'); finishClose(); await host.close(); });
   host.bind(async (_method, value) => {
     if ((value as { kind: string }).kind === 'permission') { permissionRequested = true; return approval; }
@@ -206,28 +203,6 @@ test('output budgets preserve explicit omission and reject oversized evidence be
   assert.equal(await readBoundedText(path, 20), 'oversized');
 });
 
-test('a released ZCode warm session explicitly rejects resume without starting a replacement provider', { timeout: 10_000 }, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'dock-zcode-expiry-'));
-  const audit = join(root, 'audit'), stateDir = join(root, 'state');
-  const executor = new ZCodeExecutor({ cwd: root, stateDir, zcodeHome: root, zcodeBin: process.execPath }, async () => createAcpRuntime({
-    cwd: root, sessionStore: createRuntimeStore({ stateDir }),
-    agentRegistry: createAgentRegistry({ overrides: { zcode: [process.execPath, resolve('tests/fixtures/zcode-acp.mjs')] } }),
-    agentProcessEnv: { DOCK_AUDIT: audit }, permissionMode: 'deny-all', nonInteractivePermissions: 'deny', fs: false, terminal: false,
-  }));
-  t.after(async () => { await executor.close(); await rm(root, { recursive: true, force: true }); });
-  // This case exercises idle release, not cancellation. A shorter independent
-  // timer can expire after completion and legitimately retire the warm session.
-  const input = { runId: 'first', prompt: 'synthetic', signal: t.signal, onReady: async () => {}, onEvent: async () => {} };
-  assert.equal((await executor.execute(input)).state, 'completed');
-  const sessionId = executor.retainedSessionId;
-  assert.ok(sessionId);
-  await executor.close();
-  const before = await readFile(audit, 'utf8');
-  const expired = await executor.execute({ ...input, runId: 'second', resumeThreadId: sessionId });
-  assert.deepEqual(expired, { state: 'failed', error: 'zcode_session_unavailable' });
-  assert.equal(await readFile(audit, 'utf8'), before);
-});
-
 test('device admission and approval fences survive duplicate requests, cancellation races and detached callbacks', { timeout: 10000 }, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'dock-control-')));
   const executable = join(root, 'codex');
@@ -236,7 +211,7 @@ test('device admission and approval fences survive duplicate requests, cancellat
   const nativeInspection = { models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }],
     config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: true } };
   const host = new DeviceHost({ mode: 'device', nodeId: 'control-node', token: 'synthetic'.repeat(5), endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxConcurrentExecutions: 1 },
-    providers: { codex: { executable, home: root, environment: { HTTPS_PROXY: 'http://proxy.example.test:8080' } }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } }, {
+    providers: { codex: { executable, home: root, environment: { HTTPS_PROXY: 'http://proxy.example.test:8080' } }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } }, {
     inspect: async environment => {
       assert.equal(environment.environment?.HTTPS_PROXY, 'http://proxy.example.test:8080');
       assert.equal(environment.codexHome, root);

@@ -25,7 +25,7 @@ const deviceConfig = z.looseObject({
   caFile: z.preprocess(value => value || undefined, absolutePath('Node directories must be absolute').optional()),
   // Preserve the old optional/empty override inputs; validation does not rewrite the stored config.
   providers: z.preprocess(value => value ? Object.fromEntries(Object.entries(value)) : undefined,
-    z.partialRecord(z.enum(['codex', 'lobi', 'deepseek-harness', 'zcode']), providerOverride, { error: 'invalid_provider_override' }).optional()),
+    z.partialRecord(z.enum(['codex', 'lobi', 'deepseek-harness']), providerOverride, { error: 'invalid_provider_override' }).optional()),
 });
 const devicePairing = z.strictObject({ nodeId: z.string(), token: z.string(), endpoint: z.string() });
 export function parseDevicePairing(input: unknown): Pick<NodeIdentity, 'nodeId' | 'token' | 'endpoint'> {

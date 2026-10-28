@@ -6,12 +6,6 @@ syncInjectedDepsAfterScripts:
   - build
 allowBuilds:
   esbuild: true
-  zcode-acp-server: false
-minimumReleaseAgeExclude:
-  - zcode-acp-server@0.68.2
-overrides:
-  # Only dist/index.js is used; Martty belongs to the unused TUI entry.
-  'zcode-acp-server@0.68.2>zcode-acp-martty': '-'
 patchedDependencies:
   '@agentclientprotocol/codex-acp@2.1.1': patches/@agentclientprotocol__codex-acp@2.1.1.patch
   acpx@0.19.4: patches/acpx@0.19.4.patch

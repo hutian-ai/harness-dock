@@ -186,7 +186,7 @@ index 84c5dd2296885e3c2830e842ef1f76d29e61a95d..87dd023687f0c4f814c7981db8e605b3
  	if (!Array.isArray(configOptions)) return;
  	record.acpx = applyConfigOptionsToState(record.acpx, configOptions);
 diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
-index 2077d43b17ae8a66a8630aaa76b80ded031f0e35..d391e7446f8596e92825d6ddc255f4963407a33f 100644
+index 2077d43b17ae8a66a8630aaa76b80ded031f0e35..72ddbdc4bbc60802454c1710af0d714984b77a2b 100644
 --- a/dist/runtime.d.ts
 +++ b/dist/runtime.d.ts
 @@ -100,6 +100,8 @@ type AcpRuntimeTurnInput = AcpControlAuthority & {
@@ -211,7 +211,16 @@ index 2077d43b17ae8a66a8630aaa76b80ded031f0e35..d391e7446f8596e92825d6ddc255f496
    type: "text_delta";
    text: string;
    stream?: "output" | "thought";
-@@ -789,6 +797,13 @@ export declare class AcpxRuntime implements AcpxRuntimeLike {
+@@ -433,6 +441,8 @@ type AcpRuntimeOptions = {
+   elicitationModes?: readonly AcpElicitationMode[];
+   /** Optional lifecycle observer for ACP agent processes owned by this runtime. */
+   processLifecycle?: AcpProcessLifecycle;
++  /** Technical wire observer for in-process owned clients; no payload is persisted. */
++  onAcpMessage?: ConstructorParameters<typeof AcpClient>[0]['onAcpMessage'];
+   onPermissionRequest?: AcpPermissionHandler;
+   /**
+    * ACP filesystem callback capability for new and reconnected session clients.
+@@ -789,6 +799,13 @@ export declare class AcpxRuntime implements AcpxRuntimeLike {
    isHealthy(): boolean;
    probeAvailability(): Promise<void>;
    doctor(): Promise<AcpRuntimeDoctorReport>;
@@ -226,7 +235,7 @@ index 2077d43b17ae8a66a8630aaa76b80ded031f0e35..d391e7446f8596e92825d6ddc255f496
    findSession(input: {
      sessionKey: string;
 diff --git a/dist/runtime.js b/dist/runtime.js
-index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..74b13c34843780618c6ffa2e2f3b81bdc72fe15c 100644
+index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..4e6488c940a324ca59687790ee27e35b11c2becd 100644
 --- a/dist/runtime.js
 +++ b/dist/runtime.js
 @@ -415,6 +415,14 @@ function parsePromptEventLine(line) {
@@ -289,7 +298,31 @@ index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..74b13c34843780618c6ffa2e2f3b81bd
  	async probe() {
  		let client;
  		try {
-@@ -1848,6 +1887,10 @@ var AcpRuntimeManager = class {
+@@ -1120,6 +1159,7 @@ var AcpRuntimeManager = class {
+ 			pendingSessionUpdates: []
+ 		};
+ 		input.client.setEventHandlers({
++            onAcpMessage: this.options.onAcpMessage,
+ 			onSessionUpdate: (notification) => this.routeOwnedSessionUpdate(owner, notification),
+ 			onClientOperation: (operation) => this.routeOwnedClientOperation(owner, operation)
+ 		});
+@@ -1524,7 +1564,14 @@ var AcpRuntimeManager = class {
+ 		try {
+ 			await startRuntimeClient(client, agent, this.options.timeoutMs);
+ 			this.assertOpen();
+-			const session = await createOrLoadRuntimeSession(client, input.resumeSessionId, cwd);
++			let session;
++			try {
++				session = await withTimeout(createOrLoadRuntimeSession(client, input.resumeSessionId, cwd), this.options.timeoutMs);
++			} catch (error) {
++				if (!(error instanceof TimeoutError)) throw error;
++				const method = input.resumeSessionId ? client.supportsResumeSession() ? "session/resume" : "session/load" : "session/new";
++				throw new Error(`ACP ${method} did not complete within ${this.options.timeoutMs}ms`, { cause: error });
++			}
+ 			const record = await this.prepareInitialRuntimeRecord({
+ 				input,
+ 				client,
+@@ -1848,6 +1895,10 @@ var AcpRuntimeManager = class {
  	}
  	buildRuntimeTurnController(task, turn) {
  		return {
@@ -300,7 +333,7 @@ index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..74b13c34843780618c6ffa2e2f3b81bd
  			hasActivePrompt: () => turn.client.hasActivePrompt(),
  			requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
  			setSessionMode: async (modeId, authority) => {
-@@ -1909,7 +1952,7 @@ var AcpRuntimeManager = class {
+@@ -1909,7 +1960,7 @@ var AcpRuntimeManager = class {
  		};
  	}
  	emitRuntimeTurnEvent(task, payload) {
@@ -309,7 +342,15 @@ index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..74b13c34843780618c6ffa2e2f3b81bd
  		if (!parsed) return;
  		task.queue.push(parsed);
  	}
-@@ -2485,7 +2528,7 @@ var SharedAcpRuntime = class {
+@@ -2381,6 +2432,7 @@ var SharedAcpRuntime = class {
+ 			"mcpServers",
+ 			"sessionPermissions",
+ 			"processLifecycle",
++            "onAcpMessage",
+ 			"onPermissionRequest",
+ 			"elicitationModes",
+ 			"fs",
+@@ -2485,7 +2537,7 @@ var SharedAcpRuntime = class {
  				outputFormatter: {
  					...DISCARD_OUTPUT_FORMATTER,
  					onAcpMessage: (message) => {
@@ -318,7 +359,7 @@ index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..74b13c34843780618c6ffa2e2f3b81bd
  						if (event) events.push(event);
  					}
  				},
-@@ -2727,7 +2770,8 @@ var AcpxRuntime = class {
+@@ -2727,7 +2779,8 @@ var AcpxRuntime = class {
  			signal: input.signal,
  			assertActive: input.assertActive,
  			onElicitation: input.onElicitation,
@@ -328,7 +369,7 @@ index c1ed314587cd8a28f9bc95fcaad6dff925d3f146..74b13c34843780618c6ffa2e2f3b81bd
  		}));
  		turnPromise.catch(() => {});
  		return {
-@@ -2762,9 +2806,14 @@ var AcpxRuntime = class {
+@@ -2762,9 +2815,14 @@ var AcpxRuntime = class {
  			signal: input.signal,
  			assertActive: input.assertActive,
  			onElicitation: input.onElicitation,

@@ -11,6 +11,16 @@
 
 Lobi/DeepSeek 执行统一使用 ACPX 后，增加 new/load/resume 的模式目录只读投影：保留到 record.acpx.session_modes，经现有 clone 和 getStatus.details.modes 返回。缺失为 null，用于本轮配置校验；不创建会话、不触发重连，不修改执行/恢复状态机。该投影不把安装探测结果冒充本轮会话能力，完整能力探测仍局部使用 SDK；上游完整暴露模式 metadata 后删除此补丁。
 
+ACPX 新建 runtime owner 时，initialize 已有 timeoutMs 限时，而随后的 new/load/resume 原来没有独立限时。固定补丁为后一步补相同的逐操作上限；通用 ACP driver 不再用一个外层计时把初始化与会话建立合并计费。生产两步各为 15 秒，与迁移前 SDK 的逐操作语义一致；卡住的恢复仍失败，不创建替代会话、不发送 prompt。该补丁沿用 ACPX 关闭失败 owner 的既有路径，上游提供相同限时后删除。
+
+ACPX 进程内 Runtime 透传现有 AcpClient.onAcpMessage 观察回调；共享 Runtime 拒绝该进程内选项。Codex 只在启动时配对 initialize、session/new/load/resume 请求和响应，输出固定阶段、runId、状态和单调耗时，不保存协议 payload。进程创建沿用现有 processLifecycle 观察点；诊断失败不改变执行裁决和逐操作期限。上游 Runtime 暴露等价观察入口后删除此透传补丁。
+
+Codex ACP 冷恢复仅在原有授权与 Skill 根设置完成后，将项目作用域 MCP 配置读取和全局 Provider 读取用 Promise.all 并行；两项查询的作用域和结果保持独立，二者均成功后才调用 thread/resume。任一失败继续拒绝启动并由原 owner 关闭路径清理，不补建会话、不派发 prompt、不缓存账户或配置，不改变 MCP 就绪、订阅时序与逐操作期限。上游消除该串行读取后删除对应补丁。
+
 事件约定 `_meta["harness-dock"].version = 1` 是本地扩展；其解析与 CodexEvent/CodexMessage/CodexTokens 类型由 packages/drivers/src/codex-events.ts 持有，CodexExecutor 在对外观察前解码，原始信封和其他元数据不进入设备事件流。详细消费边界见 [嵌入接口](../docs/embedded-driver.md)。历史 SDK 的版本和能力以各验收日期为准。补丁不是零维护成本；升级前须检查上游对应函数、固定类型与真实审批、精确结果、取消、续接和进程清理。上游提供等价能力后删除对应补丁。
 
 保留依赖包内的许可证：ACPX MIT、Codex ACP Apache-2.0。固定来源为 [ACPX v0.19.4](https://github.com/openclaw/acpx/tree/v0.19.4) 和 [Codex ACP v2.1.1](https://github.com/agentclientprotocol/codex-acp/tree/v2.1.1)。
+
+## 独立交付
+
+源码安装由根 pnpm-lock.yaml 和 patchedDependencies 应用补丁。daemon 运行产物完整携带已应用补丁的依赖，另附 patches/ 中的这两份原文件供审查；运行时不读取源码仓库的补丁路径。bundle 不携带 deploy 生成的外部源码/补丁安装元数据，升级依赖须从源码重新构建并验证。controller.tgz 使用 npm bundledDependencies，只含 SDK 及其传递依赖，不含 ACPX/Codex。

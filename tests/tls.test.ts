@@ -40,7 +40,7 @@ test('TLS trust, node identity and plaintext boundaries; authenticated WSS recon
   await rejected({ ...headers, 'x-dock-node': randomUUID() }, cert);
   await rejected({ ...headers, authorization: 'Bearer invalid' }, cert);
   const config = { mode: 'device' as const, nodeId, token, endpoint: client.endpoint, cwd: dir, stateDir: join(dir, 'state'),
-    providers: { codex: { disabled: true }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } };
+    providers: { codex: { disabled: true }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } };
   const host = new DeviceHost(config);
   const connection = new DeviceConnection(host, config, cert);
   t.after(async () => { connection.stop(); await host.close(); });

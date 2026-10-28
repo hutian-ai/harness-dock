@@ -39,10 +39,10 @@ export async function runAcpSession<TDelivery>(
   let record: AcpSessionRecord | undefined;
   let runtime: ReturnType<typeof createAcpRuntime> | undefined;
   let bridge: Awaited<ReturnType<typeof createMcpBridge<TDelivery>>> | undefined;
-  const wait = <T>(operation: Promise<T>, phase: string, timeoutMs: number | null = 15_000) =>
+  const wait = <T>(operation: Promise<T>, phase: string, timeoutMs: number | null = 15_000, abortGraceMs = timeoutMs === null ? 5_000 : 0) =>
     raceWithSignalAndTimeout(operation, {
       signal, label: `${provider.label} ${phase}`, timeoutMs,
-      abortGraceMs: timeoutMs === null ? 5_000 : 0,
+      abortGraceMs,
     });
 
   await callbacks.onStarted(options.runId);
@@ -68,10 +68,12 @@ export async function runAcpSession<TDelivery>(
       timeoutMs: 15_000,
       processLifecycle: { onBeforeSpawn: () => signal.throwIfAborted() },
     });
+    // ACPX bounds initialize and new/load/resume separately. A single outer
+    // deadline would spend the resume budget on starting the native process.
     const handle = await wait(runtime.ensureSession({
       sessionKey: randomUUID(), agent: provider.source, cwd: options.cwd, mode: "persistent",
       resumeSessionId: options.allowSessionResume ? options.resumeSessionId : undefined,
-    }), "session setup");
+    }), "session setup", null, 0);
     if (record?.protocolVersion !== PROTOCOL_VERSION)
       throw new Error(`Unsupported ACP protocol version ${record?.protocolVersion}`);
     sessionId = handle.backendSessionId ?? null;

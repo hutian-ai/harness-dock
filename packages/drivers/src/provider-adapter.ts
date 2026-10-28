@@ -1,21 +1,18 @@
 import { createHash } from 'node:crypto';
-import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CodexHost, type CodexHostEnvironment } from './codex-host.ts';
 import type { CodexInspection } from './codex.ts';
 import { LobiAcpExecutor } from './lobi.ts';
 import { DeepSeekAcpExecutor } from './deepseek.ts';
-import { ZCodeExecutor } from './zcode.ts';
 import type { AcpExecutor, AcpInspection } from './acp-types.ts';
 import type { DiscoveredProvider } from './discovery.ts';
 import type { NativePermissionRequest, NativePermissionDecision } from './execution.ts';
 import type { McpInvocation, McpToolDefinition } from './mcp-bridge.ts';
-import { AnswerBudget } from './output-limits.ts';
 
 export type CodexHostPort = Pick<CodexHost, 'inspect' | 'execute' | 'reconcile' | 'close'>;
 export interface ProviderCapabilities {
   protocol: 'acp';
-  sessionResume: 'native' | 'warm' | 'unsupported';
+  sessionResume: 'native' | 'unsupported';
   resultQuery: 'native' | 'unsupported';
   exactFinalAnswer: boolean;
   callerSkills: boolean;
@@ -46,7 +43,6 @@ export interface ProviderAdapter {
   environment(input: Pick<ProviderExecution, 'sessionKey' | 'workdir' | 'skillDirectory' | 'config'>): CodexHostEnvironment | undefined;
   execute(input: ProviderExecution, environment?: CodexHostEnvironment): Promise<unknown>;
   close(): Promise<void>;
-  retainedSessionId(): string | undefined;
   forgetSession(sessionKey: string): Promise<void>;
 }
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -58,7 +54,7 @@ const capabilities = (fields: Partial<ProviderCapabilities>): ProviderCapabiliti
 
 /** Named adapters keep harness policy and result differences outside device admission. */
 export function createProviderAdapter(provider: DiscoveredProvider, options: {
-  cwd: string; stateDir: string; idleTimeoutMs: number; environment: NodeJS.ProcessEnv; codex: CodexHostPort; inspection?: unknown;
+  cwd: string; stateDir: string; environment: NodeJS.ProcessEnv; codex: CodexHostPort; inspection?: unknown;
 }): ProviderAdapter {
   if (provider.key === 'codex') {
     let inspection = options.inspection as CodexInspection;
@@ -95,57 +91,8 @@ export function createProviderAdapter(provider: DiscoveredProvider, options: {
           onSteeringReady: input.steering, permission: input.permission,
         });
       },
-      close: () => options.codex.close(), retainedSessionId: () => undefined,
+      close: () => options.codex.close(),
       forgetSession: () => options.codex.close(),
-    };
-  }
-  if (provider.key === 'zcode') {
-    let inspection = options.inspection as Awaited<ReturnType<ZCodeExecutor['inspect']>>;
-    let retained: { key: string; executor: ZCodeExecutor } | undefined;
-    const executor = (cwd: string, stateDir: string) => new ZCodeExecutor({ cwd, stateDir,
-      zcodeBin: provider.executable!, zcodeHome: provider.home!, environment: options.environment });
-    const close = async () => { const previous = retained; retained = undefined; await previous?.executor.close(); };
-    return {
-      async inspect(signal) {
-        await access(join(provider.home!, 'v2', 'credentials.json'));
-        inspection = await executor(options.cwd, join(options.stateDir, 'zcode-probe')).inspect(signal);
-        return { models: inspection.models, inspection, capabilities: capabilities({
-          sessionResume: 'warm', permissionInteractions: inspection.permissionInteractions,
-        }) };
-      },
-      validate({ model, config, callerSkillsPresent }) {
-        if (Object.keys(config).some(key => !['effort', 'mode'].includes(key))) throw new Error('zcode_config_unsupported');
-        if (config.effort && !inspection.reasoningEffortsByModel[model ?? '']?.includes(String(config.effort))) throw new Error('configuration_unavailable');
-        validateMode(config, inspection.permissionModes);
-        if (callerSkillsPresent) throw new Error('zcode_caller_skills_unsupported');
-      },
-      environment: () => undefined,
-      async execute(input) {
-        if (retained?.key !== input.sessionKey) await close();
-        const selected = retained ??= { key: input.sessionKey,
-          executor: executor(input.workdir, join(options.stateDir, 'providers', 'zcode', digest(input.sessionKey))) };
-        let text = '', sessionId: string | undefined;
-        const budget = new AnswerBudget();
-        const terminal = await selected.executor.execute({
-          runId: input.runId, prompt: input.prompt, resumeThreadId: input.resumeSessionId, signal: input.signal,
-          model: input.model, mode: typeof input.config.mode === 'string' ? input.config.mode : undefined,
-          effort: typeof input.config.effort === 'string' ? input.config.effort : undefined,
-          skillDirectory: input.skillDirectory, callerSkillsPresent: input.callerSkillsPresent,
-          tools: { name: input.tools?.name ?? 'controller', definitions: input.tools?.definitions ?? [], invocation: input.invocation },
-          onReady: async value => { sessionId = value; await input.ready(value); },
-          onEvent: async event => {
-            if (event.type === 'text_delta' && event.stream !== 'thought') { budget.add(event.text); text += event.text; }
-            await input.observe('event', event);
-          }, permission: input.permission,
-        });
-        const result = { ...terminal, text, sessionId, resumable: terminal.state === 'completed' && input.retainSession,
-          sessionResumeMode: 'warm', warmSessionIdleTimeoutMs: options.idleTimeoutMs,
-          resumed: Boolean(input.resumeSessionId), exactFinalAnswer: false };
-        if (!input.retainSession) await close();
-        return result;
-      },
-      close, retainedSessionId: () => retained?.executor.retainedSessionId,
-      forgetSession: async key => { if (retained?.key === key) await close(); },
     };
   }
   const env = { ...options.environment, ...(provider.key === 'deepseek-harness' ? { DSH_HOME: provider.home! } : {}) };
@@ -177,7 +124,7 @@ export function createProviderAdapter(provider: DiscoveredProvider, options: {
           title: request.title ?? `${provider.key} permission`, details: request.toolCall }, signal, responseSent),
       },
     }),
-    close: async () => {}, retainedSessionId: () => undefined, forgetSession: async () => {},
+    close: async () => {}, forgetSession: async () => {},
   };
 }
 function validateMode(config: Record<string, unknown>, modes?: readonly { value: string }[]): void {

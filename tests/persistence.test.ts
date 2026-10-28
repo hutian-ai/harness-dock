@@ -14,7 +14,7 @@ test('device crash preserves admission, excludes a second owner and never redisp
   const root = await mkdtemp(join(tmpdir(), 'dock-crash-'));
   const config: DeviceConfig = { mode: 'device', nodeId: randomUUID(), token: 'synthetic'.repeat(5),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { home: root }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } } };
+    providers: { codex: { home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } } };
   const input = { provider: 'codex', runId: randomUUID(), model: 'synthetic', prompt: 'synthetic' };
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
     import {DeviceHost} from './apps/daemon/src/device-host.ts';

@@ -8,6 +8,7 @@ import { nativeElicitationForm, nativeElicitationResponse, type HarnessExecution
 import { AnswerBudget, MAX_EVIDENCE_BYTES, readBoundedText } from './output-limits.ts';
 import { applyNativePermissionMode, nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
 import { decodeCodexEvents } from './codex-events.ts';
+import { observeStartup, startStartupSpan } from './startup-trace.ts';
 import type { CodexMessage, CodexTokens } from './codex-events.ts';
 
 export type { CodexEvent, CodexTokens, CodexMessage } from './codex-events.ts';
@@ -59,7 +60,7 @@ const object = (value: unknown): Record<string, unknown> => value && typeof valu
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
 /** Fixed adapter entry and denied delegated callbacks are shared by both embedding modes. */
-export function createCodexRuntime(config: CodexExecutionConfig, command?: string[]) {
+export function createCodexRuntime(config: CodexExecutionConfig, command?: string[], observers: Pick<AcpRuntimeOptions, 'onAcpMessage' | 'processLifecycle'> = {}) {
   return createAcpRuntime({
     cwd: config.cwd,
     sessionStore: createRuntimeStore({ stateDir: config.stateDir }),
@@ -74,6 +75,7 @@ export function createCodexRuntime(config: CodexExecutionConfig, command?: strin
     },
     mcpServers: config.mcpServers,
     permissionMode: 'deny-all', nonInteractivePermissions: 'deny', fs: false, terminal: false, elicitationModes: ['form', 'url'],
+    ...observers,
   });
 }
 
@@ -85,6 +87,32 @@ export class CodexExecutor {
   private sessionKey = randomUUID();
   private threadId?: string;
   private executing = false;
+  private startupRunId?: string;
+  private readonly startupSpans = new Map<string, ReturnType<typeof startStartupSpan>>();
+  private readonly startupObservers: Pick<AcpRuntimeOptions, 'onAcpMessage' | 'processLifecycle'> = {
+    onAcpMessage: (direction, value) => {
+      if (!this.startupRunId) return;
+      const message = object(value), id = message.id;
+      if (typeof id !== 'number' && typeof id !== 'string') return;
+      const key = `rpc:${id}`;
+      const stages: Record<string, string> = { initialize: 'native_acp_initialize', 'session/new': 'native_session_new', 'session/load': 'native_session_load', 'session/resume': 'native_session_resume' };
+      if (direction === 'outbound' && typeof message.method === 'string' && Object.hasOwn(stages, message.method))
+        this.startupSpans.set(key, startStartupSpan(this.startupRunId, stages[message.method]!));
+      else if (direction === 'inbound' && !('method' in message)) {
+        this.startupSpans.get(key)?.('error' in message ? 'failed' : 'completed');
+        this.startupSpans.delete(key);
+      }
+    },
+    processLifecycle: {
+      onBeforeSpawn: () => { if (this.startupRunId) this.startupSpans.set('process', startStartupSpan(this.startupRunId, 'native_process_spawn')); },
+      onSpawned: () => { this.startupSpans.get('process')?.(); this.startupSpans.delete('process'); },
+      onSpawnFailed: () => { this.startupSpans.get('process')?.('failed'); this.startupSpans.delete('process'); },
+    },
+  };
+  private finishStartup(): void {
+    for (const finish of this.startupSpans.values()) finish('failed');
+    this.startupSpans.clear(); this.startupRunId = undefined;
+  }
   constructor(config: CodexExecutionConfig, runtimeFactory = createCodexRuntime) {
     this.config = config;
     this.runtimeFactory = runtimeFactory;
@@ -178,22 +206,26 @@ export class CodexExecutor {
       const evidence: CodexEvidence = { runId: input.runId, fingerprint: hash(JSON.stringify({ prompt: input.prompt, model: input.model, effort: input.effort, serviceTier: input.serviceTier, resume: input.resumeThreadId, cwd: this.config.cwd, home: this.config.codexHome })), state: 'unknown', messages: [] };
       // Exclusive creation also protects against a second owner or a caller retry after restart.
       await writeFile(this.path(input.runId), JSON.stringify(evidence), { flag: 'wx', mode: 0o600 });
-      const runtime = this.runtime ??= this.runtimeFactory(this.config);
+      this.startupRunId = input.runId;
+      const runtime = this.runtime ??= this.runtimeFactory(this.config, undefined, this.startupObservers);
       let active = false;
       const baseline = input.resumeThreadId && input.previousRunId ? await this.evidence(input.previousRunId) : null;
       try {
-        const handle = await runtime.ensureSession({ sessionKey: this.sessionKey, agent: 'codex', mode: 'persistent', cwd: this.config.cwd, resumeSessionId: input.resumeThreadId });
+        const handle = await observeStartup(input.runId, 'native_session', () => runtime.ensureSession({ sessionKey: this.sessionKey, agent: 'codex', mode: 'persistent', cwd: this.config.cwd, resumeSessionId: input.resumeThreadId }));
         const threadId = handle.backendSessionId;
         if (!threadId || (input.resumeThreadId && input.resumeThreadId !== threadId)) throw new Error('codex_resume_identity_mismatch');
         this.threadId = threadId;
         evidence.threadId = threadId;
         await this.save(evidence);
-        await applyNativePermissionMode(runtime, handle, input.mode ?? this.config.sandbox ?? 'workspace-write', signal);
-        if (input.model) await runtime.setModel({ handle, model: input.model, signal });
-        if (input.effort) await runtime.setConfigOption({ handle, key: 'reasoning_effort', value: input.effort, signal });
-        await runtime.setConfigOption({ handle, key: 'fast-mode', value: input.serviceTier === 'priority' ? 'on' : 'off', signal });
+        await observeStartup(input.runId, 'native_configuration', async () => {
+          await applyNativePermissionMode(runtime, handle, input.mode ?? this.config.sandbox ?? 'workspace-write', signal);
+          if (input.model) await runtime.setModel({ handle, model: input.model, signal });
+          if (input.effort) await runtime.setConfigOption({ handle, key: 'reasoning_effort', value: input.effort, signal });
+          await runtime.setConfigOption({ handle, key: 'fast-mode', value: input.serviceTier === 'priority' ? 'on' : 'off', signal });
+        });
         await input.onReady(threadId);
         input.signal.throwIfAborted();
+        this.finishStartup();
         active = true;
         const turn = runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', signal, rawSessionUpdates: true,
           onPermissionRequest: async (request, context) => {
@@ -262,6 +294,7 @@ export class CodexExecutor {
         input.onSteeringReady?.(null);
       }
     } finally {
+      this.finishStartup();
       this.executing = false;
       if (!completed) await this.close();
     }

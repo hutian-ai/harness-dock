@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 16daa15df86bfa40062889c8bec02c8881354a18..dcb68a71a40726d0f0551f592228d73bfe48f062 100755
+index 16daa15df86bfa40062889c8bec02c8881354a18..59fcd772506f7792c133769e4faab42782a05e3f 100755
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -27302,9 +27302,13 @@ var LineSplitter = class {
@@ -167,7 +167,25 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..dcb68a71a40726d0f0551f592228d73b
    handleTokenUsageUpdated(params) {
      this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
      this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
-@@ -34247,7 +34319,8 @@ var CodexAcpClient = class {
+@@ -33986,11 +34058,15 @@ var CodexAcpClient = class {
+   async resumeSession(request, onSubscribed) {
+     const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+     await this.refreshSkills(request.cwd, additionalDirectories);
++    const [config, modelProvider] = await Promise.all([
++      this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
++      this.getResumeModelProvider()
++    ]);
+     const response = await this.resumeThread({
+       excludeTurns: true,
+-      config: await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []),
++      config,
+       cwd: request.cwd,
+-      modelProvider: await this.getResumeModelProvider(),
++      modelProvider,
+       threadId: request.sessionId
+     });
+     onSubscribed?.();
+@@ -34247,7 +34323,8 @@ var CodexAcpClient = class {
      if (!cwd) {
        return;
      }
@@ -177,7 +195,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..dcb68a71a40726d0f0551f592228d73b
      if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
        await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
        this.skillExtraRoots = skillExtraRoots;
-@@ -34348,7 +34421,7 @@ var CodexAcpClient = class {
+@@ -34348,7 +34425,7 @@ var CodexAcpClient = class {
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
        sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
@@ -186,7 +204,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..dcb68a71a40726d0f0551f592228d73b
        effort,
        model: modelId.model,
        serviceTier
-@@ -37489,6 +37562,57 @@ var CodexAcpServer = class {
+@@ -37489,6 +37566,57 @@ var CodexAcpServer = class {
        }
      };
    }
@@ -244,7 +262,7 @@ index 16daa15df86bfa40062889c8bec02c8881354a18..dcb68a71a40726d0f0551f592228d73b
    async extMethod(method, params) {
      const methodRequest = { method, params };
      if (!isExtMethodRequest(methodRequest)) {
-@@ -40358,5 +40482,5 @@ function startAcpServer() {
+@@ -40358,5 +40486,5 @@ function startAcpServer() {
          codexAcpServer = null;
        }
      });

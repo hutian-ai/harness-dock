@@ -1,6 +1,6 @@
 ARG NODE_IMAGE=node:22.22.2-bookworm-slim
 FROM ${NODE_IMAGE}
-RUN npm install --global pnpm@11.9.0
+RUN npm install --global pnpm@12.15.0
 WORKDIR /opt/harness-dock
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches

@@ -40,7 +40,6 @@ loss never resends prompts, tools or permission decisions. Subsequent connection
 query stored execution state, terminal evidence and paged observations through events.
 
 The node does not introduce World, Actor, task, business action or authorization models.
-ZCode exposes process/ACP execution and a controller-owned MCP bridge, plus the model catalog reported by its ACP adapter. Its round output is not an authoritative final answer; inventory advertises that distinction. Readiness probes and real tool execution remain separate evidence levels.
 
 ## Validation
 

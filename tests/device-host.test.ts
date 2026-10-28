@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rename, rm, symlink, link, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, rename, rm, symlink, link, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { DeviceHost } from '../apps/daemon/src/device-host.ts';
@@ -28,8 +28,8 @@ test('an approval holds only its own session; parallel cancellation, output and 
   const decisions: string[] = [];
   let starts = 0;
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
-    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { executable, home: root }, lobi: { disabled: true }, zcode: { disabled: true }, 'deepseek-harness': { disabled: true } },
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 },
+    providers: { codex: { executable, home: root }, lobi: { disabled: true }, 'deepseek-harness': { disabled: true } },
   }, () => ({
     inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: false } }),
     reconcile: async () => null, close: async () => {},
@@ -58,6 +58,13 @@ test('an approval holds only its own session; parallel cancellation, output and 
   });
   await host.inventory();
   const request = (runId: string, sessionKey = runId) => ({ provider: 'codex', runId, sessionKey, prompt: runId, model: 'synthetic' });
+  await host.prepare({ runId: 'capacity' });
+  const growth = join(root, 'state', 'provider-growth');
+  await writeFile(growth, Buffer.alloc(2 * 1024 * 1024));
+  await assert.rejects(host.execute(request('capacity')), /resource_exhausted:managed_state_bytes/);
+  await assert.rejects(host.prepare({ runId: 'over-capacity' }), /resource_exhausted:managed_state_bytes/);
+  assert.equal(starts, 0); assert.equal(host.getExecution('capacity'), null);
+  await rm(growth); await host.release('capacity');
   await host.prepare({ runId: 'approval' });
   const first = host.execute(request('approval'));
   await waiting.promise;
@@ -272,7 +279,7 @@ console.log('0.0.0');
   const providerHome = join(root, 'provider-home');
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
     endpoint: 'ws://127.0.0.1:48518/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { disabled: true }, zcode: { disabled: true },
+    providers: { codex: { disabled: true },
       lobi: { executable }, 'deepseek-harness': { executable, home: providerHome } } });
   t.after(() => host.close());
   await host.inventory();
@@ -330,9 +337,25 @@ test('managed cleanup avoids user directories and background logs rotate while r
   const stateDir = join(root, 'state'); await mkdir(stateDir);
   const outside = join(root, 'outside'); await mkdir(outside); await writeFile(join(outside, 'keep'), 'user file');
   await symlink(outside, join(stateDir, 'sessions'));
-  assert.ok(await managedStateBytes(stateDir, 1024) < 1024);
+  const linkBytes = (await lstat(join(stateDir, 'sessions'))).size;
+  assert.equal(await managedStateBytes(stateDir, 1024), linkBytes);
   await assert.rejects(forgetSessionDirectories(stateDir, 'session'), /unsafe_managed_directory/);
   assert.equal(await readFile(join(outside, 'keep'), 'utf8'), 'user file');
+  const nested = join(stateDir, 'nested'); await mkdir(nested);
+  const sizes = Array.from({ length: 67 }, (_, index) => index + 1);
+  await Promise.all(sizes.map((size, index) => writeFile(join(index % 2 ? nested : stateDir, `file-${index}`), Buffer.alloc(size))));
+  const expected = linkBytes + sizes.reduce((sum, size) => sum + size, 0);
+  assert.equal(await managedStateBytes(stateDir, expected + 1), expected);
+  assert.equal(await managedStateBytes(stateDir, expected), expected);
+  assert.ok(await managedStateBytes(stateDir, expected - 1) > expected - 1);
+  await writeFile(join(nested, 'new-provider-output'), 'new bytes');
+  assert.equal(await managedStateBytes(stateDir, expected + 100), expected + 9);
+  await writeFile(join(outside, 'keep'), Buffer.alloc(expected + 1000));
+  assert.equal(await managedStateBytes(stateDir, expected + 100), expected + 9);
+  const deep = join(stateDir, ...Array.from({ length: 65 }, () => 'deep'));
+  await mkdir(deep, { recursive: true });
+  assert.ok(await managedStateBytes(stateDir, expected + 100) > expected + 100);
+  await rm(join(stateDir, 'deep'), { recursive: true });
   const log = new RotatingLog(stateDir, 128, 3);
   for (let index = 0; index < 10; index++) log.write(String(index).repeat(100));
   log.close();
