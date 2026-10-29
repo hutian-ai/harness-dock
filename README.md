@@ -1,6 +1,6 @@
 # harness-dock
 
-harness-dock 是跨机器的原生 Harness 接入与执行基础设施。应用、Agent 和自动化服务通过 TypeScript SDK 连接设备，在目标机器的原生环境中执行任务、处理审批并读取结果。
+harness-dock 是跨机器的原生 Harness 接入与执行基础设施。让应用、Agent 和自动化服务通过 TypeScript SDK，调用其他机器上已安装、已登录的原生 Harness。调用方可以发起任务、处理原生审批并读取结果。
 
 每台设备运行独立 Daemon，设备与调用方主动连接自托管 server。调用方无需管理远程 Provider 进程、登录文件或设备上的工具安装。
 
