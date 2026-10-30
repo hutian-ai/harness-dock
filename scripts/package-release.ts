@@ -6,12 +6,28 @@ import { isAbsolute, join, resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import { verifyRelease } from '../apps/daemon/src/release-manifest.ts';
 
-const { values } = parseArgs({ options: { bundles: { type: 'string' }, output: { type: 'string' }, 'server-image': { type: 'string' } } });
-if (!values.bundles || !values.output) throw new Error('Usage: package-release.ts --bundles <verified-bundle-directory> --output <new-directory> [--server-image <local-Linux-image-tag>]');
+const { values } = parseArgs({ options: { bundles: { type: 'string' }, output: { type: 'string' }, 'server-image': { type: 'string' }, 'sdk-tag': { type: 'string' } } });
+if (!values.bundles || !values.output) throw new Error('Usage: package-release.ts --bundles <verified-bundle-directory> --output <new-directory> [--server-image <local-Linux-image-tag>] [--sdk-tag sdk-v<version>]');
 const source = resolve(values.bundles), output = resolve(values.output);
 if (!['darwin', 'linux'].includes(process.platform)) throw new Error('distribution_host_requires_macos_or_linux');
 const { manifest } = await verifyRelease(join(source, 'daemon'));
 if (!/^[a-zA-Z0-9.+-]+$/.test(manifest.version)) throw new Error('invalid_distribution_version');
+const sdkTag = values['sdk-tag'];
+let provenance: { tag: string; source: string; build: string | null } | undefined;
+if (sdkTag) {
+  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+  const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  if (!/^sdk-v\d+\.\d+\.\d+$/.test(sdkTag) || sdkTag !== `sdk-v${pkg.version}` || pkg.version !== manifest.version || pkg.private !== true)
+    throw new Error('sdk_release_version_mismatch');
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('sdk_release_requires_macos_arm64');
+  if (manifest.revision !== revision || execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim())
+    throw new Error('sdk_release_requires_clean_exact_source');
+  if (process.env.GITHUB_SHA && process.env.GITHUB_SHA !== revision) throw new Error('sdk_release_revision_mismatch');
+  if (values['server-image']) throw new Error('sdk_release_does_not_include_server_images');
+  const repository = process.env.GITHUB_REPOSITORY ?? 'hutian-ai/harness-dock';
+  provenance = { tag: sdkTag, source: `https://github.com/${repository}/tree/${revision}`,
+    build: process.env.GITHUB_RUN_ID ? `https://github.com/${repository}/actions/runs/${process.env.GITHUB_RUN_ID}` : null };
+}
 const allowed = new Set(['dist', 'node_modules', 'package.json', 'dock-release.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.json', 'third-party', 'patches', 'examples', 'Dockerfile', 'compose.yaml']);
 async function confined(root: string, path = root): Promise<void> {
   const info = await lstat(path);
@@ -33,7 +49,7 @@ await mkdir(output, { mode: 0o700 });
 const tarMetadata = process.platform === 'darwin'
   ? ['--uid', '0', '--gid', '0', '--uname', 'root', '--gname', 'root', '--no-xattrs', '--no-acls', '--no-fflags']
   : ['--owner=0', '--group=0', '--numeric-owner', '--no-xattrs', '--no-acls', '--no-selinux'];
-for (const target of ['daemon', 'controller', 'server']) {
+for (const target of sdkTag ? ['daemon', 'server'] : ['daemon', 'controller', 'server']) {
   const platform = target === 'daemon' ? `-${manifest.platform}-${manifest.arch}` : '';
   const name = `harness-dock-${target}-${manifest.version}${platform}.tar.gz`;
   execFileSync('tar', [...tarMetadata, '-czf', join(output, name), '-C', source, target], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
@@ -49,12 +65,12 @@ if (values['server-image']) {
   execFileSync('docker', ['image', 'save', '-o', join(output, `harness-dock-server-image-${manifest.version}-linux-${image.Architecture}.tar`), values['server-image']], { stdio: 'inherit' });
 }
 await writeFile(join(output, 'release.json'), JSON.stringify({ format: 1, version: manifest.version, revision: manifest.revision ?? null,
-  candidateOnly: true, device: { platform: manifest.platform, arch: manifest.arch, protocol: manifest.protocol, stateFormat: manifest.stateFormat,
+  candidateOnly: !sdkTag, ...(provenance ?? {}), device: { platform: manifest.platform, arch: manifest.arch, protocol: manifest.protocol, stateFormat: manifest.stateFormat,
     supported: manifest.platform === 'darwin' && manifest.arch === 'arm64' },
   ...(serverImage ? { serverImage } : {}),
   runtime: 'Node.js >=22.19.0; selected native Harness installation/login required (released Codex; experimental dsh SDK adapter)',
 }, null, 2) + '\n');
-await writeFile(join(output, 'README.txt'), `Local/CI candidate artifacts; not a published release.\nVerify SHA256SUMS, release.json and source provenance before installation. Hashes detect corruption; they do not authenticate the publisher.\nDevice support: macOS arm64; released Codex support and experimental dsh SDK adapter. Linux CI device archives are experimental, not supported releases.\nInstall Node.js 22.19+; runtime users do NOT need Git, pnpm or source builds. Native Codex or dsh remains separately installed/logged in. Panel self-test covers Codex only.\nExtract server/controller/daemon archives into separate directories. The server archive contains Dockerfile for Linux builds.\nUse daemon/dist/cli.js setup --help, server/dist/cli.js --help, controller/dist/cli.js --help.\nNever run package managers in a sealed daemon release. Do not put pairing files/config/state into these archives.\n`);
+await writeFile(join(output, 'README.txt'), `${sdkTag ? `Developer SDK release ${sdkTag}; separate from the macOS App release.\nSDK guide and first real task: https://hutian-ai.github.io/harness-dock/sdk/\nServer setup: https://hutian-ai.github.io/harness-dock/server/` : 'Local/CI candidate artifacts; not a published release.'}\nVerify SHA256SUMS, release.json and source provenance before installation. Hashes detect corruption; they do not authenticate the publisher.\nDevice support: macOS arm64; released Codex support and experimental dsh SDK adapter. Linux CI device archives are experimental, not supported releases.\nInstall Node.js 22.19+; runtime users do NOT need Git, pnpm or source builds. Native Codex or dsh remains separately installed/logged in. Panel self-test covers Codex only.\nInstall harness-dock-sdk-${manifest.version}.tgz with npm in your own Node project; examples/first-task.mjs is included in the installed @harness-dock/client package.\nExtract server/daemon archives into separate directories. The server archive contains Dockerfile for Linux builds.\nUse node daemon/dist/cli.js setup --help or node server/dist/cli.js --help.\nNever run package managers in a sealed daemon release. Do not put pairing files/config/state into these archives.\n`);
 let sums = '';
 for (const name of (await readdir(output)).sort()) {
   const path = join(output, name);
@@ -64,4 +80,4 @@ for (const name of (await readdir(output)).sort()) {
   sums += `${hash.digest('hex')}  ${name}\n`;
 }
 await writeFile(join(output, 'SHA256SUMS'), sums);
-console.log(`Prepared local artifacts only: ${output}. No release, registry upload or service update was performed.`);
+console.log(`Prepared ${sdkTag ?? 'local candidate'} artifacts: ${output}. No release, registry upload or service update was performed.`);

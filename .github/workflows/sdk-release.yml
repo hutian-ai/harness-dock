@@ -1,0 +1,106 @@
+name: Release developer SDK
+
+on:
+  push:
+    tags: ['sdk-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Verify independent SDK release source
+        run: |
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const pkg=JSON.parse(readFileSync('package.json','utf8'));
+          assert.match(process.env.RELEASE_TAG,/^sdk-v\d+\.\d+\.\d+$/);
+          assert.equal(process.env.RELEASE_TAG,`sdk-v${pkg.version}`);
+          assert.equal(pkg.private,true);
+          assert.equal(process.platform,'darwin'); assert.equal(process.arch,'arm64');
+          JS
+          git diff --exit-code
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Install pinned dependencies and check source
+        run: |
+          npm install --global pnpm@12.15.0
+          pnpm install --frozen-lockfile
+          pnpm check
+      - name: Install pinned Gitleaks with a verified archive digest
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz \
+            --output "$RUNNER_TEMP/gitleaks.tar.gz"
+          printf '%s  %s\n' 'b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5' "$RUNNER_TEMP/gitleaks.tar.gz" | shasum -a 256 --check -
+          mkdir "$RUNNER_TEMP/gitleaks-bin"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+          echo "$RUNNER_TEMP/gitleaks-bin" >> "$GITHUB_PATH"
+      - name: Check source privacy and reachable history for secrets
+        run: pnpm check:privacy
+      - name: Build and verify standalone SDK, server and device CLI
+        run: |
+          node --import tsx scripts/bundle.ts .local/sdk-bundle
+          node --import tsx scripts/accept-bundle.ts .local/sdk-bundle --offline
+          node --import tsx scripts/package-release.ts --bundles .local/sdk-bundle --output .local/sdk-release --sdk-tag "$RELEASE_TAG"
+          (cd .local/sdk-release && shasum -a 256 -c SHA256SUMS)
+      - name: Publish developer assets with exact source provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          version="${RELEASE_TAG#sdk-v}"
+          git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}" > "$RUNNER_TEMP/sdk-release-tag.txt"
+          node --input-type=module - "$RUNNER_TEMP/sdk-release-tag.txt" <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const refs=readFileSync(process.argv[2],'utf8').trim().split('\n').map(line=>line.split(/\s+/));
+          const revision=refs.find(([,ref])=>ref.endsWith('^{}'))?.[0] ?? refs[0]?.[0];
+          assert.equal(revision,process.env.GITHUB_SHA,'SDK tag changed during build');
+          JS
+          cd .local/sdk-release
+          assets=("harness-dock-sdk-${version}.tgz" "harness-dock-server-${version}.tar.gz" "harness-dock-daemon-${version}-darwin-arm64.tar.gz" "SHA256SUMS" "README.txt" "release.json")
+          if gh release view "$RELEASE_TAG" --repo "$repo" --json isDraft > "$RUNNER_TEMP/sdk-release-state.json"; then
+            node -e 'if(!JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).isDraft) throw Error("release_already_published: refusing to replace assets")' "$RUNNER_TEMP/sdk-release-state.json"
+          else
+            gh release create "$RELEASE_TAG" --repo "$repo" --verify-tag --draft --prerelease --latest=false \
+              --title "SDK ${version} — Developer Alpha" \
+              --notes 'Standalone Node.js SDK, server and macOS arm64 device CLI. Requires Node.js 22.19+. No npm publication. Start with https://hutian-ai.github.io/harness-dock/sdk/ and verify SHA256SUMS plus release.json. This developer release is separate from the macOS App release; it does not replace the v0.1.0 App or its provenance.'
+          fi
+          for asset in "${assets[@]}"; do
+            if ! gh release view "$RELEASE_TAG" --repo "$repo" --json assets --jq '.assets[].name' | grep -Fx "$asset" > /dev/null; then
+              gh release upload "$RELEASE_TAG" "$asset" --repo "$repo"
+            fi
+          done
+          gh release view "$RELEASE_TAG" --repo "$repo" --json assets > "$RUNNER_TEMP/sdk-release-assets.json"
+          node -e 'const names=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).assets.map(x=>x.name).sort(); if(JSON.stringify(names)!==JSON.stringify(process.argv.slice(2).sort())) throw Error("unexpected_release_assets")' "$RUNNER_TEMP/sdk-release-assets.json" "${assets[@]}"
+          readback="$RUNNER_TEMP/sdk-release-readback"
+          mkdir "$readback"
+          for asset in "${assets[@]}"; do
+            gh release download "$RELEASE_TAG" --repo "$repo" --pattern "$asset" --dir "$readback"
+            cmp "$asset" "$readback/$asset"
+          done
+          (cd "$readback" && shasum -a 256 -c SHA256SUMS)
+          gh release edit "$RELEASE_TAG" --repo "$repo" --draft=false --prerelease --latest=false

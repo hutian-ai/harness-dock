@@ -71,6 +71,9 @@ await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
 execFileSync(process.execPath, [resolve('node_modules/typescript/bin/tsc'), '-p', join(consumer, 'tsconfig.json')], { cwd: consumer, stdio: 'inherit' });
 const clientEntry = await realpath(join(consumer, 'node_modules/@harness-dock/client/dist/index.js'));
 assert.ok(clientEntry.startsWith(consumer + '/'));
+await cp(join(dirname(dirname(clientEntry)), 'examples/first-task.mjs'), join(consumer, 'first-task.mjs'));
+assert.ok((await readFile(join(dirname(dirname(clientEntry)), 'examples/notes.txt'), 'utf8')).length > 0);
+execFileSync(process.execPath, ['first-task.mjs', '--help'], { cwd: consumer, stdio: 'inherit' });
 const require = createRequire(clientEntry);
 for (const dependency of ['@harness-dock/protocol', 'ws', 'json-rpc-2.0'])
   assert.ok((await realpath(join(dirname(dirname(clientEntry)), 'node_modules', dependency))).startsWith(consumer + '/'));
@@ -89,4 +92,4 @@ assert.match(await cli('help'), /Default config: .local.device.config.json/);
 assert.equal((await verifyRelease(join(directory, 'daemon'))).id, release.id);
 await checkNotices(dirname(dirname(clientEntry)));
 if (!offline) await acceptDevice({ daemon: cliPath, client: join(consumer, 'dist/index.js'), server: join(directory, 'server/dist/index.js') });
-console.log(`PASS outside-checkout offline SDK archive install/ci, types, dependency isolation, applied patches, licenses and installed Daemon${offline ? '' : ' and real Codex'}: ${directory}`);
+console.log(`PASS outside-checkout offline SDK archive install/ci, types, packaged first-task example, dependency isolation, applied patches, licenses and installed Daemon${offline ? '' : ' and real Codex'}: ${directory}`);

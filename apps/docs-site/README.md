@@ -80,7 +80,7 @@ npm run preview
 
 ### sdk
 
-SDK 接入：启动预览后访问 `/sdk/`。最小执行 CLI 见 [通过 CLI 执行任务](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli)（本地预览 `/sdk/#execution-cli`）：通过连接 SDK 提交任务、处理必要原生审批，并以请求记录查询同一轮结果；不增加 MCP 入口。
+SDK 接入：启动预览后访问 `/sdk/`。主入口 `/sdk/#first-task` 使用固定 `sdk-v0.1.0` 开发者发行：SDK、server、macOS arm64 Daemon、校验和与源码元数据。按公开下载、冷缓存离线安装、三个终端启动隔离服务/设备/调用方的顺序，将上传文本整理为 Markdown；示例在 SDK 的 `examples/first-task.mjs`，先落盘私有 receipt，再派发一次，只读查询原任务完成后才保存报告和清理托管文件。它不替代第二台 Mac 首装、App 签名或其他工具验收。 通用执行 CLI 见[通过 CLI 执行任务](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli)：安装发行 SDK 后可调用包内 CLI 提交自己的任务、处理原生审批，并查询原请求记录。
 
 ### server
 
@@ -130,3 +130,5 @@ Harness 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分具名 
 ### distribution
 
 构建与分发：启动预览后访问 `/distribution/`。
+
+SDK 发行由 `.github/workflows/sdk-release.yml` 监听 `sdk-v*` tag，从干净固定 revision 复用 bundle 与离线消费验证，再以 `package-release.ts --sdk-tag` 生成并发布开发者归档；不发布 npm，不修改独立的 App `v*` 发行。发布前后核对来源和摘要，已发布资产不覆盖。
