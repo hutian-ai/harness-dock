@@ -53,10 +53,11 @@ export async function clientDoctor(options: ServerClientOptions, nodeId?: string
 }
 
 /** A user explicitly selects the native option ID; never infer an allow from its position or name. */
-export async function promptNativePermission(payload: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+export async function promptNativePermission(payload: Record<string, unknown>, signal: AbortSignal, onInterrupt?: () => void): Promise<unknown> {
   signal.throwIfAborted();
   if (!process.stdin.isTTY) return 'deny';
   const reader = createInterface({ input: process.stdin, output: process.stderr });
+  if (onInterrupt) reader.once('SIGINT', onInterrupt);
   try {
     console.error(`Native request: ${String(payload.title ?? 'permission')}`);
     if (payload.details) console.error(JSON.stringify(payload.details, null, 2));
@@ -82,7 +83,10 @@ export async function promptNativePermission(payload: Record<string, unknown>, s
     if (payload.canAllow !== true) return 'deny';
     const answer = await reader.question('Allow this request once? Type allow; Enter denies: ', { signal });
     signal.throwIfAborted(); return answer.trim() === 'allow' ? 'allow' : 'deny';
-  } catch { return 'deny'; } finally { reader.close(); }
+  } catch { return 'deny'; } finally {
+    if (onInterrupt) reader.removeListener('SIGINT', onInterrupt);
+    reader.close();
+  }
 }
 
 type FirstTestPeer = Pick<ServerPeer, 'nodeId' | 'daemonId' | 'connected' | 'request'> & {

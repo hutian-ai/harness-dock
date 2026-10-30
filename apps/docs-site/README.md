@@ -80,7 +80,7 @@ npm run preview
 
 ### sdk
 
-SDK 接入：启动预览后访问 `/sdk/`。
+SDK 接入：启动预览后访问 `/sdk/`。最小执行 CLI 见 [通过 CLI 执行任务](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli)（本地预览 `/sdk/#execution-cli`）：通过连接 SDK 提交任务、处理必要原生审批，并以请求记录查询同一轮结果；不增加 MCP 入口。
 
 ### server
 
