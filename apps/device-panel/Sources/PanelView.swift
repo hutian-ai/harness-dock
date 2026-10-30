@@ -103,7 +103,7 @@ struct PanelView: View {
             PanelBrandMark().frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(PanelTheme.appName).font(.system(size: 16, weight: .semibold)).lineLimit(1)
-                Text("这台 Mac 的原生 Harness").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("让应用调用这台 Mac").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
             if model.busy { ProgressView().controlSize(.small) }
@@ -308,7 +308,7 @@ struct PanelView: View {
             }
             Text(model.device.server ?? "服务地址尚未读回").font(.system(size: 12)).foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-            Text(model.connectionDetail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(model.connectionDetail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.device.running != true && model.device.managed == true {
                 Button("启动后台") { model.action("start") }.buttonStyle(PanelPrimaryButtonStyle()).controlSize(.large)
                     .disabled(model.busy || model.maintenanceBlocked)

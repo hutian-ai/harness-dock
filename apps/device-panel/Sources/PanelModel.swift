@@ -187,7 +187,7 @@ import UniformTypeIdentifiers
         if device.connectionIssue == "configuration_mismatch" { return "后台连接与保存的服务配置不一致，请运行诊断核对。" }
         if device.connectionIssue != nil { return "请检查网络、服务地址与设备配对。" }
         if device.connected != true { return "后台正在等待连接服务。" }
-        return "任务请在调用方应用中发起。"
+        return "回到提供邀请的应用发起任务，进度、审批和结果会在那里显示。"
     }
     var connectionColor: Color {
         if refreshError != nil || device.connectionIssue != nil { return .orange }
