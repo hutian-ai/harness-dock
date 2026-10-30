@@ -102,6 +102,7 @@ struct PanelFailure: LocalizedError {
         case "self_test_unsupported": return "当前设备后台不支持一键测试。请先更新设备后台，再重新测试。"
         case "self_test_storage_unavailable": return "无法保存测试记录，尚未确认测试已启动。请检查本地状态目录后刷新状态。"
         case "self_test_id_conflict": return "此测试记录已存在。请刷新查看原测试结果，不会重复发送请求。"
+        case "preview_execution_disabled": return "当前是界面预览，未执行模型测试。请打开实际 App 进行测试。"
         case "installation_config_mismatch": return "设备使用其他安装位置。请通过原安装入口维护，或联系部署者确认配置。"
         case "installation_inspection_unavailable": return "无法确认已有后台的安装位置。请通过原安装入口维护，或联系部署者检查本机设备配置。"
         case "device_not_installed": return "这是源码启动或自定义安装的设备。可以查看状态与诊断；请通过原安装入口进行维护。"

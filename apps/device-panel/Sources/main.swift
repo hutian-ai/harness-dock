@@ -12,8 +12,8 @@ import SwiftUI
         let configOverride = configIndex.flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
         model = PanelModel(resources: Bundle.main.resourceURL!, configOverride: configOverride)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "point.3.connected.trianglepath.dotted", accessibilityDescription: "Harness Dock 设备面板")
-        item.button?.image?.isTemplate = true
+        item.button?.image = PanelTheme.statusItemImage()
+        if item.button?.image == nil { item.button?.title = "HD" }
         item.button?.toolTip = "Harness Dock"
         item.button?.target = self
         item.button?.action = #selector(toggle)
@@ -21,6 +21,7 @@ import SwiftUI
         popover.delegate = self
         popover.contentSize = NSSize(width: 400, height: 520)
         popover.contentViewController = NSHostingController(rootView: PanelView(model: model,
+            resize: { [weak self] height in self?.updatePanelHeight(height) },
             hide: { [weak self] in self?.popover.performClose(nil) }, quit: { NSApp.terminate(nil) }))
         // Reopening the app reveals the panel; closing it never stops the independently owned daemon.
         show()
@@ -38,6 +39,10 @@ import SwiftUI
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return false }
     @objc private func toggle() { if popover.isShown { popover.performClose(nil) } else { show() } }
     func popoverDidClose(_ notification: Notification) { model.visible = false }
+    private func updatePanelHeight(_ height: CGFloat) {
+        let size = NSSize(width: 400, height: min(520, max(240, height)))
+        if abs(popover.contentSize.height - size.height) >= 1 { popover.contentSize = size }
+    }
     private func show() {
         guard let button = item?.button else { return }
         model.visible = true

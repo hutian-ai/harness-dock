@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { DeviceConfig } from './config.ts';
@@ -45,7 +45,8 @@ export async function startBackground(config: DeviceConfig, path: string, entryp
   const existing = await control(config, 'status');
   if (existing) return { ...existing, alreadyRunning: true } as LocalStatus;
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
-  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { detached: true, stdio: 'ignore' });
+  // The launcher can be a temporary checkout; background commands need a lasting cwd.
+  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { cwd: dirname(entrypoint), detached: true, stdio: 'ignore' });
   let error: Error | undefined;
   child.on('error', value => { error = value; });
   child.unref();

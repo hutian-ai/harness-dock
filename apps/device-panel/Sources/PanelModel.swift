@@ -28,6 +28,7 @@ import UniformTypeIdentifiers
     @Published var copiedTestCommand = false
     @Published private(set) var pendingSelfTestId: String?
     @Published private(set) var pendingSelfTestProvider: String?
+    @Published private(set) var selfTestFeedbackProvider: String?
     @Published private(set) var selectedProvider: String
     @Published var copiedInvitationRequest = false
     @Published var connectingNew = false
@@ -44,13 +45,30 @@ import UniformTypeIdentifiers
         let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".harness-dock/.local")
         preferences = home.appendingPathComponent("panel.json")
         persistSelection = configOverride == nil
-        let saved = (try? Data(contentsOf: preferences)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+        let saved = configOverride == nil
+            ? (try? Data(contentsOf: preferences)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+            : nil
         configPath = configOverride ?? saved?["config"] ?? home.appendingPathComponent("device/config.json").path
         selectedProvider = saved?["provider"] ?? ""
     }
     var providerChoices: [ProviderInstallation] { device.providers ?? [] }
+    var installedProviderCount: Int { providerChoices.filter { $0.status == "installed" }.count }
+    var harnessSummaryTitle: String {
+        guard device.providers != nil else { return "Harness 检测待确认" }
+        if providerChoices.contains(where: { !["installed", "not_found", "disabled"].contains($0.status) }) && installedProviderCount == 0 {
+            return "Harness 检测待确认"
+        }
+        return "\(refreshError == nil ? "已检测到" : "上次检测到") \(installedProviderCount) 个 Harness"
+    }
+    var harnessSummaryDetail: String? {
+        if refreshError != nil { return "当前状态尚未刷新，保留上次检测结果。" }
+        guard device.providers != nil else { return "刷新状态后查看本机支持的 Harness。" }
+        if providerChoices.contains(where: { !["installed", "not_found", "disabled"].contains($0.status) }) { return "部分安装状态待确认，可刷新或运行诊断。" }
+        if installedProviderCount == 0 { return "请在这台 Mac 安装并登录受支持的原生 Harness。" }
+        return nil
+    }
     var selectedInstallation: ProviderInstallation? { providerChoices.first(where: { $0.key == selectedProvider }) }
-    var selectedProviderName: String { selectedInstallation?.displayName ?? (selectedProvider.isEmpty ? "原生 Harness" : selectedProvider) }
+    var selectedProviderName: String { selectedInstallation?.displayName ?? (selectedProvider == "codex" ? "Codex" : selectedProvider.isEmpty ? "原生 Harness" : selectedProvider) }
     var selectedReadOnlyEcho: Bool { selectedInstallation?.selfTestKind == "read-only-echo" }
     var selectedAcceptanceCommand: String? {
         guard let command = selectedInstallation?.acceptanceCommand, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
@@ -59,15 +77,11 @@ import UniformTypeIdentifiers
     var selectedAcceptanceDescription: String? { selectedInstallation?.acceptanceDescription }
     private func reconcileProviderSelection() {
         guard !providerChoices.contains(where: { $0.key == selectedProvider }) else { return }
-        let next = pendingSelfTestProvider ?? providerChoices.first(where: { $0.status == "installed" })?.key ?? providerChoices.first?.key ?? ""
+        let next = pendingSelfTestProvider ?? providerChoices.first(where: { $0.status == "installed" })?.key
+            ?? providerChoices.first?.key ?? allSelfTests.max { $0.startedAt < $1.startedAt }?.providerKey ?? ""
         guard next != selectedProvider else { return }
         selectedProvider = next; copiedTestCommand = false
         do { try saveSelection() } catch { self.error = error.localizedDescription }
-    }
-    var installedProviderSummary: String {
-        guard let providers = device.providers else { return "安装状态待确认" }
-        let names = providers.filter { $0.status == "installed" }.map(\.displayName)
-        return names.isEmpty ? "未发现已安装 Harness" : names.joined(separator: " · ")
     }
     func installationLabel(_ provider: ProviderInstallation) -> String {
         "\(provider.displayName)（\(installationStatus(provider))）"
@@ -101,18 +115,52 @@ import UniformTypeIdentifiers
         if let legacy = device.selfTest, !tests.contains(where: { $0.id == legacy.id && $0.providerKey == legacy.providerKey }) { tests.append(legacy) }
         return tests
     }
-    var selectedSelfTest: SelfTestSnapshot? {
-        allSelfTests.filter { $0.providerKey == selectedProvider }.max { $0.startedAt < $1.startedAt }
+    func latestSelfTest(for provider: String) -> SelfTestSnapshot? {
+        allSelfTests.filter { $0.providerKey == provider }.max { $0.startedAt < $1.startedAt }
+    }
+    var selectedSelfTest: SelfTestSnapshot? { latestSelfTest(for: selectedProvider) }
+    private func isHistorical(_ test: SelfTestSnapshot) -> Bool {
+        guard let currentDaemon = device.daemonId else { return true }
+        return test.daemonId != currentDaemon
+    }
+    func rowTestLabel(_ provider: ProviderInstallation) -> String {
+        if pendingSelfTestId != nil && pendingSelfTestProvider == provider.key { return busy ? "正在启动测试" : "启动结果待核对" }
+        guard let test = latestSelfTest(for: provider.key) else { return "尚未测试" }
+        if test.state == "running" || test.phase != "finished" { return refreshError == nil ? "测试进行中" : "测试状态待刷新" }
+        let historical = refreshError != nil || isHistorical(test) || provider.status != "installed"
+        switch test.state {
+        case "passed": return historical ? "上次回显通过" : "最近回显通过"
+        case "unknown": return "结果待核对"
+        default: return historical ? "上次回显未通过" : "最近回显未通过"
+        }
+    }
+    func rowTestColor(_ provider: ProviderInstallation) -> Color {
+        if pendingSelfTestId != nil && pendingSelfTestProvider == provider.key { return busy ? .secondary : .orange }
+        guard let test = latestSelfTest(for: provider.key) else { return .secondary }
+        if test.state == "running" || test.phase != "finished" { return .secondary }
+        if test.state == "unknown" || test.state == "failed" { return .orange }
+        return test.state == "passed" && provider.status == "installed" && !isHistorical(test) && refreshError == nil ? PanelTheme.accent : .secondary
+    }
+    func rowTestSymbol(_ provider: ProviderInstallation) -> String? {
+        if pendingSelfTestId != nil && pendingSelfTestProvider == provider.key { return busy ? "clock" : "exclamationmark.circle" }
+        guard let test = latestSelfTest(for: provider.key) else { return nil }
+        if test.state == "running" || test.phase != "finished" { return "clock" }
+        return test.state == "passed" ? "checkmark.circle.fill" : "exclamationmark.circle"
     }
     var selfTestRunning: Bool { allSelfTests.contains { $0.state == "running" || $0.phase != "finished" } }
     var selectedSelfTestRunning: Bool { selectedSelfTest.map { $0.state == "running" || $0.phase != "finished" } ?? false }
     var selfTestStartUnconfirmed: Bool { pendingSelfTestId != nil }
     var selectedSelfTestStartUnconfirmed: Bool { pendingSelfTestId != nil && pendingSelfTestProvider == selectedProvider }
-    var canSelectProvider: Bool { !providerChoices.isEmpty && !loading && !busy && refreshError == nil && !selfTestRunning && !selfTestStartUnconfirmed }
-    func selectProvider(_ provider: String) {
-        guard canSelectProvider, providerChoices.contains(where: { $0.key == provider }), provider != selectedProvider else { return }
-        selectedProvider = provider; copiedTestCommand = false; error = nil; notice = nil
-        do { try saveSelection() } catch { self.error = error.localizedDescription }
+    var hasSelectedSelfTestFeedback: Bool { selfTestFeedbackProvider != nil && selfTestFeedbackProvider == selectedProvider }
+    var canOpenProviderDetails: Bool { !loading && !busy && !providerChoices.isEmpty }
+    func openProviderDetails(_ provider: String) {
+        guard canOpenProviderDetails, providerChoices.contains(where: { $0.key == provider }) else { return }
+        // Viewing another installation never changes the pending test owner or starts a new request.
+        if provider != selectedProvider {
+            selectedProvider = provider; copiedTestCommand = false; error = nil; notice = nil
+            do { try saveSelection() } catch { self.error = error.localizedDescription }
+        }
+        showVerification = true
     }
     var maintenanceBlocked: Bool { refreshError != nil || selfTestRunning || selfTestStartUnconfirmed || (device.active ?? 0) > 0 || (device.unresolved ?? 0) > 0 }
     var maintenanceBlockReason: String? {
@@ -124,10 +172,26 @@ import UniformTypeIdentifiers
         return nil
     }
     var backgroundStateLabel: String { refreshError != nil ? "待确认" : device.running == true ? "运行中" : "已停止" }
-    var executionStateLabel: String {
+    var connectionTitle: String {
+        if loading { return "正在读取" }
         if refreshError != nil { return "待确认" }
-        if device.running != true { return "后台启动后读取" }
-        return "\(device.active ?? 0) 运行中 · \(device.unresolved ?? 0) 待核对"
+        if !device.configured { return "未连接" }
+        if device.running != true { return "后台已停止" }
+        if device.connectionIssue != nil { return "连接需检查" }
+        return device.connected == true ? "已连接" : "连接中"
+    }
+    var connectionDetail: String {
+        if refreshError != nil { return "当前连接状态尚未读回，请刷新或运行诊断。" }
+        if !device.configured { return "通过邀请连接服务，让应用使用这台 Mac 的原生 Harness。" }
+        if device.running != true { return "启动后台后恢复服务连接。" }
+        if device.connectionIssue == "configuration_mismatch" { return "后台连接与保存的服务配置不一致，请运行诊断核对。" }
+        if device.connectionIssue != nil { return "请检查网络、服务地址与设备配对。" }
+        if device.connected != true { return "后台正在等待连接服务。" }
+        return "任务请在调用方应用中发起。"
+    }
+    var connectionColor: Color {
+        if refreshError != nil || device.connectionIssue != nil { return .orange }
+        return device.running == true && device.connected == true ? PanelTheme.accent : .secondary
     }
     var canUpgradeBackground: Bool { device.managed == true && device.externalInstallation != true && device.updateAvailable == true }
     var backgroundVersionDetail: String {
@@ -167,7 +231,11 @@ import UniformTypeIdentifiers
         showVerification = true
     }
     var canStartSelfTest: Bool { !busy && device.running == true && !maintenanceBlocked && selectedInstallation?.status == "installed" && selectedProviderSelfTestSupported }
-    var selfTestButtonTitle: String { selfTestRunning ? "测试中…" : selfTestStartUnconfirmed ? "等待确认…" : "测试 \(selectedProviderName)" }
+    var selfTestButtonTitle: String {
+        if selectedSelfTestRunning { return "测试中…" }
+        if selectedSelfTestStartUnconfirmed { return "等待确认…" }
+        return "\(selectedSelfTest == nil ? "测试" : "重新测试") \(selectedProviderName)"
+    }
     var selfTestDescription: String {
         selectedReadOnlyEcho
             ? "会实际调用一次模型并使用账户额度。测试使用原生确认的只读模式核对一次回显，不会授予额外工具权限。"
@@ -177,8 +245,8 @@ import UniformTypeIdentifiers
         "通过只证明本次 \(selectedProviderName) 模型回显。设备连接单独显示；工具、应用授权、浏览器和插件需按实际用途分别验证。"
     }
     var selfTestIsHistorical: Bool {
-        guard let testedDaemon = selectedSelfTest?.daemonId, let currentDaemon = device.daemonId else { return false }
-        return testedDaemon != currentDaemon
+        guard let test = selectedSelfTest else { return false }
+        return isHistorical(test)
     }
     var selfTestTitle: String {
         if selectedSelfTestStartUnconfirmed { return busy ? "正在启动 \(selectedProviderName) 测试" : "\(selectedProviderName) 测试启动结果待核对" }
@@ -222,35 +290,12 @@ import UniformTypeIdentifiers
     }
     var selfTestColor: Color {
         if selectedSelfTestStartUnconfirmed || selectedSelfTest?.state == "unknown" || selectedSelfTest?.state == "failed" { return .orange }
-        if selectedSelfTest?.state == "passed" && !selfTestIsHistorical && refreshError == nil { return .teal }
+        if selectedSelfTest?.state == "passed" && !selfTestIsHistorical && refreshError == nil { return PanelTheme.accent }
         return .secondary
     }
     var selfTestCheckedAt: String? {
         guard let test = selectedSelfTest, !selectedSelfTestStartUnconfirmed else { return nil }
         return Date(timeIntervalSince1970: (test.finishedAt ?? test.startedAt) / 1000).formatted(.dateTime.month().day().hour().minute())
-    }
-    var statusTitle: String {
-        if loading { return "正在读取设备" }
-        if refreshError != nil { return "状态暂不可用" }
-        if !device.configured { return "接入这台 Mac" }
-        if (device.unresolved ?? 0) > 0 { return "有执行结果待核对" }
-        if device.running != true { return "后台已停止" }
-        if device.connectionIssue != nil { return "设备连接需检查" }
-        if device.connected != true { return "正在等待连接" }
-        return "设备已连接"
-    }
-    var statusDetail: String {
-        if refreshError != nil { return "未能读取最新状态，请刷新或打开诊断。" }
-        if (device.unresolved ?? 0) > 0 { return "请核对原执行记录。应用任务回到发起应用，本机检查在“检查本机环境”中查看。" }
-        if device.running != true { return "启动设备后台后，才能建立服务连接。" }
-        if device.connectionIssue == "configuration_mismatch" { return "后台连接与保存的服务配置不一致，请运行诊断核对。" }
-        if device.connected != true { return "后台已启动，尚未连接到服务。" }
-        if selfTestRunning { return "本机环境检查在后台进行，详情可在检查入口查看。" }
-        return (device.active ?? 0) > 0 ? "正在处理应用发起的执行，进度与结果请在调用方应用中查看。" : "后台独立运行。任务请在调用方应用中发起。"
-    }
-    var statusColor: Color {
-        if refreshError != nil || device.connectionIssue != nil || (device.unresolved ?? 0) > 0 { return .orange }
-        return device.connected == true ? .teal : .secondary
     }
     func load() async {
         await refresh()
@@ -384,7 +429,7 @@ import UniformTypeIdentifiers
         let id = UUID().uuidString.lowercased()
         let provider = selectedProvider
         pendingSelfTestId = id; pendingSelfTestProvider = provider
-        perform("正在启动 \(selectedProviderName) 本机测试…") {
+        perform("正在启动 \(selectedProviderName) 本机测试…", feedbackProvider: provider) {
             do {
                 self.device = try await self.bridge.call("test", config: self.configPath, fields: ["testId": id, "provider": provider], as: DeviceState.self)
                 self.refreshError = nil
@@ -408,9 +453,9 @@ import UniformTypeIdentifiers
         if matchingAcceptance || matchingSnapshot || matchingReceipt && device.selfTestReceipt?.found == true {
             clearPendingSelfTest(); error = nil
         } else if matchingReceipt && device.selfTestReceipt?.found == false {
-            clearPendingSelfTest(); error = nil
+            clearPendingSelfTest()
             let name = providerChoices.first(where: { $0.key == provider })?.displayName ?? provider
-            notice = "原 \(name) 测试未启动，可重新点击对应测试按钮发起。"
+            notice = "已确认 \(name) 测试未启动。"
         }
     }
     private func readDeviceState(config: String) async throws -> DeviceState {
@@ -452,8 +497,9 @@ import UniformTypeIdentifiers
             self.logs = result.text
         }
     }
-    private func perform(_ message: String = "正在处理…", _ operation: @escaping @MainActor () async throws -> Void) {
+    private func perform(_ message: String = "正在处理…", feedbackProvider: String? = nil, _ operation: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
+        selfTestFeedbackProvider = feedbackProvider
         busy = true; busyMessage = message; error = nil; notice = nil
         Task {
             defer { busy = false; busyMessage = nil }
