@@ -4,7 +4,7 @@
 
 位于 harness-dock 仓库的 `apps/docs-site/`，使用 Node.js 静态生成，无第三方运行时依赖。中性黑白底、绿色强调、两层导航、图标侧栏和三栏阅读布局。
 
-只使用客户端的用户请阅读站点“设备快速开始”和“安装执行设备”，通过 [Release 下载客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.1/harness-dock-panel-0.1.1-darwin-arm64.zip)；不需要运行下面的文档预览命令。客户端仅有 ad-hoc 签名，尚未完成 Developer ID 签名与公证。
+只使用客户端的用户先阅读 [App 使用指南](https://hutian-ai.github.io/harness-dock/app/)，按首次连接、日常查看、测试和维护的顺序操作；需要详细安装要求时再读“安装执行设备”。客户端可从 [Release 下载](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.1/harness-dock-panel-0.1.1-darwin-arm64.zip)，不需要运行下面的文档预览命令。客户端仅有 ad-hoc 签名，尚未完成 Developer ID 签名与公证。
 
 ## 维护者：本地预览
 
@@ -58,7 +58,7 @@ npm run preview
 
 首屏图展示同一 Server 接入多台执行设备，由应用通过连接 SDK 选择本次目标；只高亮一台设备的任务路径，其他设备保留独立连接。所选设备展开独立后台与原生 Harness，其他设备用简化结构表示各自的后台与原生环境；窄屏同样保留多设备分支。图中强调后台持有进程与记录、原生审批和结果沿原路返回应用，不暗示 Server 自动调度、广播或故障迁移。ACP 只表示设备后台与原生 Harness 之间的执行协议，不用于应用、Server 与设备的网络连接。图内展示设备上所选的原生 Harness 及安装、登录、工具和会话，不以多个计划适配对象作为图的重点；当前支持和计划适配在图外区分。ACPX、各 Harness 的具名适配器与原生进程层级见 architecture 和 drivers 页面。
 
-产品与维护文档统一维护在 src/content.json，不再保留重复的 docs/ 目录。App `v0.1.1` 面向 macOS arm64 + Codex；SDK `sdk-v0.1.0` 的开发者 Daemon 另含实验性 dsh 适配。源码与新构建候选的面板把环境列表、固定回显、分环境历史与诊断放入“检查本机环境”，把自启和版本操作放入“设置与维护”；这些界面尚未进入 App `v0.1.1`，只在教程后部另列。Codex 固定回显使用原生只读模式，dsh 候选固定回显沿用原生策略，不提供只读保证。文档站不包含真实地址、设备身份或凭据。
+产品与维护文档统一维护在 src/content.json，不再保留重复的 docs/ 目录。App `v0.1.1` 面向 macOS arm64 + Codex；SDK `sdk-v0.1.0` 的开发者 Daemon 另含实验性 dsh 适配。源码与新构建候选首页突出已检测到的 Harness 数量、安装列表和服务连接；点击条目查看安装信息、固定回显、分环境历史与诊断，“设置与维护”独立页面收纳日志、版本、自启和后台操作，右上角按钮收起面板。这些界面尚未进入 App `v0.1.1`；“App 使用指南”明确区分两版操作。Codex 固定回显使用原生只读模式，dsh 候选固定回显沿用原生策略，不提供只读保证。文档站不包含真实地址、设备身份或凭据。
 
 构建、链接检查和页面 QA 不替代产品的真实设备安装、模型执行或部署验收。
 
@@ -68,7 +68,11 @@ npm run preview
 
 ### quickstart
 
-设备快速开始：启动预览后访问 `/quickstart/`。默认介绍公开 App `v0.1.1`：先取得管理员邀请，安装客户端、连接这台 Mac，实际执行前安装并登录 Codex，需要核验时点击“测试 Codex”，最后回到提供邀请的应用。下载附近说明 macOS 可能阻止首次打开并提供求助入口。源码候选的“检查本机环境”等界面另列，不让公开 App 用户混用步骤。开发者直接进入 `/sdk/#first-task`；管理员进入 Server 部署。设备用户无须终端、Git、Node、pnpm 或 JSON。
+设备快速开始：启动预览后访问 `/quickstart/`。默认介绍公开 App `v0.1.1`：先取得管理员邀请，安装客户端、连接这台 Mac，实际执行前安装并登录 Codex，需要核验时点击“测试 Codex”，最后回到提供邀请的应用。下载附近说明 macOS 可能阻止首次打开并提供求助入口。源码候选的 Harness 列表等界面另列，不让公开 App 用户混用步骤。完整日常操作链接到“App 使用指南”。开发者直接进入 `/sdk/#first-task`；管理员进入 Server 部署。设备用户无须终端、Git、Node、pnpm 或 JSON。
+
+### app
+
+App 使用指南：启动预览后访问 `/app/`。这是设备用户从下载到日常使用的集中入口，覆盖首次邀请连接、菜单栏打开面板、安装与连接状态、按需模型回显、收起/退出/停止后台的区别、自启和更新、常见问题下一步。先说明公开 App `v0.1.1` 与源码候选界面的差异，避免把新 Harness 列表和 dsh 入口写成已发行功能。安装细节、应用端到端验收和管理员操作仍链接到各自页面。
 
 ### usage
 
@@ -94,7 +98,7 @@ SDK 接入：启动预览后访问 `/sdk/`。主入口 `/sdk/#first-task` 使用
 
 设备安装与维护：启动预览后访问 `/installation/`。
 
-设备邀请以服务器生成的 HTTPS 链接为主要入口，网页唤起客户端、用户确认后领取一次；JSON 导入位于高级设置。反向代理增加 /connect 与 /invitations/redeem，服务端持久保存仅含摘要的消费记录；容器需挂载私有 invitation-state 目录，不能使用易失的 /tmp。菜单栏面板的用户接入与安装步骤统一维护在 installation 页面，普通用户先从 Release 下载并安装客户端，再通过邀请连接并回到调用方应用；环境检查按需进行，原生源码与构建说明在 `apps/device-panel/README.md`。`pnpm panel:build` 在 macOS arm64 上生成携带运行时的本地 App/ZIP；Developer ID 签名、公证、公开发行和真实目标设备验收分别记录。`pnpm check` 在 macOS arm64 上额外检查 Swift 源码，其他平台明确跳过原生面板检查。
+设备邀请以服务器生成的 HTTPS 链接为主要入口，网页唤起客户端、用户确认后领取一次；JSON 导入位于高级设置。反向代理增加 /connect 与 /invitations/redeem，服务端持久保存仅含摘要的消费记录；容器需挂载私有 invitation-state 目录，不能使用易失的 /tmp。菜单栏 App 的日常操作统一从 `/app/` 进入，安装前提、邀请接入及维护细节在 installation 页面；普通用户先从 Release 下载并安装客户端，再通过邀请连接并回到调用方应用。环境检查按需进行，原生源码与构建说明在 `apps/device-panel/README.md`。`pnpm panel:build` 在 macOS arm64 上生成携带运行时的本地 App/ZIP；Developer ID 签名、公证、公开发行和真实目标设备验收分别记录。`pnpm check` 在 macOS arm64 上额外检查 Swift 源码，其他平台明确跳过原生面板检查。
 
 ### architecture
 
@@ -125,7 +129,7 @@ Harness 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分具名 
 | 独立分发 | 同一候选包的仓外离线安装、许可、manifest 和摘要 |
 | 真实 Codex | 精确完成、两轮续接、工具/审批投递、只读恢复和不重派 |
 | 真实 dsh | `pnpm accept:dsh`：SDK / Server / DeviceHost 本机 fixture、原生审批允许/拒绝/失效与一次性作用域、MCP 成功/错误/送达、调用方与原生项目 skills 共存；不替代独立进程、设备或发行包 |
-| 实际 GUI | 邀请与已有设备复用、环境检查不阻挡接入、首页状态与需要处理事项、“检查本机环境”中的固定回显/诊断/分环境历史、关闭重开不重派、全局测试阻止切换与维护、“设置与维护”的受保护操作 |
+| 实际 GUI | 邀请与已有设备复用、环境检查不阻挡接入、首页 Harness 数量/安装列表及独立服务连接、条目详情中的固定回显/诊断/分环境历史、关闭重开不重派、测试运行或收据待确认时仅浏览其他条目且不改变原测试归属、禁止另启测试与维护、“设置与维护”的受保护操作 |
 | 独立设备 | 首装、移动 App、真实登录自启、升级/回滚和用户文件保留 |
 | 远端 CI 与发行 | 对应源码 revision 的 CI、Developer ID/公证、下载入口和发行权限分别确认 |
 

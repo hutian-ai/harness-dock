@@ -7,12 +7,13 @@ const shell = await readFile(join(root, 'src/shell.html'), 'utf8');
 const out = join(root, 'dist');
 const esc = text => String(text).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const groups = ['认识产品', '开始使用', '应用集成', '运行维护','开发与贡献'];
-const order = ['', 'overview', 'support', 'quickstart', 'installation', 'server', 'usage', 'sdk', 'lifecycle', 'pairing', 'troubleshooting', 'deploy-docs','architecture','drivers','verification','distribution'];
+const order = ['', 'overview', 'support', 'quickstart', 'app', 'installation', 'server', 'usage', 'sdk', 'lifecycle', 'pairing', 'troubleshooting', 'deploy-docs','architecture','drivers','verification','distribution'];
 const iconPaths={
 '':'M4 10 12 3l8 7v10H4V10Zm5 10v-7h6v7',
 overview:'M12 8v1m0 3v5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
 support:'m5 12 4 4L19 6M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
 quickstart:'m9 4 12 8-12 8V4ZM3 5v14',
+app:'M3 4h18v13H3V4Zm5 17h8m-4-4v4M7 8h3m-3 4h10',
 installation:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
 server:'M3 3h18v7H3V3Zm0 11h18v7H3v-7M7 6h1M7 17h1',
 usage:'M4 5h16v14H4V5Zm4 4 3 3-3 3m5 0h3',
@@ -40,7 +41,7 @@ for (const [index, page] of sorted.entries()) {
   const pageHeader = page.slug ? '<header class="article-header"><div class="breadcrumb">文档 <span>/</span> '+page.group+'</div><h1>'+esc(page.title)+'</h1><p>'+esc(page.description)+'</p></header>' : '';
   const prev=sorted[index-1], next=sorted[index+1];
   const pagination = page.slug ? '<nav class="pagination" aria-label="翻页">'+(prev?'<a href="'+href(prev.slug)+'"><span>← 上一篇</span><strong>'+esc(prev.label)+'</strong></a>':'<div></div>')+(next?'<a class="next" href="'+href(next.slug)+'"><span>下一篇 →</span><strong>'+esc(next.label)+'</strong></a>':'')+'</nav>':'';
-  const values = {TITLE:esc(page.title)+(page.slug?' | harness-dock 文档':' · harness-dock'),DESCRIPTION:esc(page.description),BASE:base,SLUG:page.slug,NAV:nav,BODY:body,TOC:toc,PAGE_HEADER:pageHeader,PAGINATION:pagination,LAYOUT:page.slug?'article-layout':'home-layout',BODY_CLASS:page.slug?'is-docs':'is-home',TAB_DEV:page.group==='开发与贡献'?'active':'',TAB_INTRO:page.group==='认识产品'?'active':'',TAB_START:['quickstart','installation','usage'].includes(page.slug)?'active':'',TAB_SDK:page.group==='应用集成'?'active':'',TAB_OPS:['server','pairing','troubleshooting','deploy-docs'].includes(page.slug)?'active':''};
+  const values = {TITLE:esc(page.title)+(page.slug?' | harness-dock 文档':' · harness-dock'),DESCRIPTION:esc(page.description),BASE:base,SLUG:page.slug,NAV:nav,BODY:body,TOC:toc,PAGE_HEADER:pageHeader,PAGINATION:pagination,LAYOUT:page.slug?'article-layout':'home-layout',BODY_CLASS:page.slug?'is-docs':'is-home',TAB_DEV:page.group==='开发与贡献'?'active':'',TAB_INTRO:page.group==='认识产品'?'active':'',TAB_START:['quickstart','app','installation','usage'].includes(page.slug)?'active':'',TAB_SDK:page.group==='应用集成'?'active':'',TAB_OPS:['server','pairing','troubleshooting','deploy-docs'].includes(page.slug)?'active':''};
   const html = shell.replace(/\{\{([A-Z_]+)\}\}/g, (_,key) => {if(!(key in values)) throw new Error('Unknown template field '+key);return values[key];});
   const dir=page.slug?join(out,page.slug):out;
   await mkdir(dir,{recursive:true});
