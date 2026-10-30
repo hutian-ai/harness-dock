@@ -1,25 +1,59 @@
 # harness-dock
 
-**让你的应用，调用原生执行能力。**
+**让原生 Harness，为你的产品执行任务。**
 
-让应用、Agent 和自动化服务通过 SDK 调用其他机器上的原生 Harness，将任务、原生审批和结果接入自己的业务流程。Harness Dock 封装设备接入与执行管理，复用原生安装、登录和工具环境；应用负责业务交互、授权与结果验收。
+通过 SDK 连接获授权的设备，复用已有的原生安装、登录和工具环境。由你的产品选择执行设备、发起任务，并接回进度、原生审批和产物；执行留在所选设备上。
 
-[下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip) · [文档站](https://hutian-ai.github.io/harness-dock/) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)
+Harness Dock 是面向原生 Harness 的 AI Infra，负责跨设备接入、连接与执行管理。应用负责业务交互、业务授权与结果验收，Harness 负责内部工具与原生权限。
+
+[从 SDK 示例开始](https://hutian-ai.github.io/harness-dock/sdk/#first-task) · [产品文档](https://hutian-ai.github.io/harness-dock/) · [下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)
+
+## 适合谁
+
+你在开发业务产品、Agent 或自动化服务，需要把任务交给其他设备上的原生 Harness，并希望复用设备接入与执行管理。
+
+例如，为业务产品加入“生成报告”入口：产品选择获授权且具备所需能力的电脑，提交任务，接收原生审批与进度，再取回报告并按业务规则验收。具体工具能力取决于所选设备的原生环境和权限。
 
 **应用开发者：**[下载 SDK 0.1.0](https://github.com/hutian-ai/harness-dock/releases/tag/sdk-v0.1.0)，按[第一个真实任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)下载、校验和离线安装，在独立设备后台上把文本笔记整理为 Markdown 报告。SDK、server 和 macOS arm64 开发者 Daemon 均提供带依赖归档，无需克隆仓库或构建源码。
 
 ## 它怎么工作
 
+1. **产品选设备**：通过连接 SDK 查询获授权设备的在线状态与可用能力，选择本次执行设备。
+2. **设备执行任务**：Server 转发请求，独立 Daemon 持有进程和执行记录，原生 Harness 使用这台设备已有的安装、登录、工具和环境。
+3. **结果回到产品**：进度、原生审批和产物沿原路返回，产品负责呈现交互与验收结果。
+
 ```mermaid
 flowchart LR
   A["任务发起方<br/>应用 / Agent / 自动化"] <-->|"连接 SDK"| S["Dock Server"]
-  subgraph DEVICE["执行设备"]
+  subgraph DEVICE["本次所选执行设备"]
     D["独立设备后台"] <-->|"ACP 协议"| H["原生 Harness"]
   end
   S <--> D
 ```
 
-设备主动连接服务端，任务、权限确认和结果沿连接双向传递。应用负责业务交互与结果验收，原生 Harness 负责执行与工具权限。
+同一 Server 可接入多台设备，图中展开本次所选设备。设备主动连接服务端，无需为设备开放公网入站端口；远程连接使用经过验证的 WSS。
+
+应用断线后按原任务查询进度和结果，重连不会自动重派任务。依赖应用响应的交互仍可能失败；Daemon 重启不会自动恢复执行，缺少完成证据时保持待核对。详见[执行生命周期](https://hutian-ai.github.io/harness-dock/lifecycle/)。
+
+## 什么时候值得使用 Dock
+
+| 你的目标 | 可以从哪里开始 |
+| --- | --- |
+| 自己远程使用一个 Harness | 先看原生远程入口，直接使用原生客户端完成任务。 |
+| 直接集成某个 Harness，且已有所需的设备连接与进程管理 | 原生 SDK 或服务接口可能更轻。 |
+| 让自己的产品调用其他设备上的原生环境，并复用设备接入与执行管理 | 使用 Dock 的连接 SDK、自托管 Server 和独立设备 Daemon。 |
+
+Dock 封装的是设备接入与跨设备执行管理。会话、审批和事件本身并非 Dock 独有；接入方需要维护连接服务与设备后台。完整对比见[如何选择远程控制、原生 SDK 与 Dock](https://hutian-ai.github.io/harness-dock/overview/#when-to-use)。
+
+## 开始使用
+
+- **应用开发者**：[从 SDK 示例发起第一个任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)，学习选设备、发任务、收进度与产物。
+- **设备用户**：[下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)，按[安装指南](https://hutian-ai.github.io/harness-dock/installation/)连接这台 Mac。
+- **服务管理员**：[部署连接服务](https://hutian-ai.github.io/harness-dock/server/)，为应用与执行设备准备共同的入口。
+
+设备接入路径是：安装客户端 → 用管理员提供的邀请连接这台 Mac → 确认状态并回到调用方应用。实际执行前准备所用原生 Harness，环境核验不阻挡邀请接入。客户端自带运行时和独立后台，是设备持有人的轻量接入、状态和维护入口；源码与新构建候选首页显示连接、后台、执行数量及需要处理事项，“检查本机环境”收纳安装信息、固定回显和诊断，“设置与维护”收纳自启、停止、更新与回滚。当前公开客户端仍通过原来的“测试 Codex”按钮核验；测试使用模型额度，通过不代表全部工具均已验证。
+
+当前为 **v0.1.0 Developer Alpha**，仅有 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证；安装限制见[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)。
 
 ## 支持哪些 Harness
 
@@ -37,25 +71,6 @@ flowchart LR
 dsh 实验入口复用现有 SDK 的 `provider: 'dsh'`；设备需安装并配置原生 `@deepseek-ai/dsh`，首个适配版本为 `0.1.2-rc.1`。模型值从设备 inventory 原样选择。原生审批保留 `optionId`，支持会话续接；暂不提供精确最终答案识别或只读结果查回，重启未完成的执行保持 `unknown`。源码与新构建候选在“检查本机环境”中逐项展示后台发现结果（当前支持 Codex/dsh），按需进行固定回显并分别保存历史。Codex 使用原生确认的只读模式；dsh 沿用原生权限配置，不提供只读保证。测试使用模型额度，也不代表工具或应用授权已验收。现有 v0.1.0 下载仍使用原来的 Codex 测试界面。配置与示例见驱动页。
 
 维护者可运行 `pnpm accept:dsh`，通过本机隔离的 SDK / Server / DeviceHost fixture 验收原生审批允许、拒绝、取消后旧决定失效、一次性授权作用域、MCP 成功/错误与送达、调用方和原生项目 skills 共存。会实际使用模型额度，证据保存在 ignored `.local/dsh-acceptance-*`；本机合成验收不替代独立设备、独立 Daemon 进程或发行包验收。
-
-## 开始使用
-
-1. **安装客户端**：下载并解压 ZIP，将 `Harness Dock.app` 拖入“应用程序”目录，打开客户端。
-2. **连接设备**：打开管理员提供的邀请链接，在客户端核对服务地址并连接这台 Mac。
-3. **准备执行环境**：实际执行前，在这台 Mac 安装并登录所用原生 Harness；环境核验不阻挡邀请接入。现有公开客户端使用 Codex。
-4. **回到应用使用**：确认设备连接正常后，在接入的应用发起任务、处理原生审批并接收结果；本机环境核验按需进行。
-
-客户端自带运行时和独立后台，是设备持有人的轻量接入、状态和维护入口。源码与新构建候选首页显示连接、后台、执行数量及需要处理事项；“检查本机环境”收纳安装信息、固定回显和诊断，“设置与维护”收纳自启、停止、更新与回滚。首次引导先连接这台 Mac，环境核验不阻挡邀请接入。测试使用模型额度，通过不代表全部工具均已验证。详细步骤见[安装指南](https://hutian-ai.github.io/harness-dock/installation/)。
-
-当前为 **v0.1.0 Developer Alpha**，仅有 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证；安装限制见[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)。
-
-## 你想从哪里开始
-
-- [把这台电脑接进来](https://hutian-ai.github.io/harness-dock/installation/)：安装客户端，用邀请链接连接设备。
-- [把原生 Harness 接进我的应用](https://hutian-ai.github.io/harness-dock/sdk/)：通过 TypeScript SDK 发任务、收结果。
-- [自己部署连接服务](https://hutian-ai.github.io/harness-dock/server/)：在 Linux 上自托管服务端，连接应用与设备。
-
-想了解选型？看[如何选择远程控制、原生 SDK 与 Dock](https://hutian-ai.github.io/harness-dock/overview/#when-to-use)。
 
 ## 开发与贡献
 

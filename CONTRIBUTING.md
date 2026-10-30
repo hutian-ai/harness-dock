@@ -1,6 +1,6 @@
 # 贡献指南
 
-harness-dock 是跨机器原生 Harness 接入与执行基础设施。先阅读 [架构](apps/docs-site/README.md#architecture)、[支持范围](apps/docs-site/README.md#support) 和 [构建与分发](apps/docs-site/README.md#distribution)。设备执行仅限 macOS arm64；已发布客户端支持 Codex，源码和新构建候选另含 dsh 的 SDK 实验适配，现有 v0.1.0 下载尚未更新。
+harness-dock 把原生 Harness 接入产品，让任务在调用方所选设备上执行。它作为 AI Infra 提供跨设备接入、连接与执行管理；业务交互、业务授权与结果验收归调用方应用，内部工具与原生权限归 Harness。先阅读 [架构](apps/docs-site/README.md#architecture)、[支持范围](apps/docs-site/README.md#support) 和 [构建与分发](apps/docs-site/README.md#distribution)。设备执行仅限 macOS arm64；已发布客户端支持 Codex，源码和新构建候选另含 dsh 的 SDK 实验适配，现有 v0.1.0 下载尚未更新。
 
 ## 开发环境
 
