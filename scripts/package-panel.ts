@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { verifyRelease, writeReleaseManifest } from '../apps/daemon/src/release-manifest.ts';
 import { createAppArchive } from './app-archive.ts';
+import { buildPanelIcon } from './panel-icon.ts';
 
 process.umask(0o077);
 const { values } = parseArgs({ options: { bundles: { type: 'string' }, output: { type: 'string' }, node: { type: 'string' }, 'node-license': { type: 'string' } } });
@@ -28,6 +29,7 @@ if (!(await lstat(runtimeLicense)).isFile()) throw new Error('node_license_requi
 const app = join(output, 'Harness Dock.app'), resources = join(app, 'Contents/Resources');
 await mkdir(join(app, 'Contents/MacOS'), { recursive: true });
 await mkdir(resources);
+await buildPanelIcon(join(resources, 'AppIcon.icns'));
 await cp(join(bundles, 'daemon'), join(resources, 'daemon'), { recursive: true, verbatimSymlinks: true });
 await mkdir(join(resources, 'daemon/runtime'));
 await copyFile(runtime, join(resources, 'daemon/runtime/node'));
