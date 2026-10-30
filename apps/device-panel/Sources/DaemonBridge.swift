@@ -12,6 +12,13 @@ struct DeviceState: Decodable {
     var daemonId: String?
     var autostart: Bool?
     var canRollback: Bool?
+    var appVersion: String?
+    var installedVersion: String?
+    var appReleaseId: String?
+    var installedReleaseId: String?
+    var runningReleaseId: String?
+    var releaseMatchesApp: Bool?
+    var updateAvailable: Bool?
     var active: Int?
     var unresolved: Int?
     var connectionIssue: String?
@@ -35,6 +42,7 @@ struct ProviderInstallation: Decodable, Identifiable {
     let selfTestKind: String?
     let acceptanceCommand: String?
     let acceptanceDescription: String?
+    let experimental: Bool?
     var id: String { key }
 }
 struct SelfTestReceipt: Decodable {
@@ -90,7 +98,7 @@ struct PanelFailure: LocalizedError {
         case "invitation_claim_unconfirmed": return "尚未确认邀请领取结果。请先刷新设备状态；若仍未接入，请管理员生成新邀请，不要重复提交旧链接。"
         case "legacy_service_unverified", "legacy_owner_still_running", "legacy_service_changed": return "旧后台服务尚未确认安全退役，已保留原配置。请刷新状态后检查本地日志。"
         case "device_busy": return "设备正在执行任务，请结束后再操作。"
-        case "unresolved_execution": return "有执行结果待核对。请回到发起应用查询原执行记录，核对后再维护设备。"
+        case "unresolved_execution": return "有执行结果待核对。请查看原本机检查记录，或回到发起应用查询原任务，再维护设备。"
         case "self_test_unsupported": return "当前设备后台不支持一键测试。请先更新设备后台，再重新测试。"
         case "self_test_storage_unavailable": return "无法保存测试记录，尚未确认测试已启动。请检查本地状态目录后刷新状态。"
         case "self_test_id_conflict": return "此测试记录已存在。请刷新查看原测试结果，不会重复发送请求。"

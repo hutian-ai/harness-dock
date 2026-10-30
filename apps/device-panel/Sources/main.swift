@@ -19,7 +19,7 @@ import SwiftUI
         item.button?.action = #selector(toggle)
         popover.behavior = .semitransient
         popover.delegate = self
-        popover.contentSize = NSSize(width: 400, height: 580)
+        popover.contentSize = NSSize(width: 400, height: 520)
         popover.contentViewController = NSHostingController(rootView: PanelView(model: model, quit: { NSApp.terminate(nil) }))
         // Reopening the app reveals the panel; closing it never stops the independently owned daemon.
         show()

@@ -79,9 +79,18 @@ import UniformTypeIdentifiers
     var selectedProviderDetail: String {
         guard let installation = selectedInstallation else { return "尚未读回可展示的本机环境。请刷新或运行诊断，不能据此判断模型可用。" }
         switch installation.status {
-        case "installed": return selectedProviderSelfTestSupported
-            ? "已发现本机 \(selectedProviderName) 安装，登录和模型执行需通过测试确认。"
-            : "已发现本机 \(selectedProviderName)，当前后台尚未提供对应测试。请更新后台或运行诊断。"
+        case "installed":
+            if let test = selectedSelfTest {
+                if test.state == "passed" { return selfTestIsHistorical
+                    ? "已安装，保留后台重启前的回显结果；需要时可重新检查。"
+                    : "已安装，最近固定回显已通过。该结果仅代表本次模型回显。" }
+                if test.state == "unknown" { return "已安装，原检查结果尚未确认。请核对原记录，不会自动重发。" }
+                if test.state == "running" { return "已安装，固定回显检查正在后台进行。" }
+                if test.state == "failed" { return "已安装，最近一次固定检查未通过；请查看原记录或运行诊断。" }
+            }
+            return selectedProviderSelfTestSupported
+                ? "已发现本机安装。需要验证模型连接时，可运行一次固定回显检查。"
+                : "已发现本机安装，当前后台尚未提供对应检查。请核对后台版本或运行诊断。"
         case "disabled": return "本机 \(selectedProviderName) 已在设备配置中禁用。"
         case "not_found": return "尚未发现本机 \(selectedProviderName) 安装。请安装并登录原生 Harness，或运行诊断。"
         default: return "尚未读回本机安装状态。请刷新或更新后台，不能据此判断模型可用。"
@@ -106,6 +115,57 @@ import UniformTypeIdentifiers
         do { try saveSelection() } catch { self.error = error.localizedDescription }
     }
     var maintenanceBlocked: Bool { refreshError != nil || selfTestRunning || selfTestStartUnconfirmed || (device.active ?? 0) > 0 || (device.unresolved ?? 0) > 0 }
+    var maintenanceBlockReason: String? {
+        if refreshError != nil { return "最新状态尚未读回，确认设备状态后才能维护后台。" }
+        if selfTestStartUnconfirmed { return "本机检查启动结果待核对，请先查看原检查记录。" }
+        if selfTestRunning { return "本机检查仍在运行，完成后才能维护后台。" }
+        if (device.unresolved ?? 0) > 0 { return "有执行结果待核对，核对原记录后才能维护后台；不会自动重发任务。" }
+        if (device.active ?? 0) > 0 { return "设备正在执行任务，完成后才能维护后台。" }
+        return nil
+    }
+    var backgroundStateLabel: String { refreshError != nil ? "待确认" : device.running == true ? "运行中" : "已停止" }
+    var executionStateLabel: String {
+        if refreshError != nil { return "待确认" }
+        if device.running != true { return "后台启动后读取" }
+        return "\(device.active ?? 0) 运行中 · \(device.unresolved ?? 0) 待核对"
+    }
+    var canUpgradeBackground: Bool { device.managed == true && device.externalInstallation != true && device.updateAvailable == true }
+    var backgroundVersionDetail: String {
+        if device.externalInstallation == true { return "后台由其他安装入口管理，请通过原入口更新。" }
+        if device.managed != true { return "后台尚未由此应用管理。" }
+        if device.releaseMatchesApp == true { return "后台与此应用附带版本一致。" }
+        if canUpgradeBackground { return "已安装后台与此应用附带版本不同，可显式更新。" }
+        if device.releaseMatchesApp == false { return "运行中的后台版本需核对，请先运行诊断并查看原安装记录。" }
+        return "后台版本尚未确认，请刷新或运行诊断。"
+    }
+    private var attentionSelfTest: SelfTestSnapshot? {
+        let tests = allSelfTests.filter { $0.state != "passed" }
+        return tests.first(where: { $0.state == "unknown" })
+            ?? tests.first(where: { $0.state == "running" || $0.phase != "finished" })
+            ?? tests.max { $0.startedAt < $1.startedAt }
+    }
+    var localTestNeedsAttention: Bool { selfTestStartUnconfirmed || attentionSelfTest != nil }
+    var localTestNoticeTitle: String {
+        if selfTestStartUnconfirmed { return "本机检查启动结果待核对" }
+        guard let test = attentionSelfTest else { return "本机环境检查" }
+        if test.state == "unknown" { return "本机检查结果待核对" }
+        if test.state == "running" || test.phase != "finished" { return "本机环境检查进行中" }
+        return "最近本机检查未通过"
+    }
+    var localTestNoticeDetail: String {
+        if selfTestStartUnconfirmed { return "查看原检查的启动收据；不会自动重新调用模型。" }
+        guard let test = attentionSelfTest else { return "按需检查本机安装与模型连接。" }
+        if test.state == "unknown" { return "完成状态尚未确认。请查看原检查记录和本地诊断，保留原请求。" }
+        if test.state == "running" || test.phase != "finished" { return "检查由设备后台持有，可在详情中查看进度。" }
+        return "查看对应环境的检查记录，按提示排查安装或模型连接。"
+    }
+    func openLocalChecks() {
+        if let provider = pendingSelfTestProvider ?? attentionSelfTest?.providerKey, provider != selectedProvider {
+            selectedProvider = provider; copiedTestCommand = false
+            do { try saveSelection() } catch { self.error = error.localizedDescription }
+        }
+        showVerification = true
+    }
     var canStartSelfTest: Bool { !busy && device.running == true && !maintenanceBlocked && selectedInstallation?.status == "installed" && selectedProviderSelfTestSupported }
     var selfTestButtonTitle: String { selfTestRunning ? "测试中…" : selfTestStartUnconfirmed ? "等待确认…" : "测试 \(selectedProviderName)" }
     var selfTestDescription: String {
@@ -174,18 +234,19 @@ import UniformTypeIdentifiers
         if refreshError != nil { return "状态暂不可用" }
         if !device.configured { return "接入这台 Mac" }
         if (device.unresolved ?? 0) > 0 { return "有执行结果待核对" }
-        if device.running != true { return "设备已停止" }
+        if device.running != true { return "后台已停止" }
         if device.connectionIssue != nil { return "设备连接需检查" }
         if device.connected != true { return "正在等待连接" }
         return "设备已连接"
     }
     var statusDetail: String {
         if refreshError != nil { return "未能读取最新状态，请刷新或打开诊断。" }
-        if (device.unresolved ?? 0) > 0 { return allSelfTests.contains(where: { $0.state == "unknown" }) ? "本机测试结果尚未确认，请查看对应 Harness 的测试详情并运行诊断。" : "请回到发起应用查询原执行记录，核对结果。" }
-        if device.running != true { return "启动设备后，应用才能使用这台 Mac 的原生 Harness。" }
+        if (device.unresolved ?? 0) > 0 { return "请核对原执行记录。应用任务回到发起应用，本机检查在“检查本机环境”中查看。" }
+        if device.running != true { return "启动设备后台后，才能建立服务连接。" }
+        if device.connectionIssue == "configuration_mismatch" { return "后台连接与保存的服务配置不一致，请运行诊断核对。" }
         if device.connected != true { return "后台已启动，尚未连接到服务。" }
-        if selfTestRunning { return "正在进行本机可用性测试，结果将在这里显示。" }
-        return (device.active ?? 0) > 0 ? "正在处理应用发起的执行，进度与结果请在应用中查看。" : "当前空闲，可测试 \(selectedProviderName) 或等待应用发起执行。"
+        if selfTestRunning { return "本机环境检查在后台进行，详情可在检查入口查看。" }
+        return (device.active ?? 0) > 0 ? "正在处理应用发起的执行，进度与结果请在调用方应用中查看。" : "后台独立运行。任务请在调用方应用中发起。"
     }
     var statusColor: Color {
         if refreshError != nil || device.connectionIssue != nil || (device.unresolved ?? 0) > 0 { return .orange }
@@ -312,7 +373,7 @@ import UniformTypeIdentifiers
             self.pairingURL = nil; self.pairing = nil
             self.invitationLink = nil
             self.resumeSetup = false
-            self.notice = "设备后台已启动。选择已安装的 Harness 后，即可测试对应的本机模型回显。"
+            self.notice = "设备已接入，后台独立运行。可回到调用方应用发起任务，需要时再检查本机环境。"
         }
     }
     func continueSetup() {

@@ -1,12 +1,13 @@
 import { constants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { chmod, copyFile, lstat, mkdir, open, realpath, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { z } from 'zod';
-import { assertEndpoint, id, parseInvitationLink } from '@harness-dock/protocol';
+import { assertEndpoint, DEVICE_PROTOCOL_VERSION, id, parseInvitationLink } from '@harness-dock/protocol';
 import { parseDevicePairing, readConfig } from './config.ts';
 import { deviceDiagnostics } from './doctor.ts';
-import { installationRoot, manageInstallation, readInstallation, startInstalled } from './installation.ts';
-import { control } from './local-control.ts';
+import { installationRoot, manageInstallation, readInstallation, startInstalled, type Installation } from './installation.ts';
+import { control, type LocalStatus } from './local-control.ts';
 import { stopIdleDaemon } from './process-management.ts';
 import { verifyRelease } from './release-manifest.ts';
 import { discoverProviders, type ProviderKey, type ProviderDiscoveryOptions } from '@harness-dock/drivers';
@@ -50,11 +51,11 @@ async function privateConfig(path: string) {
 
 // Named test implementations belong to the device. The panel renders their metadata.
 const selfTestProfiles = {
-  codex: { displayName: 'Codex', selfTestKind: 'read-only-echo',
+  codex: { displayName: 'Codex', experimental: false, selfTestKind: 'read-only-echo',
     acceptanceDescription: '在已构建的源码目录使用应用 client.json，核对两轮回显和同一会话续接。替换命令中的配置路径；会使用模型额度。需要验证审批时可在交互终端追加 --approval。' },
-  dsh: { displayName: 'dsh', selfTestKind: 'native-echo',
+  dsh: { displayName: 'dsh', experimental: true, selfTestKind: 'native-echo',
     acceptanceDescription: '在已构建的源码目录运行隔离的 SDK / Server / DeviceHost 合成验收，检查真实审批、MCP 与 skills，会使用模型额度；不验证此设备现有应用身份或业务授权。' },
-} satisfies Record<ProviderKey, { displayName: string; selfTestKind: string; acceptanceDescription: string }>;
+} satisfies Record<ProviderKey, { displayName: string; experimental: boolean; selfTestKind: string; acceptanceDescription: string }>;
 
 async function panelProviders(overrides: ProviderDiscoveryOptions['overrides'], supported: readonly string[], nodeId?: string) {
   // An optional installation probe cannot hide owner state or durable test receipts.
@@ -63,6 +64,7 @@ async function panelProviders(overrides: ProviderDiscoveryOptions['overrides'], 
     key, displayName: selfTestProfiles[key].displayName, status: 'unknown', version: null, source: null, executable: null, home: null,
   }));
   return installations.map(provider => ({ key: provider.key, displayName: provider.displayName, status: provider.status,
+    experimental: selfTestProfiles[provider.key].experimental,
     version: provider.version, source: provider.source, executable: provider.executable, home: provider.home,
     selfTestSupported: provider.status === 'installed' && supported.includes(provider.key),
     selfTestKind: selfTestProfiles[provider.key].selfTestKind,
@@ -71,11 +73,67 @@ async function panelProviders(overrides: ProviderDiscoveryOptions['overrides'], 
   }));
 }
 
-export async function panelStatus(path: string, home?: string) {
+/** Presentation metadata only. Installation still verifies every file before activation. */
+async function panelReleaseMetadata(directory?: string): Promise<{ id: string; version: string } | undefined> {
+  if (!directory) return undefined;
+  try {
+    const root = await lstat(directory);
+    if (!root.isDirectory() || root.isSymbolicLink()) return undefined;
+    const file = await open(join(directory, 'dock-release.json'), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const info = await file.stat(), maxBytes = 8 * 1024 * 1024;
+      if (!info.isFile() || info.size <= 0 || info.size > maxBytes) return undefined;
+      const bytes = Buffer.alloc(info.size + 1), { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+      if (bytesRead !== info.size) return undefined;
+      const text = bytes.subarray(0, bytesRead).toString('utf8'), manifest = JSON.parse(text) as Record<string, unknown>;
+      if (manifest.format !== 1 || manifest.stateFormat !== 1 || manifest.protocol !== DEVICE_PROTOCOL_VERSION
+        || manifest.platform !== process.platform || manifest.arch !== process.arch
+        || !Array.isArray(manifest.entries) || !manifest.entries.length
+        || typeof manifest.version !== 'string' || !manifest.version || manifest.version.length > 128 || /[\u0000-\u001f]/u.test(manifest.version)) return undefined;
+      return { id: createHash('sha256').update(text).digest('hex'), version: manifest.version };
+    } finally { await file.close(); }
+  } catch { return undefined; }
+}
+
+async function panelReleases(bundle: string | undefined, root: string, installation?: Installation, status?: LocalStatus | null, external = false) {
+  const installedReleaseId = installation?.current.id;
+  const directory = await lstat(root).catch(() => undefined);
+  const managed = installation && !external && directory?.isDirectory() && !directory.isSymbolicLink()
+    && directory.uid === process.getuid?.() && !(directory.mode & 0o077);
+  const releases = managed ? await lstat(join(root, 'releases')).catch(() => undefined) : undefined;
+  const [app, installed] = await Promise.all([
+    panelReleaseMetadata(bundle),
+    releases?.isDirectory() && !releases.isSymbolicLink() ? panelReleaseMetadata(join(root, 'releases', installedReleaseId!)) : undefined,
+  ]);
+  const canonicalRoot = managed ? await realpath(root).catch(() => undefined) : undefined;
+  const runningReleaseId = canonicalRoot && status?.entrypoint && isAbsolute(status.entrypoint)
+    ? /^([a-f0-9]{64})\/dist\/cli\.js$/u.exec(relative(join(canonicalRoot, 'releases'), status.entrypoint))?.[1] : undefined;
+  const installedConfirmed = installed?.id === installedReleaseId && installed !== undefined;
+  const selectedId = installedConfirmed ? status ? runningReleaseId : installedReleaseId : undefined;
+  return {
+    appVersion: app?.version, installedVersion: installedConfirmed ? installed.version : undefined,
+    appReleaseId: app?.id, installedReleaseId, runningReleaseId,
+    releaseMatchesApp: app && selectedId ? selectedId === app.id && (!status || runningReleaseId === installedReleaseId) : undefined,
+    updateAvailable: !!(managed && app && installedConfirmed && app.id !== installedReleaseId
+      && (!status || runningReleaseId === installedReleaseId)),
+  };
+}
+
+type PanelStatusResult = Awaited<ReturnType<typeof panelReleases>> & {
+  configured: boolean; managed?: boolean; running?: boolean; connected?: boolean; externalInstallation?: boolean;
+  server?: string; cwd?: string; nodeId?: string; daemonId?: string;
+  selfTest?: LocalStatus['selfTest']; selfTests: NonNullable<LocalStatus['selfTests']>; selfTestProviders: readonly string[];
+  providers: Awaited<ReturnType<typeof panelProviders>>;
+  autostart?: boolean; canRollback?: boolean; active?: number; unresolved?: number;
+  connectionIssue?: 'configuration_mismatch' | 'connection_failed';
+};
+
+export async function panelStatus(path: string, home?: string, bundle?: string): Promise<PanelStatusResult> {
   let config;
   try { config = await privateConfig(path); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { configured: false, providers: await panelProviders(undefined, []), selfTests: [], selfTestProviders: [] };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { configured: false, providers: await panelProviders(undefined, []), selfTests: [], selfTestProviders: [],
+      ...await panelReleases(bundle, installationRoot(path)) };
     throw error;
   }
   const status = await control(config, 'status');
@@ -84,8 +142,11 @@ export async function panelStatus(path: string, home?: string) {
   const installation = await readInstallation(installationRoot(path), path);
   const registration = await panelExternalInstallation(path, installationRoot(path), home);
   const endpointMatches = status?.endpoint === config.endpoint;
+  const externalInstallation = registration.external || !installation && !!status?.entrypoint && /\/releases\/[a-f0-9]{64}\/dist\/cli\.js$/u.test(status.entrypoint);
+  const releases = await panelReleases(bundle, installationRoot(path), installation?.nodeId === config.nodeId ? installation : undefined,
+    status, externalInstallation || registration.incomplete);
   return { configured: true, managed: !!installation, running: !!status, connected: !!status?.connected && endpointMatches,
-    externalInstallation: registration.external || !installation && !!status?.entrypoint && /\/releases\/[a-f0-9]{64}\/dist\/cli\.js$/u.test(status.entrypoint),
+    externalInstallation, ...releases,
     server: endpointLabel(config.endpoint), cwd: config.cwd, nodeId: config.nodeId,
     daemonId: status?.daemonId, selfTest: status?.selfTest,
     selfTests: status?.selfTests ?? (status?.selfTest ? [{ ...status.selfTest, provider: status.selfTest.provider ?? 'codex' }] : []),
@@ -125,7 +186,7 @@ export async function runPanelOperation(input: unknown, bundle: string, home?: s
     const pairing = await pairingFile(options.pairing);
     return { server: endpointLabel(pairing.endpoint), nodeId: pairing.nodeId };
   }
-  if (options.operation === 'status') return panelStatus(path, home);
+  if (options.operation === 'status') return panelStatus(path, home, bundle);
   if (options.operation === 'test' || options.operation === 'test-status') {
     if (!options.testId) throw new Error('invalid_panel_request');
     const config = await privateConfig(path);
@@ -136,7 +197,7 @@ export async function runPanelOperation(input: unknown, bundle: string, home?: s
       throw error;
     }
     if (!state) throw new Error('device_not_running');
-    const latest = await panelStatus(path, home);
+    const latest = await panelStatus(path, home, bundle);
     return { ...latest, ...(options.operation === 'test' ? { acceptedSelfTestId: state.selfTest!.id, acceptedSelfTestProvider: state.selfTest!.provider ?? 'codex' } : { selfTestReceipt: state.selfTestReceipt }) };
   }
   if (options.operation === 'setup') {
@@ -165,14 +226,14 @@ export async function runPanelOperation(input: unknown, bundle: string, home?: s
     } else pairing = await pairingFile(options.pairing!);
     await setupDevice({ home: dirname(path), cwd: options.cwd, ...pairing, bundle,
       runtime: join(bundle, 'runtime/node'), caFile: options.caFile });
-    return panelStatus(path, home);
+    return panelStatus(path, home, bundle);
   }
   const config = await privateConfig(path), root = installationRoot(path);
   if (options.operation === 'install') {
     const registration = await panelExternalInstallation(path, root, home);
     if (registration.external) throw new Error('installation_config_mismatch');
     if (registration.incomplete) throw new Error('installation_inspection_unavailable');
-    if (await readInstallation(root, path)) return panelStatus(path, home);
+    if (await readInstallation(root, path)) return panelStatus(path, home, bundle);
     await verifyRelease(bundle);
     const previousOwner = await control(config, 'status');
     if (previousOwner?.entrypoint && /\/releases\/[a-f0-9]{64}\/dist\/cli\.js$/u.test(previousOwner.entrypoint))
@@ -192,7 +253,7 @@ export async function runPanelOperation(input: unknown, bundle: string, home?: s
     await manageInstallation('install', { config: path, root, bundle, runtime: join(bundle, 'runtime/node') });
     if (legacy.autostart) await manageInstallation('autostart', { config: path, root });
     else await startInstalled(path, root);
-    return panelStatus(path, home);
+    return panelStatus(path, home, bundle);
   }
   if (options.operation === 'doctor') {
     const checks = await deviceDiagnostics(path);
@@ -220,7 +281,7 @@ export async function runPanelOperation(input: unknown, bundle: string, home?: s
     await manageInstallation(options.operation, { config: path, root,
       ...(options.operation === 'upgrade' ? { bundle: await realpath(bundle), runtime: join(bundle, 'runtime/node') } : {}) });
   }
-  return panelStatus(path, home);
+  return panelStatus(path, home, bundle);
 }
 
 /** Return stable codes, never arbitrary exception strings which may contain user material. */

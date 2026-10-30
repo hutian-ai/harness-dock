@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { constants } from 'node:fs';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { DEVICE_PROTOCOL_VERSION } from '../packages/protocol/src/index.ts';
 import { initializeDevice, readConfig } from '../apps/daemon/src/config.ts';
 import { control, serveControl } from '../apps/daemon/src/local-control.ts';
 import { discoverPanelDevices, panelError, panelStatus, runPanelOperation } from '../apps/daemon/src/panel-management.ts';
@@ -14,6 +15,94 @@ import { setupDevice } from '../apps/daemon/src/setup.ts';
 import { retireLegacyAutostart } from '../apps/daemon/src/legacy-autostart.ts';
 
 async function directory() { await mkdir('.local', { recursive: true }); return mkdtemp(resolve('.local/panel-test-')); }
+
+async function releaseMetadataFixture(root: string, version: string) {
+  await mkdir(join(root, 'dist'), { recursive: true });
+  await writeFile(join(root, 'package.json'), JSON.stringify({ name: '@harness-dock/daemon', version, type: 'module' }));
+  await writeFile(join(root, 'dist/cli.js'), 'export const synthetic = true;');
+  await writeReleaseManifest(root);
+  const text = await readFile(join(root, 'dock-release.json'), 'utf8');
+  return { root, version, text, id: createHash('sha256').update(text).digest('hex') };
+}
+
+async function releasePanelFixture(root: string, installed: Awaited<ReturnType<typeof releaseMetadataFixture>>) {
+  const paths = await initializeDevice({ home: join(root, 'device'), cwd: root, endpoint: 'ws://127.0.0.1:1/' });
+  const config = { ...await readConfig(paths.configPath), providers: { codex: { disabled: true }, dsh: { disabled: true } } };
+  await writeFile(paths.configPath, JSON.stringify(config), { mode: 0o600 });
+  const installation = join(root, 'device/installation'), current = { id: installed.id,
+    runtime: join(installation, 'releases', installed.id, 'runtime/node') };
+  await mkdir(join(installation, 'releases', current.id), { recursive: true, mode: 0o700 });
+  await writeFile(join(installation, 'releases', current.id, 'dock-release.json'), installed.text, { mode: 0o600 });
+  const record = { format: 1, stateFormat: 1, protocol: DEVICE_PROTOCOL_VERSION, configPath: await realpath(paths.configPath),
+    nodeId: config.nodeId, current, autostart: false, searchPath: '/usr/bin:/bin' };
+  await writeFile(join(installation, 'installation.json'), JSON.stringify(record), { mode: 0o600 });
+  return { paths, config, installation, record };
+}
+
+test('panel compares release metadata without full bundle verification; activation still rejects changed files', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  const app = await releaseMetadataFixture(join(root, 'app-daemon'), '1.0.0');
+  const f = await releasePanelFixture(root, app);
+  await writeFile(join(app.root, 'dist/cli.js'), 'changed after the manifest was written');
+  const state = await runPanelOperation({ operation: 'status', config: f.paths.configPath }, app.root, root) as Awaited<ReturnType<typeof panelStatus>>;
+  assert.equal(state.appVersion, '1.0.0'); assert.equal(state.installedVersion, '1.0.0');
+  assert.equal(state.appReleaseId, app.id); assert.equal(state.installedReleaseId, app.id);
+  assert.equal(state.releaseMatchesApp, true); assert.equal(state.updateAvailable, false);
+  assert.equal(state.runningReleaseId, undefined);
+  assert.equal(state.providers.find(provider => provider.key === 'codex')?.experimental, false);
+  assert.equal(state.providers.find(provider => provider.key === 'dsh')?.experimental, true);
+  const original = await readFile(join(f.installation, 'installation.json'));
+  await assert.rejects(runPanelOperation({ operation: 'upgrade', config: f.paths.configPath }, app.root, root), /release_integrity_mismatch/);
+  assert.deepEqual(await readFile(join(f.installation, 'installation.json')), original);
+});
+
+test('panel offers the different App release only for the matching managed owner and keeps mismatched owners explicit', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  const installed = await releaseMetadataFixture(join(root, 'installed-source'), '1.0.0');
+  const app = await releaseMetadataFixture(join(root, 'app-daemon'), '1.1.0');
+  const f = await releasePanelFixture(root, installed);
+  const stopped = await panelStatus(f.paths.configPath, root, app.root);
+  assert.equal(stopped.releaseMatchesApp, false); assert.equal(stopped.updateAvailable, true);
+  assert.equal(stopped.appVersion, '1.1.0'); assert.equal(stopped.installedVersion, '1.0.0');
+  const owner = { nodeId: f.config.nodeId, daemonId: randomUUID(), pid: process.pid, connected: false, endpoint: f.config.endpoint,
+    entrypoint: join(f.installation, 'releases', installed.id, 'dist/cli.js'), runtime: f.record.current.runtime };
+  const close = await serveControl(f.config, () => owner, async () => {}); t.after(close);
+  const matching = await panelStatus(f.paths.configPath, root, app.root);
+  assert.equal(matching.runningReleaseId, installed.id); assert.equal(matching.releaseMatchesApp, false); assert.equal(matching.updateAvailable, true);
+  owner.entrypoint = join(f.installation, 'releases', app.id, 'dist/cli.js');
+  const mismatched = await panelStatus(f.paths.configPath, root, app.root);
+  assert.equal(mismatched.runningReleaseId, app.id);
+  assert.equal(mismatched.releaseMatchesApp, false, 'a live owner must also match its installation record');
+  assert.equal(mismatched.updateAvailable, false);
+  owner.entrypoint = join(root, 'source-checkout/dist/cli.js');
+  const sourceOwner = await panelStatus(f.paths.configPath, root, app.root);
+  assert.equal(sourceOwner.running, true); assert.equal(sourceOwner.runningReleaseId, undefined);
+  assert.equal(sourceOwner.releaseMatchesApp, undefined); assert.equal(sourceOwner.updateAvailable, false);
+});
+
+test('optional release metadata refuses unsafe or oversized manifests without hiding device status', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  const installed = await releaseMetadataFixture(join(root, 'installed-source'), '1.0.0');
+  const app = await releaseMetadataFixture(join(root, 'app-daemon'), '1.1.0');
+  const f = await releasePanelFixture(root, installed), path = join(app.root, 'dock-release.json');
+  for (const kind of ['missing', 'symlink', 'oversized', 'incompatible'] as const) {
+    await rm(path, { force: true });
+    if (kind === 'symlink') await symlink(join(installed.root, 'dock-release.json'), path);
+    if (kind === 'oversized') { await writeFile(path, '{}'); await truncate(path, 8 * 1024 * 1024 + 1); }
+    if (kind === 'incompatible') await writeFile(path, JSON.stringify({ ...JSON.parse(app.text), protocol: DEVICE_PROTOCOL_VERSION + 1 }));
+    const state = await panelStatus(f.paths.configPath, root, app.root);
+    assert.equal(state.configured, true, kind); assert.equal(state.managed, true, kind);
+    assert.equal(state.installedVersion, '1.0.0', kind);
+    assert.equal(state.appVersion, undefined, kind); assert.equal(state.releaseMatchesApp, undefined, kind); assert.equal(state.updateAvailable, false, kind);
+  }
+  await rm(path); await writeFile(path, app.text);
+  await writeFile(join(f.installation, 'releases', installed.id, 'dock-release.json'), app.text);
+  const wrongInstalledMetadata = await panelStatus(f.paths.configPath, root, app.root);
+  assert.equal(wrongInstalledMetadata.installedVersion, undefined);
+  assert.equal(wrongInstalledMetadata.releaseMatchesApp, undefined); assert.equal(wrongInstalledMetadata.updateAvailable, false);
+  const unconfigured = await panelStatus(join(root, 'unconfigured/config.json'), root, app.root);
+  assert.equal(unconfigured.configured, false); assert.equal(unconfigured.appVersion, '1.1.0'); assert.equal(unconfigured.updateAvailable, false);
+});
 
 test('panel imports bounded pairing without modifying the source, and projects no credential', async t => {
   const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
