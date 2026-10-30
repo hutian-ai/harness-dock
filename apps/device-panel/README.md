@@ -4,28 +4,28 @@
 
 轻量菜单栏 App，使用系统 AppKit / SwiftUI，支持 macOS 13+、Apple Silicon。App 提供设备连接与维护界面，独立后台 Daemon 管理原生进程和执行记录，运行它们的这台 Mac 是执行设备；业务任务在提供邀请的调用方应用中发起。
 
-已发布 App `v0.1.1` 支持 Codex，使用“测试 Codex”入口。独立的 SDK `sdk-v0.1.0` 发行包含实验性 dsh 适配及开发者 Daemon；这不代表 App 已包含 dsh 或下文的候选界面。
+App `v0.1.2` 支持 Codex 与实验性 dsh 适配。首页展示 Harness 数量和安装列表，点击条目进入详情，按需执行对应固定回显。App 与独立 SDK `sdk-v0.1.0` 分别发行；原生 Harness 仍由设备用户安装、登录和管理。
 
 ## 安装与接入
 
 设备用户直接安装 App，不需要 Git、Node、pnpm、终端命令或 JSON 文件。日常操作请先看 [App 使用指南](https://hutian-ai.github.io/harness-dock/app/)，按菜单栏打开、查看状态、测试和维护的流程使用；下文保留安装细节与维护者说明。
 
-以下步骤面向已发布 App `v0.1.1`。先取得服务管理员提供的邀请；没有邀请的应用开发者可从 [SDK 首次任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)开始，管理员先[部署服务](https://hutian-ai.github.io/harness-dock/server/)并生成邀请。
+以下步骤面向已发布 App `v0.1.2`。先取得服务管理员提供的邀请；没有邀请的应用开发者可从 [SDK 首次任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)开始，管理员先[部署服务](https://hutian-ai.github.io/harness-dock/server/)并生成邀请。
 
-1. 下载 [v0.1.1 Developer Alpha 客户端（macOS arm64 ZIP）](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.1/harness-dock-panel-0.1.1-darwin-arm64.zip)；[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.1)列出已知限制。
+1. 下载 [v0.1.2 Developer Alpha 客户端（macOS arm64 ZIP）](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.2/harness-dock-panel-0.1.2-darwin-arm64.zip)；[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.2)列出已知限制。
 2. 解压并将 `Harness Dock.app` 拖入“应用程序”目录（或 `~/Applications`），双击打开。
 3. 打开管理员提供的邀请链接，在客户端核对服务器并点击“连接这台 Mac”；也可粘贴邀请链接。已有设备优先使用原连接。
-4. 实际执行前，在这台 Mac 安装并登录原生 Codex；无需先完成本机回显才能接入服务。
-5. 需要核验时点击“测试 Codex”，查看通过、失败或结果待核对以及最近检查时间。会使用模型额度。
+4. 实际执行前，在这台 Mac 安装并登录原生 Codex，或单独安装、配置实验适配的 dsh；无需先完成本机回显才能接入服务。
+5. 需要核验时点击首页 Harness 条目，在详情中使用“运行诊断”检查环境，或点击“测试 Codex”/“测试 dsh”核对一次模型回显。查看通过、失败或结果待核对以及最近检查时间；只有进入模型执行才使用额度。
 6. 回到接入的应用发起任务；原生审批和业务结果仍在应用中处理。
 
-支持 macOS 13+、Apple Silicon。App 已随带运行时和 Daemon；首版为 Developer Alpha，仅完成本地 ad-hoc 签名，尚未完成 Developer ID 签名与公证，macOS 可能阻止首次打开。遇到限制可[联系维护者](https://github.com/hutian-ai/harness-dock/issues)，提供脱敏后的系统版本和错误提示。下面的源码与候选构建说明面向维护者。
+支持 macOS 13+、Apple Silicon。App 已随带运行时和 Daemon；仍为 Developer Alpha，仅有 ad-hoc 签名，尚未完成 Developer ID 签名与公证，macOS 可能阻止首次打开。遇到限制可[联系维护者](https://github.com/hutian-ai/harness-dock/issues)，提供脱敏后的系统版本和错误提示。源码构建部分面向维护者。
 
-## 源码与新构建候选：接入后的使用
+## 接入后的使用
 
-本节界面尚未进入 App `v0.1.1`。新候选首页突出已检测到的 Harness 数量和列表，独立显示服务连接，并提供“设置与维护”入口，不常驻展示任务统计。点击 Harness 条目进入详情，查看安装信息、按需固定回显、分环境历史及诊断；“设置与维护”是可返回首页的独立页面，收纳本地日志、版本信息、登录自启、停止、更新和回滚。候选首次邀请接入无需先选择或验证 Harness。需要候选新提供的后台能力时，按下方步骤显式更新后台；旧后台未报告对应能力时不会启用该测试。
+App `v0.1.2` 首页突出已检测到的 Harness 数量和列表，独立显示服务连接，并提供“设置与维护”入口，不常驻展示任务统计。点击 Harness 条目进入详情，查看安装信息、按需固定回显、分环境历史及诊断；“设置与维护”是可返回首页的独立页面，收纳本地日志、版本信息、登录自启、停止、更新和回滚。首次邀请接入无需先选择或验证 Harness。已有安装需要新版后台能力时，按下方步骤显式更新后台；旧后台未报告对应能力时不会启用该测试。
 
-候选面板与菜单栏使用和现有 App 图标同源的标识，菜单栏为适配小尺寸的单色 template；界面采用系统字体、中性按钮和随系统切换的浅深色外观。保留 Logo 原色，安装与状态文字使用中性色，连接或回显通过仅以小面积柔和绿色图标标示。
+面板与菜单栏使用和 App 图标同源的标识，菜单栏为适配小尺寸的单色 template；界面采用系统字体、中性按钮和随系统切换的浅深色外观。保留 Logo 原色，安装与状态文字使用中性色，连接或回显通过仅以小面积柔和绿色图标标示。
 
 1. **查看本机 Harness**：首页核对安装数量、各条目的安装与最近回显状态，再确认服务连接。数量只统计已发现的安装，未发现、禁用或待确认条目不计入；检测未完成不显示为零，刷新失败保留上次结果并标明。安装发现或连接成功不等于模型、工具或业务应用已验收。
 2. **回到应用使用**：正常情况下，在调用方应用发任务、看进度、处理原生审批和接收结果。面板不提供任务业务面板或审批管理。
@@ -58,16 +58,16 @@ pnpm panel:build --bundles .local/bundles/candidate --output .local/panel/candid
 
 ## 更新本机 App 与后台
 
-替换 `Harness Dock.app` 只更新面板及其随包资源，已经安装的后台仍运行其固定 release。要使用新包中的 dsh 实验适配，需要同时完成后台升级：
+替换 `Harness Dock.app` 只更新面板及其随包资源，已经安装的后台仍运行其固定 release。旧后台需要新包提供的 dsh 实验适配或后台修复时，按以下步骤显式更新：
 
 1. 先确认已有设备没有活动或 unknown 执行；有待核对任务时，回到原调用方按原身份处理，不通过清理状态绕过维护限制。
-2. 在“设置与维护”中选择“退出 LaunchApp”，以同平台的新构建候选替换本机 App，再打开原配置。退出 App 会保留后台；设备身份、私有配置、状态与工作目录不随 App 替换而重新创建。
+2. 退出当前 App：旧 v0.1.1 使用底部“退出面板”，v0.1.2 使用“设置与维护”→“退出 LaunchApp”。以同平台的新版 App 替换本机 App，再打开原配置。退出 App 会保留后台；设备身份、私有配置、状态与工作目录不随 App 替换而重新创建。
 3. 在“设置与维护”中点击“更新后台…”，核对后确认“更新至此应用附带版本”。入口仅在此应用自管的后台与随包版本不同时显示。helper 校验随包运行包，并由后台拥有者通过受保护 socket 再次检查空闲、升级和读回状态。不要手动覆盖运行中的 release 或按保存 PID 停机。
 4. 核对已安装后台 release、设备身份与连接状态。升级结果未确认时只读查询状态和日志，不自动重试升级或重发执行。
 
 版本一致时显示“后台与此应用附带版本一致。”；可更新时显示“已安装后台与此应用附带版本不同，可显式更新。”。这些提示仅比较清单元数据，不表示随包版本号更高，也不替代实际更新时的运行包完整校验。
 
-dsh 任务仍由应用 SDK 以 `provider: 'dsh'` 发起，模型值从设备 inventory 原样选择。新候选的“测试 dsh”只证明本次固定回显，不保证只读，也不验证工具、业务授权或独立设备。公开 v0.1.1 下载与本机构建候选的状态分别记录。
+dsh 任务仍由应用 SDK 以 `provider: 'dsh'` 发起，模型值从设备 inventory 原样选择。“测试 dsh”只证明本次固定回显，不保证只读，也不验证工具、业务授权或独立设备。公开 App 与本机构建候选的产物来源和验证记录分别保存。
 
 ## 所有权与本地接口
 
@@ -78,7 +78,7 @@ dsh 任务仍由应用 SDK 以 `provider: 'dsh'` 发起，模型值从设备 inv
 - helper 复用 Daemon 的 `setupDevice`、`manageInstallation`、`startInstalled`、`stopIdleDaemon`、`deviceDiagnostics`；状态和停机经过原有受保护 Unix socket，绝不使用保存 PID 发信号。
 - 主要入口是服务器生成的 HTTPS 邀请链接：网页通过 `harness-dock://connect?invite=…` 唤起 App；已运行实例接收链接并置前。客户端预览只显示服务器，用户点击“连接这台 Mac”后才领取一次短期邀请、持久化私有配置并复用 setup。粘贴链接提供备用入口，网络请求不跟随重定向、不自动重试，TLS 始终校验。
 - 旧 JSON 邀请在高级设置导入，允许用户选择从下载目录取得的普通 JSON 文件；有界读取并验证身份、token 和 TLS 地址，不改变原文件权限，不打印 token。持久化使用原有 0700 设备目录与 0600 配置。导入不等于服务端已经授权或加载配置，连接状态以拥有者读回为准。
-- 本机检测仅检查已选配置、默认设备配置和本产品自己的用户 LaunchAgent（最多 16 项），不递归搜索 home 或实验目录。支持旧 `dev.harness-dock.device.plist` 和现有 `org.harness-dock.device.*.plist`。候选只展示服务与连接状态，不展示凭据。
+- 本机检测仅检查已选配置、默认设备配置和本产品自己的用户 LaunchAgent（最多 16 项），不递归搜索 home 或实验目录。支持旧 `dev.harness-dock.device.plist` 和现有 `org.harness-dock.device.*.plist`。设备选择列表只展示服务与连接状态，不展示凭据。
 - 首次接入通过“打开邀请链接 → 确认服务器 → 连接”完成；旧 `device-pairing.json` 导入保留在高级设置。没有邀请时提供获取说明与可复制申请，服务端注册/授权仍由管理员完成，不冒充自动签发。工作目录自动使用 `~/harness-work`，私有 CA、目录修改和旧配置文件导入统一收进高级设置。
 - 默认设备配置为 `~/.harness-dock/.local/device/config.json`；面板只在 `~/.harness-dock/.local/panel.json` 保存所选配置的路径。已有安装可以自动检测或导入 config；源码设备可显式使用此应用管理…。自定义目录的既有版本化安装只观察和诊断，继续通过原入口维护。
 - 迁移旧源码设备时先验证 App 内的运行包，再让拥有者原子检查空闲并停机。只退役与该配置精确匹配的旧 `dev.harness-dock.device` 用户服务，将原 plist 与原自启偏好保存在配置目录的 `retired-autostart/`，保留配置、状态路径、执行身份和工作文件。随后安装随包 Daemon 并按原偏好注册新自启。失败后不重放任务，不按 PID 强杀；重新读回状态。
