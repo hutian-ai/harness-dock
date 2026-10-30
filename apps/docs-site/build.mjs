@@ -36,7 +36,7 @@ for (const [index, page] of sorted.entries()) {
   const headings = [...body.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)].map(m=>({id:m[1],text:m[2].replace(/<[^>]+>/g,' ')}));
   if(new Set(headings.map(h=>h.id)).size!==headings.length) throw new Error('Duplicate heading IDs: '+page.slug);
   body = body.replace(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g, (_,id,title)=>'<h2 id="'+id+'">'+title+'<a class="heading-anchor" href="#'+id+'" aria-label="链接到此节">#</a></h2>');
-  const toc = page.slug ? '<aside class="page-toc"><div>本页内容</div><nav aria-label="本页目录">'+headings.map(h=>'<a href="#'+h.id+'">'+esc(h.text)+'</a>').join('')+'</nav><div class="toc-note">Developer Alpha<br><span>以实际候选包为准</span></div></aside>' : '';
+  const toc = page.slug ? '<aside class="page-toc"><div>本页内容</div><nav aria-label="本页目录">'+headings.map(h=>'<a href="#'+h.id+'">'+esc(h.text)+'</a>').join('')+'</nav><div class="toc-note">Developer Alpha<br><span>App 与 SDK 分别发行</span></div></aside>' : '';
   const pageHeader = page.slug ? '<header class="article-header"><div class="breadcrumb">文档 <span>/</span> '+page.group+'</div><h1>'+esc(page.title)+'</h1><p>'+esc(page.description)+'</p></header>' : '';
   const prev=sorted[index-1], next=sorted[index+1];
   const pagination = page.slug ? '<nav class="pagination" aria-label="翻页">'+(prev?'<a href="'+href(prev.slug)+'"><span>← 上一篇</span><strong>'+esc(prev.label)+'</strong></a>':'<div></div>')+(next?'<a class="next" href="'+href(next.slug)+'"><span>下一篇 →</span><strong>'+esc(next.label)+'</strong></a>':'')+'</nav>':'';

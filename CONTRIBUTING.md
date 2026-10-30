@@ -1,6 +1,6 @@
 # 贡献指南
 
-harness-dock 把原生 Harness 接入产品，让任务在调用方所选设备上执行。它作为 AI Infra 提供跨设备接入、连接与执行管理；业务交互、业务授权与结果验收归调用方应用，内部工具与原生权限归 Harness。先阅读 [架构](apps/docs-site/README.md#architecture)、[支持范围](apps/docs-site/README.md#support) 和 [构建与分发](apps/docs-site/README.md#distribution)。设备执行仅限 macOS arm64；已发布客户端支持 Codex，源码和新构建候选另含 dsh 的 SDK 实验适配，现有 v0.1.0 下载尚未更新。
+harness-dock 把原生 Harness 接入产品，让任务在调用方所选设备上执行。它作为 AI Infra 提供跨设备接入、连接与执行管理；业务交互、业务授权与结果验收归调用方应用，内部工具与原生权限归 Harness。先阅读 [架构](apps/docs-site/README.md#architecture)、[支持范围](apps/docs-site/README.md#support) 和 [构建与分发](apps/docs-site/README.md#distribution)。设备执行仅限 macOS arm64。App `v0.1.0` 支持 Codex；独立的 SDK `sdk-v0.1.0` 发行包含 Codex 与实验性 dsh 适配。源码与新构建候选的面板变化尚未进入已发布 App，不能与 SDK 发行状态混写。
 
 ## 开发环境
 
@@ -27,7 +27,7 @@ pnpm check 构建 workspace、检查脚本/测试类型并运行确定性控制�
 
 ## 设计边界
 
-- Daemon 拥有 Provider 进程和待批审批，独立于连接。恢复连接不重派 prompt、工具或权限决定。
+- Daemon 管理 Provider 进程与审批处理，执行所有权独立于连接；等待应用响应的审批或工具请求可能因失联失败或被拒绝。恢复连接不重派 prompt、工具或权限决定。
 - 缺少完成证据保持 unknown；取消请求或观察文本不证明终态。
 - Harness 拥有原生工具、插件、skills、memory 与权限，dock 使用具名薄适配连接原生环境。
 - 公共 wire 类型位于 protocol/client，调用方不依赖 daemon/drivers 或设备凭据。

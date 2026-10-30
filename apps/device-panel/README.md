@@ -2,26 +2,28 @@
 
 设备面板是设备持有人的轻量接入、状态与维护入口：把这台 Mac 上的原生 Harness 接到 Dock，供调用方产品选择并发起任务。执行由独立 Daemon 持有，任务、原生审批和结果回到调用方应用。业务授权与结果验收归应用，内部工具与原生权限归 Harness。
 
-轻量菜单栏 App，使用系统 AppKit / SwiftUI，支持 macOS 13+、Apple Silicon。源码与新构建候选首页只显示服务连接、后台、执行数量及需要处理事项，正常连接后回到调用方应用使用。
+轻量菜单栏 App，使用系统 AppKit / SwiftUI，支持 macOS 13+、Apple Silicon。App 提供设备连接与维护界面，独立后台 Daemon 管理原生进程和执行记录，运行它们的这台 Mac 是执行设备；业务任务在提供邀请的调用方应用中发起。
 
-已发布 v0.1.0 客户端支持 Codex，并保留原来的 Codex 测试界面；现有公开下载尚未包含本轮布局和 dsh 实验适配。新候选把后台发现的环境列表、按需固定回显、各环境历史及诊断收进“检查本机环境”，把登录自启、停止、更新和回滚收进“设置与维护”。安装发现不代表登录或模型执行已确认，也不构成应用业务授权。
+已发布 App `v0.1.0` 支持 Codex，使用“测试 Codex”入口。独立的 SDK `sdk-v0.1.0` 发行包含实验性 dsh 适配及开发者 Daemon；这不代表 App 已包含 dsh 或下文的候选界面。
 
 ## 安装与接入
 
 设备用户直接安装 App，不需要 Git、Node、pnpm、终端命令或 JSON 文件。
 
-以下下载与首次步骤面向已发布 v0.1.0，测试入口为 Codex。源码与新构建候选先完成“连接这台 Mac”，无需先选择或验证 Harness；需要核验时再进入“检查本机环境”。替换 App 后仍须按下方步骤更新后台，旧后台未报告对应能力时不会启用该测试。
+以下步骤面向已发布 App `v0.1.0`。先取得服务管理员提供的邀请；没有邀请的应用开发者可从 [SDK 首次任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)开始，管理员先[部署服务](https://hutian-ai.github.io/harness-dock/server/)并生成邀请。
 
 1. 下载 [v0.1.0 Developer Alpha 客户端（macOS arm64 ZIP）](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)；[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)列出已知限制。
 2. 解压并将 `Harness Dock.app` 拖入“应用程序”目录（或 `~/Applications`），双击打开。
 3. 打开管理员提供的邀请链接，在客户端核对服务器并点击“连接这台 Mac”；也可粘贴邀请链接。已有设备优先使用原连接。
 4. 实际执行前，在这台 Mac 安装并登录原生 Codex；无需先完成本机回显才能接入服务。
-5. 需要核验时点击旧版客户端的“测试 Codex”，查看通过、失败或结果待核对以及最近检查时间。会使用模型额度。
+5. 需要核验时点击“测试 Codex”，查看通过、失败或结果待核对以及最近检查时间。会使用模型额度。
 6. 回到接入的应用发起任务；原生审批和业务结果仍在应用中处理。
 
-支持 macOS 13+、Apple Silicon。App 已随带运行时和 Daemon；首版为 Developer Alpha，仅完成本地 ad-hoc 签名，尚未完成 Developer ID 签名与公证。普通设备用户使用 Release 中的客户端；下面的构建命令面向维护者。
+支持 macOS 13+、Apple Silicon。App 已随带运行时和 Daemon；首版为 Developer Alpha，仅完成本地 ad-hoc 签名，尚未完成 Developer ID 签名与公证，macOS 可能阻止首次打开。遇到限制可[联系维护者](https://github.com/hutian-ai/harness-dock/issues)，提供脱敏后的系统版本和错误提示。下面的源码与候选构建说明面向维护者。
 
-## 接入后的使用
+## 源码与新构建候选：接入后的使用
+
+本节界面尚未进入 App `v0.1.0`。新候选首页显示连接、后台、执行数量及需要处理事项；“检查本机环境”收纳后台发现的环境列表、按需固定回显、分环境历史及诊断，“设置与维护”收纳登录自启、停止、更新和回滚。候选首次邀请接入无需先选择或验证 Harness。替换候选 App 后仍须按下方步骤更新后台，旧后台未报告对应能力时不会启用该测试。
 
 1. **确认设备状态**：首页核对服务连接、后台是否运行、执行数量以及需要处理事项。数量为零表示空闲；连接成功不等于模型或业务应用已验收。
 2. **回到应用使用**：正常情况下，在调用方应用发任务、看进度、处理原生审批和接收结果。面板不提供任务业务面板或审批管理。
