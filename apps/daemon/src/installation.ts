@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { access, cp, lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { DEVICE_PROTOCOL_VERSION } from '@harness-dock/protocol';
@@ -57,7 +57,9 @@ async function stage(root: string, bundle: string, runtime: string): Promise<Rel
   const source = await realpath(bundle);
   if (within(source, root) || within(root, source)) throw new Error('bundle_installation_overlap');
   const { id } = await verifyRelease(source);
-  const release = { id, runtime: await realpath(runtime) }, target = join(root, 'releases', id);
+  const selectedRuntime = await realpath(runtime), target = join(root, 'releases', id);
+  // A packaged runtime moves into the immutable release with the daemon, independent of the app's location.
+  const release = { id, runtime: within(source, selectedRuntime) ? join(target, relative(source, selectedRuntime)) : selectedRuntime };
   await mkdir(join(root, 'releases'), { recursive: true, mode: 0o700 });
   try { await lstat(target); }
   catch (error) {

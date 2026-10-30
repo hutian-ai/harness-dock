@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { arch, hostname, platform, release } from 'node:os';
 import {
   discoverProviders, createProviderAdapters, boundedObservation, observeStartup, startStartupSpan,
@@ -12,8 +12,10 @@ import { collectFiles, digest, prepareDirectories, releaseDirectories, verifySki
 import { DeviceStore, type StoredExecution } from './device-store.ts';
 import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
 import { ObservationWriter } from './observation-writer.ts';
+import { DeviceSelfTest, type SelfTestOutcome, type SelfTestSnapshot } from './device-self-test.ts';
 
 export type DeviceCallback = (method: string, params: unknown, timeoutMs?: number) => Promise<unknown>;
+type RunCallback = (kind: string, payload: unknown, timeoutMs?: number) => Promise<unknown>;
 export interface DeviceExecuteInput extends Omit<PublicExecuteInput, 'provider'> { provider: ProviderKey }
 interface InventoryProvider {
   key: ProviderKey; displayName: string; status: 'ready' | 'not_found' | 'unavailable' | 'disabled';
@@ -71,6 +73,7 @@ export class DeviceHost {
   readonly daemonId = randomUUID();
   readonly nodeId: string;
   readonly #store: DeviceStore;
+  readonly #selfTest: DeviceSelfTest;
   readonly #discovered = new Map<ProviderKey, DiscoveredProvider>();
   readonly #sessions = new Map<string, { sessionKey: string; provider: ProviderKey; adapter: ProviderAdapter }>();
   readonly #limits: DeviceResourceLimits;
@@ -94,6 +97,7 @@ export class DeviceHost {
     this.#limits = resourceLimits(config.resources);
     this.#store = new DeviceStore(config.nodeId, config.stateDir, config.resources);
     this.#store.expireDetails();
+    this.#selfTest = new DeviceSelfTest(config.stateDir, this.daemonId, (id, progress) => this.#runSelfTest(id, progress));
     this.#armIdleTimer();
   }
   #assertOpen(): void { if (this.#closed) throw new Error('device_stopping'); }
@@ -102,7 +106,7 @@ export class DeviceHost {
   }
   #armIdleTimer(): void {
     this.#clearIdleTimer();
-    if (this.#closed || this.#maintenance || this.#active.size) return;
+    if (this.#closed || this.#maintenance || this.#active.size || this.#selfTest.running) return;
     const generation = this.#idleGeneration;
     this.#idleTimer = setTimeout(() => {
       if (generation !== this.#idleGeneration || this.#closed) return;
@@ -116,14 +120,16 @@ export class DeviceHost {
     }, this.#idleDeadline === undefined ? 60_000 : Math.min(60_000, Math.max(0, this.#idleDeadline - Date.now())));
     this.#idleTimer.unref();
   }
-  #maintain<T>(operation: () => Promise<T>, concurrent = false): Promise<T> {
+  #maintain<T>(operation: () => Promise<T>, concurrent = false, localTest = false): Promise<T> {
     this.#assertOpen();
+    if (this.#selfTest.running && !localTest) throw new Error('device_busy');
     if (this.#exclusiveMaintenance || !concurrent && this.#active.size) throw new Error('busy');
     if (!concurrent) this.#exclusiveMaintenance = true;
     this.#clearIdleTimer();
     // Serialize short mutations, never the lifetime of an ACP prompt or approval.
     const pending = (this.#maintenance ?? Promise.resolve()).catch(() => {}).then(() => {
       this.#assertOpen();
+      if (this.#selfTest.running && !localTest) throw new Error('device_busy');
       if (!concurrent && this.#active.size) throw new Error('busy');
       return operation();
     });
@@ -161,10 +167,85 @@ export class DeviceHost {
   }
   get activeRunIds(): string[] { return [...this.#active.keys()]; }
   maintenanceStatus() { return { activeRunIds: this.activeRunIds, unresolvedRunIds: this.#store.unresolved() }; }
+  get selfTestStatus(): SelfTestSnapshot | undefined { return this.#selfTest.status; }
+  lookupSelfTest(id: string): { id: string; found: boolean } {
+    this.#assertOpen();
+    return { id, found: this.#selfTest.status?.id === id || this.#store.get(identity(id)) !== undefined };
+  }
+  startSelfTest(id: string): SelfTestSnapshot {
+    this.#assertOpen();
+    const previous = this.#selfTest.status;
+    if (previous?.id === id) return previous;
+    if (this.#selfTest.running || this.#active.size || this.#maintenance || this.#probing) throw new Error('device_busy');
+    if (this.#store.unresolved().length) throw new Error('unresolved_execution');
+    if (this.#store.get(id)) throw new Error('self_test_id_conflict');
+    return this.#selfTest.start(id);
+  }
+  async #runSelfTest(id: string, progress: (phase: 'checking' | 'executing', model?: string) => void): Promise<SelfTestOutcome> {
+    const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(120_000)]);
+    const rejected = new AbortController();
+    const testSignal = AbortSignal.any([signal, rejected.signal]);
+    const sessionKey = `self-test:${id}`, marker = `DOCK_SELF_TEST_${randomBytes(12).toString('hex')}`;
+    let violation: string | undefined, model: string | undefined;
+    // No connection/approval ownership is transferred. Captured callbacks never fall back to the remote application.
+    const call: RunCallback = async (kind, payload) => {
+      const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+      const item = value.item && typeof value.item === 'object' ? value.item as Record<string, unknown> : {};
+      const tool = kind === 'toolCall' || kind === 'event' && (['tool_call', 'tool_call_update'].includes(String(value.type))
+        || value.type === 'codex_event' && value.kind === 'item' && ['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'webSearch', 'fileChange'].includes(String(item.type)));
+      if (tool || kind === 'permission') {
+        violation ??= kind === 'permission' ? 'self_test_permission_requested' : 'self_test_unexpected_tool';
+        rejected.abort(new Error(violation));
+        if (kind === 'toolCall') throw new Error(violation);
+      }
+      return kind === 'permission' ? value.form ? { action: 'cancel' } : 'deny' : null;
+    };
+    try {
+      progress('checking');
+      const inventory = await this.#inspectInventory(true, true, testSignal) as DeviceInventory;
+      testSignal.throwIfAborted();
+      const provider = inventory.providers.find(value => value.key === 'codex');
+      if (provider?.status !== 'ready' || provider.capabilities?.exactFinalAnswer !== true) return { state: 'failed', code: 'self_test_provider_unavailable' };
+      model = provider.models[0];
+      if (!model) return { state: 'failed', code: 'self_test_model_unavailable' };
+      const inspection = object(provider.inspection);
+      if (!Array.isArray(inspection.permissionModes) || !inspection.permissionModes.some(value => object(value).value === 'read-only'))
+        return { state: 'failed', model, code: 'self_test_read_only_unavailable' };
+      const modes = Array.isArray(inspection.models) ? inspection.models.map(object) : [];
+      const selected = modes.find(value => value.id === model);
+      const config = { mode: 'read-only', ...(Array.isArray(selected?.efforts) && selected.efforts.includes('low') ? { effort: 'low' } : {}) };
+      await this.#prepare({ runId: id, sessionKey, files: [] }, true);
+      testSignal.throwIfAborted();
+      progress('executing', model);
+      const response = object(await this.#execute({ provider: 'codex', runId: id, sessionKey, model, config,
+        prompt: `Reply with exactly ${marker}. Do not call tools, read files, search, or perform any other action.`, retainSession: false }, { call, signal: testSignal }));
+      const result = object(response.result);
+      if (result.state === 'unknown') return { state: 'unknown', model, code: violation ?? (signal.aborted ? 'self_test_timed_out' : 'self_test_unconfirmed') };
+      if (violation) return { state: 'failed', model, code: violation };
+      if (result.state !== 'completed') return { state: 'failed', model, code: signal.aborted ? 'self_test_timed_out' : 'self_test_execution_failed' };
+      const messages = Array.isArray(result.messages) ? result.messages.map(object) : [];
+      const text = messages.filter(message => message.phase === 'final_answer').map(message => String(message.text)).join('\n').trim();
+      if (text !== marker || typeof result.threadId !== 'string' || typeof result.turnId !== 'string')
+        return { state: 'failed', model, code: 'self_test_answer_mismatch' };
+      return { state: 'passed', model };
+    } catch {
+      const record = this.#store.get(id);
+      return { state: record?.state === 'unknown' || record?.state === 'running' ? 'unknown' : 'failed', model,
+        code: violation ?? (signal.aborted ? 'self_test_timed_out' : 'self_test_unconfirmed') };
+    } finally {
+      const record = this.#store.get(id);
+      if (!this.#closed && this.#store.preparation(id) && record?.state !== 'unknown' && record?.state !== 'running') {
+        // Only this synthetic session is released; never close the remote application's provider pool.
+        try { await this.#release(id, true); await this.#forgetSession(sessionKey, true); }
+        catch { console.error('Local self-test cleanup deferred.'); }
+      }
+      setTimeout(() => this.#armIdleTimer(), 0).unref();
+    }
+  }
   /** Reserve shutdown synchronously so admission cannot race an installation change. */
   closeIfIdle(): Promise<void> {
     this.#assertOpen();
-    if (this.#active.size || this.#maintenance || this.#probing) throw new Error('device_busy');
+    if (this.#active.size || this.#maintenance || this.#probing || this.#selfTest.running) throw new Error('device_busy');
     if (this.#store.unresolved().length) throw new Error('unresolved_execution');
     return this.close();
   }
@@ -176,15 +257,16 @@ export class DeviceHost {
     if (!this.#callback) throw new Error('controller_disconnected');
     return this.#callback('execution.callback', { runId, kind, payload }, timeoutMs);
   }
-  async #observe(runId: string, kind: string, payload: unknown): Promise<void> {
+  async #observe(runId: string, kind: string, payload: unknown, call: RunCallback, localOnly = false): Promise<void> {
+    // Local facts were checked before ObservationWriter's projection; remote presentation remains bounded.
     const observation = boundedObservation(kind, payload);
     const stored = this.#store.observe(runId, kind, observation);
     const active = this.#active.get(runId);
     if (!stored && active && !active.historyTruncated) {
       active.historyTruncated = true;
-      try { await this.#call(runId, 'historyTruncated', { type: 'history_truncated', reason: 'observation_retention_limit' }); } catch { /* Persisted by the Store. */ }
+      try { await call('historyTruncated', { type: 'history_truncated', reason: 'observation_retention_limit' }); } catch { /* Persisted by the Store. */ }
     }
-    try { await this.#call(runId, kind, observation); } catch { /* Reconnect observes persisted events; it never replays effects. */ }
+    if (!localOnly) try { await call(kind, observation); } catch { /* Reconnect observes persisted events; it never replays effects. */ }
   }
   events(runId: string, after: number) {
     this.#assertOpen();
@@ -193,12 +275,15 @@ export class DeviceHost {
     return this.#store.events(runId, after);
   }
   async inventory(refresh = false): Promise<unknown> {
+    return this.#inspectInventory(refresh);
+  }
+  async #inspectInventory(refresh = false, localTest = false, selfTestSignal?: AbortSignal): Promise<unknown> {
     if (this.#closed) throw new Error('device_stopping');
     if (this.#probing) return this.#probing;
     if (this.#providers && (!refresh || this.#active.size)) return this.#inventory();
     this.#probing = this.#maintain(async () => {
       await this.#cleanup();
-      const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(90_000)]);
+      const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(90_000), ...(selfTestSignal ? [selfTestSignal] : [])]);
       const found = await discoverProviders({ overrides: this.config.providers, signal });
       const providers: InventoryProvider[] = [];
       for (const provider of found) {
@@ -233,7 +318,7 @@ export class DeviceHost {
       }
       this.#providers = providers;
       return this.#inventory();
-    });
+    }, false, localTest);
     try { return await this.#probing; } finally { this.#probing = undefined; }
   }
   #inventory(): DeviceInventory {
@@ -245,6 +330,9 @@ export class DeviceHost {
       })) };
   }
   async prepare(value: unknown) {
+    return this.#prepare(value);
+  }
+  async #prepare(value: unknown, localTest = false) {
     const input = object(value), runId = identity(input.runId), sessionKey = input.sessionKey === undefined ? runId : identity(input.sessionKey);
     const fingerprint = digest(canonical({ sessionKey, files: input.files ?? [] }));
     const queuedAt = performance.now();
@@ -258,13 +346,13 @@ export class DeviceHost {
       }
       if ([...this.#active.values()].some(active => active.sessionKey === sessionKey)) throw new Error('session_busy');
       if (this.#store.get(runId)) throw new Error('preparation_identity_conflict');
-      // No admission exists: only the owned run directory can be left by an interrupted preparation.
+      // Recover only directories which never reached durable admission.
       await releaseDirectories(this.config.stateDir, runId);
       await observeStartup(runId, 'device_prepare_capacity', () => this.#capacity(runId));
       const directories = await observeStartup(runId, 'device_prepare_files', () => prepareDirectories(this.config.stateDir, runId, sessionKey, (input.files ?? []) as DeviceFile[], this.config.cwd));
       await observeStartup(runId, 'device_prepare_persist', async () => { this.#store.prepare(runId, { input: fingerprint, sessionKey, directories }); });
       return directories;
-    }, performance.now() - queuedAt), true));
+    }, performance.now() - queuedAt), true, localTest));
   }
   getExecution(runId: string) {
     this.#assertOpen();
@@ -275,6 +363,9 @@ export class DeviceHost {
       detailsExpired: value.detailsExpired ?? false, historyTruncated: value.historyTruncated ?? false };
   }
   async execute(value: unknown): Promise<unknown> {
+    return this.#execute(value);
+  }
+  async #execute(value: unknown, local?: { call: RunCallback; signal: AbortSignal }): Promise<unknown> {
     this.#assertOpen();
     const input = executionInput(value), fingerprint = digest(canonical(input));
     const existing = this.#store.get(input.runId);
@@ -298,6 +389,7 @@ export class DeviceHost {
         input.resumeSessionId && active.provider === input.provider && active.nativeSessionId === input.resumeSessionId)) throw new Error('session_busy');
       await observeStartup(input.runId, 'device_admission_capacity', () => this.#capacity(input.runId));
       this.#assertOpen();
+      local?.signal.throwIfAborted();
       this.#store.assertSessionOpen(input.sessionKey ?? input.runId);
       const unresolved = this.#store.unresolved();
       if (unresolved.length) throw new Error(`unresolved_execution:${unresolved[0]}`);
@@ -331,8 +423,10 @@ export class DeviceHost {
       const active = { runId: input.runId, sessionKey: key, provider: input.provider, nativeSessionId: input.resumeSessionId, adapter, controller, historyTruncated: false, promise: Promise.resolve<unknown>(null), steer: undefined as ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | undefined };
       this.#active.set(input.runId, active);
       active.promise = (async () => {
-        const signal = AbortSignal.any([controller.signal, this.#lifetime.signal]);
-        const observations = new ObservationWriter((kind, payload) => this.#observe(input.runId, kind, payload), signal);
+        // This closure keeps local diagnostic callbacks local even after completion or a remote rebind.
+        const call: RunCallback = local?.call ?? ((kind, payload, timeout) => this.#call(input.runId, kind, payload, timeout));
+        const signal = AbortSignal.any([controller.signal, this.#lifetime.signal, ...(local ? [local.signal] : [])]);
+        const observations = new ObservationWriter((kind, payload) => this.#observe(input.runId, kind, payload, call, !!local), signal);
         const reports = new Set<Promise<unknown>>();
         let pendingPermissions = 0;
         let started = false;
@@ -341,22 +435,22 @@ export class DeviceHost {
           if (sessionId && [...this.#active.values()].some(other => other !== active && other.provider === input.provider && other.nativeSessionId === sessionId)) throw new Error('native_session_busy');
           active.nativeSessionId = sessionId;
           finishNativeStartup();
-          await observeStartup(input.runId, 'device_ready_callback', () => this.#call(input.runId, 'ready', { sessionId })); signal.throwIfAborted(); started = true;
+          await observeStartup(input.runId, 'device_ready_callback', () => call('ready', { sessionId })); signal.throwIfAborted(); started = true;
         };
         const invocation: McpInvocation = { signal,
-          onToolCall: async call => {
+          onToolCall: async tool => {
             signal.throwIfAborted();
             observations.seal();
-            return await withSignal(this.#call(input.runId, 'toolCall', call, 5 * 60_000), signal) as Awaited<ReturnType<McpInvocation['onToolCall']>>;
+            return await withSignal(call('toolCall', tool, 5 * 60_000), signal) as Awaited<ReturnType<McpInvocation['onToolCall']>>;
           },
-          onToolResultDelivery: async delivery => { await this.#call(input.runId, 'toolDelivery', delivery); },
+          onToolResultDelivery: async delivery => { await call('toolDelivery', delivery); },
         };
         const permission = async (request: NativePermissionRequest, nativeSignal: AbortSignal, responseSent?: Promise<void>): Promise<NativePermissionDecision> => {
           if (this.#active.get(input.runId) !== active || signal.aborted || nativeSignal.aborted || pendingPermissions + reports.size >= 32) return 'deny';
           observations.seal();
           pendingPermissions++;
           let decision: unknown;
-          try { decision = await withSignal(this.#call(input.runId, 'permission', request, 30 * 60_000), AbortSignal.any([signal, nativeSignal])); } catch { /* Fail closed. */ }
+          try { decision = await withSignal(call('permission', request, 30 * 60_000), AbortSignal.any([signal, nativeSignal])); } catch { /* Fail closed. */ }
           finally { pendingPermissions--; }
           let effective: NativePermissionDecision = request.form ? { action: 'cancel' } : 'deny';
           if (!signal.aborted && !nativeSignal.aborted && this.#active.get(input.runId) === active) {
@@ -371,8 +465,8 @@ export class DeviceHost {
           const confirmed = decision !== undefined && canonical(decision) === canonical(effective);
           if (responseSent) {
             const reporting = withSignal(responseSent, AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(30_000)])).then(
-              () => this.#call(input.runId, 'permissionDelivered', { id: request.id, decision: effective, success: confirmed && !signal.aborted && !nativeSignal.aborted }),
-              () => this.#call(input.runId, 'permissionDelivered', { id: request.id, decision: effective, success: false }),
+              () => call('permissionDelivered', { id: request.id, decision: effective, success: confirmed && !signal.aborted && !nativeSignal.aborted }),
+              () => call('permissionDelivered', { id: request.id, decision: effective, success: false }),
             );
             reports.add(reporting);
             void reporting.finally(() => reports.delete(reporting)).catch(() => {});
@@ -385,8 +479,11 @@ export class DeviceHost {
             previousRunId: input.previousRunId, retainSession: input.retainSession ?? false,
             workdir: prepared.directories.workdir, skillDirectory: prepared.directories.skillDirectory,
             signal, tools: input.tools, invocation,
-            ready, observe: (kind, payload) => observations.write(kind, payload), permission,
-            steering: steer => { active.steer = steer ?? undefined; void this.#call(input.runId, 'steering', { available: Boolean(steer) }).catch(() => {}); },
+            ready, observe: async (kind, payload) => {
+              if (local) await call(kind, payload);
+              await observations.write(kind, payload);
+            }, permission,
+            steering: steer => { active.steer = steer ?? undefined; void call('steering', { available: Boolean(steer) }).catch(() => {}); },
           }, environment);
           await observations.finish();
           const state = object(result).state;
@@ -418,12 +515,13 @@ export class DeviceHost {
         return { provider: input.provider, result: record.result };
       })();
       return { result: active.promise };
-    }, performance.now() - queuedAt), true));
+    }, performance.now() - queuedAt), true, !!local));
     return admitted.result;
   }
   cancel(runId: string) {
     this.#assertOpen();
     identity(runId);
+    if (this.#selfTest.running && this.#selfTest.status?.runId === runId) throw new Error('device_busy');
     const active = this.#active.get(runId);
     if (active) { active.controller.abort(new Error('cancel_requested')); return { requested: true }; }
     return { requested: false, state: this.#store.get(runId)?.state ?? null };
@@ -431,6 +529,7 @@ export class DeviceHost {
   async steer(runId: string, text: string) {
     this.#assertOpen();
     identity(runId);
+    if (this.#selfTest.running && this.#selfTest.status?.runId === runId) throw new Error('device_busy');
     if (typeof text !== 'string' || !text || text.length > 100_000) throw new Error('invalid_steer');
     const active = this.#active.get(runId);
     if (active?.runId !== runId || !active.steer) return 'rejected';
@@ -457,6 +556,9 @@ export class DeviceHost {
     }, true);
   }
   async release(runId: string) {
+    return this.#release(runId);
+  }
+  async #release(runId: string, localTest = false) {
     return this.#maintain(async () => {
       if (this.#active.has(runId)) throw new Error('busy');
       const prepared = this.#store.preparation(identity(runId));
@@ -471,20 +573,23 @@ export class DeviceHost {
       this.#store.markReleased(runId);
       if (!this.#active.size) this.#store.expireDetails();
       return null;
-    }, true);
+    }, true, localTest);
   }
   async forgetSession(sessionKey: string) {
+    return this.#forgetSession(sessionKey);
+  }
+  async #forgetSession(sessionKey: string, localTest = false) {
     identity(sessionKey);
     return this.#maintain(async () => {
       // Durable invalidation precedes deletion; interrupted cleanup remains safely retryable.
       const forgotten = this.#store.forgetSession(sessionKey);
-      await this.providers.close();
+      if (!localTest) await this.providers.close();
       for (const [key, session] of this.#sessions) if (session.sessionKey === sessionKey) {
         await session.adapter.forgetSession(sessionKey); await session.adapter.close(); this.#sessions.delete(key);
       }
       await forgetSessionDirectories(this.config.stateDir, sessionKey);
       return forgotten;
-    });
+    }, false, localTest);
   }
   close(): Promise<void> {
     if (this.#closing) return this.#closing;

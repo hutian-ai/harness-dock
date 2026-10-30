@@ -3,6 +3,7 @@ export * from './device.ts';
 export * from './device-limits.ts';
 export * from './health.ts';
 export * from './execution.ts';
+export * from './invitation.ts';
 export const id = z.uuid();
 export class DockError extends Error {
   constructor(

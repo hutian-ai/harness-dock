@@ -4,7 +4,36 @@ harness-dock 是跨机器的原生 Harness 接入与执行基础设施。让应�
 
 每台设备运行独立 Daemon，设备与调用方主动连接自托管 server。调用方无需管理远程 Provider 进程、登录文件或设备上的工具安装。
 
-**最小版本：仅支持 macOS arm64 设备上的 Codex。** server 可部署在 Linux。源码采用 MIT，当前为开发者 Alpha；从源码即可启动，workspace package 保持 private，避免误发布到 npm。
+**最小版本：仅支持 macOS arm64 设备上的 Codex。** server 可部署在 Linux。源码采用 MIT，当前为开发者 Alpha；设备用户可直接安装客户端，workspace package 保持 private，避免误发布到 npm。
+
+[下载 macOS 客户端 v0.1.0](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip) · [版本说明与已知限制](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)
+
+设备用户的默认路径是：安装客户端 → 登录原生 Codex → 打开邀请 → 连接这台 Mac → 点击“测试 Codex”。设备用户无需查找 JSON 文件；安装说明见[设备安装与维护](apps/docs-site/README.md#installation)，管理员生成步骤见[配对管理](apps/docs-site/README.md#pairing)。
+
+## 从你的角色开始
+
+| 你的目标 | 入口 | 完成标志 |
+| --- | --- | --- |
+| 把这台 Mac 接入已有服务 | [设备安装](apps/docs-site/README.md#installation) | 面板显示设备已连接，点击“测试 Codex”完成本机执行验证 |
+| 让应用调用已授权的设备 | [执行与测试](apps/docs-site/README.md#usage)、[SDK](apps/docs-site/README.md#sdk) | 收到真实执行结果，按需验证审批与工具 |
+| 部署和管理自托管服务 | [server](apps/docs-site/README.md#server)、[配对管理](apps/docs-site/README.md#pairing) | TLS、已加载配对和设备连接分别确认 |
+
+设备用户按下方客户端流程完成接入。应用开发与服务部署的命令分别保留在 SDK、server 和开发者说明中。
+
+## 开始使用
+
+设备用户直接安装客户端即可，不需要 Git、Node.js、pnpm、源码构建或 JSON 配置。
+
+1. **下载客户端**：下载 [v0.1.0 Developer Alpha（macOS arm64 ZIP）](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)，也可在[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)查看已知限制。
+2. **安装并打开**：解压 ZIP，将 `Harness Dock.app` 拖入“应用程序”目录（或 `~/Applications`），双击打开。
+3. **准备原生 Codex**：在这台 Mac 上安装并登录 Codex，保留原生安装与授权。
+4. **连接这台 Mac**：打开管理员提供的邀请链接，点击“在 Harness Dock 中打开”；核对服务器后，点击“连接这台 Mac”。也可以在客户端粘贴邀请链接。已有设备直接使用检测到的原连接。
+5. **点击“测试 Codex”**：客户端提交一次固定合成回显并显示通过、失败或结果待核对，以及最近检查时间。测试会使用一次模型请求额度，不需要打开终端或提供应用凭据。
+6. **回到应用使用**：设备连接与本机测试确认后，在接入的应用中发起任务、处理原生审批并查看结果。
+
+当前支持 macOS 13+、Apple Silicon + Codex。App 自带 Node 和独立 Daemon；首版为 Developer Alpha，仅完成本地 ad-hoc 签名，尚未完成 Developer ID 签名与公证。具体安装、维护与状态说明见[设备安装与维护](apps/docs-site/README.md#installation)。
+
+服务器连接、本机模型执行和业务应用授权分别确认；本机测试通过不代表全部插件、桌面或浏览器工具已验证。关闭并重新打开面板只查询原测试，不会补发模型请求。
 
 ## 适用场景
 
@@ -69,7 +98,34 @@ Driver 和 ACPX 库运行在 Daemon 内；由 ACPX 管理的 `codex-acp` 接入�
 
 部署架构、执行时序、身份与恢复规则见 [架构与执行契约](apps/docs-site/README.md#architecture)。
 
-## 开始使用
+## 文档
+
+- [快速开始](apps/docs-site/README.md#quickstart)：客户端安装、邀请接入与一键本机测试
+- [执行与测试](apps/docs-site/README.md#usage)：一键本机测试、状态说明与高级应用侧验收
+- [SDK](apps/docs-site/README.md#sdk)：方法、回调、执行身份与错误处理
+- [server](apps/docs-site/README.md#server)：Linux 部署、TLS 与配对管理
+- [设备维护](apps/docs-site/README.md#installation)：安装、自启、升级与回滚
+- [架构](apps/docs-site/README.md#architecture)：职责、协议和扩展边界
+- [Codex 集成与 ACP 分层](apps/docs-site/README.md#drivers)：dock 集成层、ACPX、codex-acp 与原生 Harness
+- [支持范围](apps/docs-site/README.md#support)：平台、能力与限制
+- [资源管理](apps/docs-site/README.md#lifecycle)：容量、保留与释放
+- [验证](apps/docs-site/README.md#verification)：测试和真实执行的验收方法
+- [构建与分发](apps/docs-site/README.md#distribution)：独立运行包、CI 和候选产物
+
+## 首版交付范围
+
+首版 **0.1.0 Developer Alpha** 包含：macOS arm64 + Codex、独立设备 Daemon、Linux server 和 TypeScript SDK。设备用户可从 [GitHub Release](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0) 下载客户端，无需构建源码。客户端目前只有本地 ad-hoc 签名，Developer ID 签名与公证尚未完成；远端 CI、独立设备和具体工具能力的验证范围分别记录，不能由本机构建通过推定。
+
+发布前按[首版验收清单](apps/docs-site/README.md#verification)核对源码检查、离线分发、真实 Codex、实际 GUI 和目标设备证据。原始配置、日志、截图和验证结果留在 ignored 的 `.local/`；公共文档只记录可复现方法与限制。
+
+## 开发者与维护者
+
+下面的命令用于源码开发、独立 server 部署和 SDK 集成。只使用客户端接入设备时，无需执行。
+
+<details>
+<summary>展开：从源码启动、完整链路示例与 SDK 接入</summary>
+
+### 从源码启动
 
 准备 Git、Node.js 22.19+；在执行设备原生安装、登录 Codex。先取得并构建源码：
 
@@ -106,7 +162,9 @@ pnpm client nodes .local/quickstart/control/client.json
 pnpm client doctor .local/quickstart/control/client.json --probe --json
 ```
 
-真实两轮测试会使用原生模型额度。`--approval` 在交互终端展示原生选项，由你决定是否允许：
+真实两轮测试会使用原生模型额度。测试由设备的授权应用通过 SDK 发起，server 负责转发。每台设备只有一个应用拥有者、每个应用身份只有一个活动连接：已有应用连接时应复用其 SDK 连接运行测试；下方 CLI 用于该身份未连接时的首次验收。不要另建客户端抢占既有设备，独立实验使用隔离的 server/设备身份。
+
+基础测试可省略 `--approval`；加入该选项后，在交互终端展示原生选项，由你决定是否允许：
 
 ```sh
 pnpm client test .local/quickstart/control/client.json --approval
@@ -129,7 +187,7 @@ pnpm daemon doctor .local/home-device/config.json --json
 pnpm daemon status .local/home-device/config.json
 ```
 
-若使用私有 CA，在 `init` 增加 `--ca-file /absolute/trusted-ca.pem`。原生 Codex 使用这台 Mac 当前用户自己的安装与登录；设备凭据和应用 `client.json` 分别授权，不混用。持有应用凭据的控制端按 `status` 返回的 nodeId 执行：
+若使用私有 CA，在 `init` 增加 `--ca-file /absolute/trusted-ca.pem`。原生 Codex 使用这台 Mac 当前用户自己的安装与登录；设备凭据和应用 `client.json` 分别授权，不混用。持有该设备拥有者应用凭据的控制端，在该应用身份没有其他活动连接时，按 `status` 返回的 nodeId 执行：
 
 ```sh
 pnpm client doctor /private/client.json --node-id <设备UUID> --probe --json
@@ -157,20 +215,9 @@ await client.close();
 
 完整执行、审批和恢复示例见 [SDK 指南](apps/docs-site/README.md#sdk)。
 
-## 文档
+</details>
 
-- [快速开始](apps/docs-site/README.md#quickstart)：本机闭环与首次验证
-- [SDK](apps/docs-site/README.md#sdk)：方法、回调、执行身份与错误处理
-- [server](apps/docs-site/README.md#server)：Linux 部署、TLS 与配对管理
-- [设备维护](apps/docs-site/README.md#installation)：安装、自启、升级与回滚
-- [架构](apps/docs-site/README.md#architecture)：职责、协议和扩展边界
-- [Codex 集成与 ACP 分层](apps/docs-site/README.md#drivers)：dock 集成层、ACPX、codex-acp 与原生 Harness
-- [支持范围](apps/docs-site/README.md#support)：平台、能力与限制
-- [资源管理](apps/docs-site/README.md#lifecycle)：容量、保留与释放
-- [验证](apps/docs-site/README.md#verification)：测试和真实执行的验收方法
-- [构建与分发](apps/docs-site/README.md#distribution)：独立运行包、CI 和候选产物
-
-## 从源码开发
+### 开发与验证命令
 
 ```sh
 npm install --global pnpm@12.15.0
