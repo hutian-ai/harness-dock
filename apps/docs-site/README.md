@@ -84,7 +84,9 @@ SDK 接入：启动预览后访问 `/sdk/`。主入口 `/sdk/#first-task` 使用
 
 执行 CLI 已于 2026-10-30 在本机 macOS arm64 使用真实 Codex 验证通过：一次任务完成、原生 `allow_once` 审批成功送达且命令退出 0、另起 `status --receipt` 查回同一执行与完整结果。首轮验证范围仅限本机源码链路，不覆盖跨机器、断线或重启恢复、两轮续接、全部工具或插件、独立发行包及生产部署；详见 [真实 Codex 验证结论与范围](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
 
-同日追加验证了执行 CLI（提交 `4fcd3b8`）在原生命令开始后收到 `SIGINT`、退出码为 `130` 并返回 `unknown`，再按原 receipt 从 `running` 查回 `completed`；服务入口 `prepare/execute` 各一次，原生 turn、命令及文件效果也各一次，未重复提交。范围仅限同机中断 CLI 观察、Server/Daemon 持续运行，不覆盖 `SIGKILL`、进程重启、跨机器或真实网络故障恢复；详见 [CLI 中断后按 receipt 查回原执行](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli-interruption-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
+同日追加验证了执行 CLI（提交 `4fcd3b8`）在原生命令开始后收到 `SIGINT`、退出码为 `130` 并返回 `unknown`，再按原 receipt 从 `running` 查回 `completed`；服务入口 `prepare/execute` 各一次，原生 turn、命令及文件效果也各一次，未重复提交。该 SIGINT 验证范围仅限同机中断 CLI 观察、Server/Daemon 持续运行，不覆盖 `SIGKILL`、进程重启、跨机器或真实网络故障恢复；详见 [CLI 中断后按 receipt 查回原执行](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli-interruption-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
+
+同日还验证了执行 CLI（验证时提交 `7a51fd1`）被 `SIGKILL` 强制结束、stdout 为空且没有最终 JSON 后，完整 receipt 保持原指纹，并能从 `running` 查回原执行的 `completed` 结果；`prepare/execute`、原生 turn、命令、文件效果及持久执行行均各一次，未重复提交。范围仅限同机强杀 CLI、Server/Daemon 持续运行；未覆盖服务强杀或重启、断电、跨机、真实网络故障、原生进程崩溃或新审批请求，详见 [CLI 被 SIGKILL 后按 receipt 查回原执行](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli-sigkill-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
 
 ### server
 
