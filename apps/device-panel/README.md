@@ -4,15 +4,15 @@
 
 轻量菜单栏 App，使用系统 AppKit / SwiftUI，支持 macOS 13+、Apple Silicon。App 提供设备连接与维护界面，独立后台 Daemon 管理原生进程和执行记录，运行它们的这台 Mac 是执行设备；业务任务在提供邀请的调用方应用中发起。
 
-已发布 App `v0.1.0` 支持 Codex，使用“测试 Codex”入口。独立的 SDK `sdk-v0.1.0` 发行包含实验性 dsh 适配及开发者 Daemon；这不代表 App 已包含 dsh 或下文的候选界面。
+已发布 App `v0.1.1` 支持 Codex，使用“测试 Codex”入口。独立的 SDK `sdk-v0.1.0` 发行包含实验性 dsh 适配及开发者 Daemon；这不代表 App 已包含 dsh 或下文的候选界面。
 
 ## 安装与接入
 
 设备用户直接安装 App，不需要 Git、Node、pnpm、终端命令或 JSON 文件。
 
-以下步骤面向已发布 App `v0.1.0`。先取得服务管理员提供的邀请；没有邀请的应用开发者可从 [SDK 首次任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)开始，管理员先[部署服务](https://hutian-ai.github.io/harness-dock/server/)并生成邀请。
+以下步骤面向已发布 App `v0.1.1`。先取得服务管理员提供的邀请；没有邀请的应用开发者可从 [SDK 首次任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)开始，管理员先[部署服务](https://hutian-ai.github.io/harness-dock/server/)并生成邀请。
 
-1. 下载 [v0.1.0 Developer Alpha 客户端（macOS arm64 ZIP）](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)；[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)列出已知限制。
+1. 下载 [v0.1.1 Developer Alpha 客户端（macOS arm64 ZIP）](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.1/harness-dock-panel-0.1.1-darwin-arm64.zip)；[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.1)列出已知限制。
 2. 解压并将 `Harness Dock.app` 拖入“应用程序”目录（或 `~/Applications`），双击打开。
 3. 打开管理员提供的邀请链接，在客户端核对服务器并点击“连接这台 Mac”；也可粘贴邀请链接。已有设备优先使用原连接。
 4. 实际执行前，在这台 Mac 安装并登录原生 Codex；无需先完成本机回显才能接入服务。
@@ -23,7 +23,7 @@
 
 ## 源码与新构建候选：接入后的使用
 
-本节界面尚未进入 App `v0.1.0`。新候选首页显示连接、后台、执行数量及需要处理事项；“检查本机环境”收纳后台发现的环境列表、按需固定回显、分环境历史及诊断，“设置与维护”收纳登录自启、停止、更新和回滚。候选首次邀请接入无需先选择或验证 Harness。替换候选 App 后仍须按下方步骤更新后台，旧后台未报告对应能力时不会启用该测试。
+本节界面尚未进入 App `v0.1.1`。新候选首页显示连接、后台、执行数量及需要处理事项；“检查本机环境”收纳后台发现的环境列表、按需固定回显、分环境历史及诊断，“设置与维护”收纳登录自启、停止、更新和回滚。候选首次邀请接入无需先选择或验证 Harness。替换候选 App 后仍须按下方步骤更新后台，旧后台未报告对应能力时不会启用该测试。
 
 1. **确认设备状态**：首页核对服务连接、后台是否运行、执行数量以及需要处理事项。数量为零表示空闲；连接成功不等于模型或业务应用已验收。
 2. **回到应用使用**：正常情况下，在调用方应用发任务、看进度、处理原生审批和接收结果。面板不提供任务业务面板或审批管理。
@@ -65,7 +65,7 @@ pnpm panel:build --bundles .local/bundles/candidate --output .local/panel/candid
 
 版本一致时显示“后台与此应用附带版本一致。”；可更新时显示“已安装后台与此应用附带版本不同，可显式更新。”。这些提示仅比较清单元数据，不表示随包版本号更高，也不替代实际更新时的运行包完整校验。
 
-dsh 任务仍由应用 SDK 以 `provider: 'dsh'` 发起，模型值从设备 inventory 原样选择。新候选的“测试 dsh”只证明本次固定回显，不保证只读，也不验证工具、业务授权或独立设备。公开 v0.1.0 下载与本机构建候选的状态分别记录。
+dsh 任务仍由应用 SDK 以 `provider: 'dsh'` 发起，模型值从设备 inventory 原样选择。新候选的“测试 dsh”只证明本次固定回显，不保证只读，也不验证工具、业务授权或独立设备。公开 v0.1.1 下载与本机构建候选的状态分别记录。
 
 ## 所有权与本地接口
 

@@ -6,7 +6,7 @@
 
 Harness Dock 是面向原生 Harness 的 AI Infra，负责跨设备接入、连接与执行管理。应用负责业务交互、业务授权与结果验收，Harness 负责内部工具与原生权限。
 
-[从 SDK 示例开始](https://hutian-ai.github.io/harness-dock/sdk/#first-task) · [产品文档](https://hutian-ai.github.io/harness-dock/) · [下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)
+[从 SDK 示例开始](https://hutian-ai.github.io/harness-dock/sdk/#first-task) · [产品文档](https://hutian-ai.github.io/harness-dock/) · [下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.1/harness-dock-panel-0.1.1-darwin-arm64.zip) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.1)
 
 ## 适合谁
 
@@ -48,18 +48,18 @@ Dock 封装的是设备接入与跨设备执行管理。会话、审批和事件
 ## 开始使用
 
 - **应用开发者**：[从 SDK 示例发起第一个任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)，学习选设备、发任务、收进度与产物。
-- **设备用户**：[下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)，按[安装指南](https://hutian-ai.github.io/harness-dock/installation/)连接这台 Mac。
+- **设备用户**：[下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.1/harness-dock-panel-0.1.1-darwin-arm64.zip)，按[安装指南](https://hutian-ai.github.io/harness-dock/installation/)连接这台 Mac。
 - **服务管理员**：[部署连接服务](https://hutian-ai.github.io/harness-dock/server/)，为应用与执行设备准备共同的入口。
 
 设备接入路径是：取得管理员邀请 → 安装客户端 → 用邀请连接这台 Mac → 确认状态并回到提供邀请的应用。实际执行前安装并登录原生 Codex；需要核验时点击“测试 Codex”。客户端 App 自带运行时和独立后台 Daemon，后台管理这台 Mac 上的原生执行，退出面板仍可继续运行。测试使用模型额度，通过不代表全部工具或业务授权均已验证。没有邀请的开发者先走 SDK 示例，管理员先部署 Server 并生成邀请。
 
-当前 App 为 **v0.1.0 Developer Alpha**，仅有 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证，macOS 可能阻止首次打开；安装限制见[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)，遇到限制可[联系维护者](https://github.com/hutian-ai/harness-dock/issues)。
+当前 App 为 **v0.1.1 Developer Alpha**，仅有 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证，macOS 可能阻止首次打开；安装限制见[版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.1)，遇到限制可[联系维护者](https://github.com/hutian-ai/harness-dock/issues)。
 
 ## 支持哪些 Harness
 
-App 与开发者 SDK 分别发行。App `v0.1.0` 面向设备用户；SDK `sdk-v0.1.0` 提供连接 SDK、Server 与独立开发者 Daemon。设备执行均限 macOS arm64。
+App 与开发者 SDK 分别发行。App `v0.1.1` 面向设备用户；SDK `sdk-v0.1.0` 提供连接 SDK、Server 与独立开发者 Daemon。设备执行均限 macOS arm64。
 
-| 原生 Harness | App v0.1.0 | SDK sdk-v0.1.0 |
+| 原生 Harness | App v0.1.1 | SDK sdk-v0.1.0 |
 | --- | --- | --- |
 | Codex | 已支持：macOS 13+、Apple Silicon | 已支持：macOS arm64 |
 | dsh（DeepSeek Harness） | 未包含 | 实验适配：macOS arm64，复用本机 dsh |
@@ -70,7 +70,7 @@ App 与开发者 SDK 分别发行。App `v0.1.0` 面向设备用户；SDK `sdk-v
 
 dsh 实验入口使用 SDK 的 `provider: 'dsh'` 和 SDK 发行内的开发者 Daemon；设备需安装并配置原生 `@deepseek-ai/dsh`，首个适配版本为 `0.1.2-rc.1`。模型值从设备 inventory 原样选择。原生审批保留 `optionId`，支持会话续接；暂不提供精确最终答案识别或只读结果查回，重启未完成的执行保持 `unknown`。配置与示例见[驱动页](https://hutian-ai.github.io/harness-dock/drivers/)。
 
-源码与新构建候选的面板变化尚未进入 App `v0.1.0`：“检查本机环境”展示后台发现的 Codex/dsh 条目、固定回显与各自历史；“设置与维护”收纳自启和版本操作。Codex 使用原生只读模式；dsh 固定回显沿用原生权限配置，不提供只读保证。测试使用模型额度，不代表工具或应用授权已验收。使用这些候选界面还需升级对应后台，不能由 SDK 已发行推导 App 已更新。
+源码与新构建候选的面板变化尚未进入 App `v0.1.1`：“检查本机环境”展示后台发现的 Codex/dsh 条目、固定回显与各自历史；“设置与维护”收纳自启和版本操作。Codex 使用原生只读模式；dsh 固定回显沿用原生权限配置，不提供只读保证。测试使用模型额度，不代表工具或应用授权已验收。使用这些候选界面还需升级对应后台，不能由 SDK 已发行推导 App 已更新。
 
 维护者可运行 `pnpm accept:dsh`，通过本机隔离的 SDK / Server / DeviceHost fixture 验收原生审批允许、拒绝、取消后旧决定失效、一次性授权作用域、MCP 成功/错误与送达、调用方和原生项目 skills 共存。会实际使用模型额度，证据保存在 ignored `.local/dsh-acceptance-*`；本机合成验收不替代独立设备、独立 Daemon 进程或发行包验收。
 

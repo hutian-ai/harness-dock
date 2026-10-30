@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-以下为当前源码尚未通过新 Release 分发的变更。已有 [v0.1.0 Developer Alpha 客户端](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0)支持 Codex；该公开下载尚未更新为包含 dsh 的新包。workspace package 保持 private，不发布 npm 包。
+以下为当前源码尚未通过新 Release 分发的变更。已有 [v0.1.1 Developer Alpha 客户端](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.1)支持 Codex；该公开下载尚未更新为包含 dsh 的新包。workspace package 保持 private，不发布 npm 包。
 
 ### Added
 
@@ -20,7 +20,13 @@
 ### Scope
 
 - dsh 暂无精确最终答案识别与只读结果查回，缺少完成证据保持 unknown，不自动重派。MCP 错误在原生投影为 failed 时，送达状态保守保持 unknown。
-- Codex 面板测试使用原生确认的只读模式；dsh 面板测试为实验固定回显，沿用原生权限配置，不提供只读保证，工具与应用授权分别验收。现有公开 v0.1.0 下载仍只提供“测试 Codex”；源码与新构建候选的功能不表示独立 Daemon 进程、独立设备或发行包已完成 dsh 验收。
+- Codex 面板测试使用原生确认的只读模式；dsh 面板测试为实验固定回显，沿用原生权限配置，不提供只读保证，工具与应用授权分别验收。现有公开 v0.1.1 下载仍只提供“测试 Codex”；源码与新构建候选的功能不表示独立 Daemon 进程、独立设备或发行包已完成 dsh 验收。
+
+## v0.1.1 — App 图标更新
+
+- macOS 客户端采用 hutian-ai 现有 Logo；打包时直接缩放并封装为应用图标资源。
+- 正式客户端继续由 GitHub Actions 从固定发布提交构建，附带校验和及源码、构建来源元数据。
+- 本次只更新 App 图标，公开支持范围仍为 macOS arm64 + Codex。
 
 ## 已有能力与历史变更
 
