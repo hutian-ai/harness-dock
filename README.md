@@ -34,7 +34,7 @@ flowchart LR
 
 具体工具能力取决于原生环境和权限。完整平台与能力边界见[支持范围](https://hutian-ai.github.io/harness-dock/support/)。
 
-dsh 实验入口复用现有 SDK 的 `provider: 'dsh'`；设备需安装并配置原生 `@deepseek-ai/dsh`，首个适配版本为 `0.1.2-rc.1`。模型值从设备 inventory 原样选择。原生审批保留 `optionId`，支持会话续接；暂不提供精确最终答案识别或只读结果查回，重启未完成的执行保持 `unknown`。面板的“测试 Codex”只验证 Codex。配置与示例见驱动页。
+dsh 实验入口复用现有 SDK 的 `provider: 'dsh'`；设备需安装并配置原生 `@deepseek-ai/dsh`，首个适配版本为 `0.1.2-rc.1`。模型值从设备 inventory 原样选择。原生审批保留 `optionId`，支持会话续接；暂不提供精确最终答案识别或只读结果查回，重启未完成的执行保持 `unknown`。源码与新构建候选的面板逐项显示后台发现的本机环境（当前支持 Codex/dsh），可选择对应测试，并分别保存结果；Codex 使用原生确认的只读模式，dsh 仅做实验固定回显、沿用原生权限配置，不提供只读保证。两者都使用模型额度，且不代表工具或应用授权已验收。现有 v0.1.0 下载仍只提供“测试 Codex”。配置与示例见驱动页。
 
 维护者可运行 `pnpm accept:dsh`，通过本机隔离的 SDK / Server / DeviceHost fixture 验收原生审批允许、拒绝、取消后旧决定失效、一次性授权作用域、MCP 成功/错误与送达、调用方和原生项目 skills 共存。会实际使用模型额度，证据保存在 ignored `.local/dsh-acceptance-*`；本机合成验收不替代独立设备、独立 Daemon 进程或发行包验收。
 

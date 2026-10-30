@@ -34,7 +34,9 @@ test('invitation links preview locally, bind the server, expire, and never conta
   const file = join(root, 'device/config.json');
   assert.deepEqual(await runPanelOperation({ operation: 'invitation', config: file, invitation: appLink }, root),
     { server: 'dock.example.com', nodeId: settings.nodes[0]!.nodeId });
-  assert.deepEqual(await panelStatus(file), { configured: false });
+  const unconfigured = await panelStatus(file);
+  assert.equal(unconfigured.configured, false);
+  assert.ok(!('nodeId' in unconfigured), 'installation discovery cannot create a device identity');
   assert.deepEqual(await readdir(root), []);
   for (const link of [invitation.url.replace('dock.example.com', 'other.example.com'), invitation.url.replace('https:', 'http:'),
     invitation.url.replace('/connect#', '/connect?claim=bad#'), 'file:///private/invitation', 'harness-dock://connect?invite=bad&invite=bad'])

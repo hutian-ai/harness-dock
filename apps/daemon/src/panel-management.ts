@@ -9,6 +9,7 @@ import { installationRoot, manageInstallation, readInstallation, startInstalled 
 import { control } from './local-control.ts';
 import { stopIdleDaemon } from './process-management.ts';
 import { verifyRelease } from './release-manifest.ts';
+import { discoverProviders, type ProviderKey, type ProviderDiscoveryOptions } from '@harness-dock/drivers';
 import { setupDevice } from './setup.ts';
 import { panelConfigurationPaths, panelExternalInstallation } from './panel-discovery.ts';
 import { retireLegacyAutostart } from './legacy-autostart.ts';
@@ -19,7 +20,7 @@ const request = z.strictObject({
   operation: z.enum(['discover', 'install', 'status', 'pairing', 'invitation', 'setup', 'start', 'stop', 'autostart', 'doctor', 'test', 'test-status', 'upgrade', 'rollback', 'logs']),
   config: localPath, pairing: localPath.optional(), cwd: localPath.optional(), caFile: localPath.optional(),
   invitation: z.string().min(1).max(4096).optional(),
-  testId: z.string().uuid().optional(),
+  testId: z.string().uuid().optional(), provider: z.enum(['codex', 'dsh']).optional(),
   enabled: z.boolean().optional(), selectedOnly: z.boolean().optional(),
 });
 export type PanelRequest = z.infer<typeof request>;
@@ -47,11 +48,39 @@ async function privateConfig(path: string) {
   return readConfig(path);
 }
 
+// Named test implementations belong to the device. The panel renders their metadata.
+const selfTestProfiles = {
+  codex: { displayName: 'Codex', selfTestKind: 'read-only-echo',
+    acceptanceDescription: '在已构建的源码目录使用应用 client.json，核对两轮回显和同一会话续接。替换命令中的配置路径；会使用模型额度。需要验证审批时可在交互终端追加 --approval。' },
+  dsh: { displayName: 'dsh', selfTestKind: 'native-echo',
+    acceptanceDescription: '在已构建的源码目录运行隔离的 SDK / Server / DeviceHost 合成验收，检查真实审批、MCP 与 skills，会使用模型额度；不验证此设备现有应用身份或业务授权。' },
+} satisfies Record<ProviderKey, { displayName: string; selfTestKind: string; acceptanceDescription: string }>;
+
+async function panelProviders(overrides: ProviderDiscoveryOptions['overrides'], supported: readonly string[], nodeId?: string) {
+  // An optional installation probe cannot hide owner state or durable test receipts.
+  const found = await discoverProviders({ overrides, signal: AbortSignal.timeout(20_000) }).catch(() => undefined);
+  const installations = found ?? (Object.keys(selfTestProfiles) as ProviderKey[]).map(key => ({
+    key, displayName: selfTestProfiles[key].displayName, status: 'unknown', version: null, source: null, executable: null, home: null,
+  }));
+  return installations.map(provider => ({ key: provider.key, displayName: provider.displayName, status: provider.status,
+    version: provider.version, source: provider.source, executable: provider.executable, home: provider.home,
+    selfTestSupported: provider.status === 'installed' && supported.includes(provider.key),
+    selfTestKind: selfTestProfiles[provider.key].selfTestKind,
+    acceptanceCommand: provider.key === 'dsh' ? 'pnpm accept:dsh' : nodeId ? `pnpm client test /private/client.json --node-id ${nodeId}` : undefined,
+    acceptanceDescription: selfTestProfiles[provider.key].acceptanceDescription,
+  }));
+}
+
 export async function panelStatus(path: string, home?: string) {
   let config;
   try { config = await privateConfig(path); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { configured: false }; throw error; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { configured: false, providers: await panelProviders(undefined, []), selfTests: [], selfTestProviders: [] };
+    throw error;
+  }
   const status = await control(config, 'status');
+  const supported = status?.selfTestProviders ?? (status ? ['codex'] : []);
+  const providers = await panelProviders(config.providers, supported, config.nodeId);
   const installation = await readInstallation(installationRoot(path), path);
   const registration = await panelExternalInstallation(path, installationRoot(path), home);
   const endpointMatches = status?.endpoint === config.endpoint;
@@ -59,6 +88,8 @@ export async function panelStatus(path: string, home?: string) {
     externalInstallation: registration.external || !installation && !!status?.entrypoint && /\/releases\/[a-f0-9]{64}\/dist\/cli\.js$/u.test(status.entrypoint),
     server: endpointLabel(config.endpoint), cwd: config.cwd, nodeId: config.nodeId,
     daemonId: status?.daemonId, selfTest: status?.selfTest,
+    selfTests: status?.selfTests ?? (status?.selfTest ? [{ ...status.selfTest, provider: status.selfTest.provider ?? 'codex' }] : []),
+    selfTestProviders: supported, providers,
     autostart: installation?.autostart ?? false, canRollback: !!installation?.previous,
     active: status?.activeRunIds?.length ?? 0, unresolved: status?.unresolvedRunIds?.length ?? 0,
     connectionIssue: status && !endpointMatches ? 'configuration_mismatch' : status?.connectionError ? 'connection_failed' : undefined,
@@ -99,14 +130,14 @@ export async function runPanelOperation(input: unknown, bundle: string, home?: s
     if (!options.testId) throw new Error('invalid_panel_request');
     const config = await privateConfig(path);
     let state;
-    try { state = await control(config, options.operation === 'test' ? 'self-test' : 'self-test-status', { id: options.testId }); }
+    try { state = await control(config, options.operation === 'test' ? 'self-test' : 'self-test-status', { id: options.testId, ...(options.provider === 'dsh' ? { provider: options.provider } : {}) }); }
     catch (error) {
       if (error instanceof Error && error.message === 'local_control_rejected:404:unknown') throw new Error('self_test_unsupported');
       throw error;
     }
     if (!state) throw new Error('device_not_running');
     const latest = await panelStatus(path, home);
-    return { ...latest, ...(options.operation === 'test' ? { acceptedSelfTestId: state.selfTest!.id } : { selfTestReceipt: state.selfTestReceipt }) };
+    return { ...latest, ...(options.operation === 'test' ? { acceptedSelfTestId: state.selfTest!.id, acceptedSelfTestProvider: state.selfTest!.provider ?? 'codex' } : { selfTestReceipt: state.selfTestReceipt }) };
   }
   if (options.operation === 'setup') {
     if ((!options.pairing && !options.invitation) || options.pairing && options.invitation || !options.cwd

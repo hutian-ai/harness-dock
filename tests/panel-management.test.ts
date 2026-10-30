@@ -31,7 +31,10 @@ test('panel imports bounded pairing without modifying the source, and projects n
   await writeFile(file, ' '.repeat(16_385));
   await assert.rejects(runPanelOperation({ operation: 'pairing', config, pairing: file }, root), /invalid_device_pairing/);
   await assert.rejects(runPanelOperation({ operation: 'execute', config, prompt: 'must never execute' }, root), /invalid_panel_request/);
-  assert.deepEqual(await panelStatus(config), { configured: false });
+  const unconfigured = await panelStatus(config);
+  assert.equal(unconfigured.configured, false);
+  assert.ok(Array.isArray(unconfigured.providers));
+  assert.ok(unconfigured.providers.every(provider => provider.selfTestSupported === false));
 });
 
 test('panel adopts existing identity read-only and does not confuse a stale owner with the saved server', async t => {
@@ -64,6 +67,36 @@ test('panel identifies an externally managed live owner without offering implici
   assert.equal(result.externalInstallation, true); assert.equal(result.managed, false); assert.equal(result.connected, true);
   assert.deepEqual(await readFile(paths.configPath), original);
   assert.ok(!JSON.stringify(result).includes(config.token));
+});
+
+test('panel projects discovered installations and test capabilities without conflating model readiness', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = await initializeDevice({ home: join(root, 'device'), cwd: root, endpoint: 'wss://dock.example.com/' });
+  const executable = join(root, 'synthetic-harness');
+  await writeFile(executable, '#!/bin/sh\necho 0.1.2\n', { mode: 0o700 });
+  const config = { ...await readConfig(paths.configPath), providers: {
+    codex: { executable, home: root }, dsh: { executable, home: root },
+  } };
+  await writeFile(paths.configPath, JSON.stringify(config), { mode: 0o600 });
+  const testId = randomUUID();
+  const selfTest = { id: testId, runId: testId, daemonId: randomUUID(), provider: 'dsh' as const,
+    state: 'passed' as const, phase: 'finished' as const, startedAt: 1, finishedAt: 2 };
+  const daemonId = randomUUID();
+  const close = await serveControl(config, () => ({ nodeId: config.nodeId, daemonId, pid: process.pid,
+    connected: false, endpoint: config.endpoint, selfTests: [selfTest], selfTestProviders: ['codex', 'dsh'] }), async () => {});
+  t.after(close);
+  const state = await panelStatus(paths.configPath);
+  assert.deepEqual(state.selfTests, [selfTest]);
+  assert.equal(state.selfTest, undefined, 'legacy Codex status cannot project a dsh pass');
+  const dshSupported = process.platform === 'darwin' && process.arch === 'arm64';
+  assert.deepEqual(state.providers.map(provider => [provider.key, provider.status, provider.selfTestKind, provider.selfTestSupported]),
+    [['codex', 'installed', 'read-only-echo', true], ['dsh', dshSupported ? 'installed' : 'not_found', 'native-echo', dshSupported]]);
+  for (const provider of state.providers.filter(provider => provider.status === 'installed')) {
+    assert.equal(provider.executable, executable); assert.equal(provider.home, root); assert.equal(provider.source, 'configured');
+    assert.equal(provider.version, '0.1.2');
+    assert.ok(provider.acceptanceCommand); assert.ok(!JSON.stringify(provider).includes(config.token));
+    assert.ok(!('models' in provider), 'installation discovery is not a readiness probe');
+  }
 });
 
 test('panel setup installs its bundled runtime independently and stop keeps the owner busy guard', { timeout: 60_000 }, async t => {

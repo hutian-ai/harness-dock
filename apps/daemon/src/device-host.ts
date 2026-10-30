@@ -73,7 +73,8 @@ export class DeviceHost {
   readonly daemonId = randomUUID();
   readonly nodeId: string;
   readonly #store: DeviceStore;
-  readonly #selfTest: DeviceSelfTest;
+  readonly #selfTests = new Map<ProviderKey, DeviceSelfTest>();
+  get #selfTestRunning(): boolean { return [...this.#selfTests.values()].some(test => test.running); }
   readonly #discovered = new Map<ProviderKey, DiscoveredProvider>();
   readonly #sessions = new Map<string, { sessionKey: string; provider: ProviderKey; adapter: ProviderAdapter }>();
   readonly #limits: DeviceResourceLimits;
@@ -97,7 +98,8 @@ export class DeviceHost {
     this.#limits = resourceLimits(config.resources);
     this.#store = new DeviceStore(config.nodeId, config.stateDir, config.resources);
     this.#store.expireDetails();
-    this.#selfTest = new DeviceSelfTest(config.stateDir, this.daemonId, (id, progress) => this.#runSelfTest(id, progress));
+    for (const provider of ['codex', 'dsh'] as const) this.#selfTests.set(provider,
+      new DeviceSelfTest(config.stateDir, this.daemonId, (id, progress) => this.#runSelfTest(id, progress, provider), provider));
     this.#armIdleTimer();
   }
   #assertOpen(): void { if (this.#closed) throw new Error('device_stopping'); }
@@ -106,7 +108,7 @@ export class DeviceHost {
   }
   #armIdleTimer(): void {
     this.#clearIdleTimer();
-    if (this.#closed || this.#maintenance || this.#active.size || this.#selfTest.running) return;
+    if (this.#closed || this.#maintenance || this.#active.size || this.#selfTestRunning) return;
     const generation = this.#idleGeneration;
     this.#idleTimer = setTimeout(() => {
       if (generation !== this.#idleGeneration || this.#closed) return;
@@ -122,14 +124,14 @@ export class DeviceHost {
   }
   #maintain<T>(operation: () => Promise<T>, concurrent = false, localTest = false): Promise<T> {
     this.#assertOpen();
-    if (this.#selfTest.running && !localTest) throw new Error('device_busy');
+    if (this.#selfTestRunning && !localTest) throw new Error('device_busy');
     if (this.#exclusiveMaintenance || !concurrent && this.#active.size) throw new Error('busy');
     if (!concurrent) this.#exclusiveMaintenance = true;
     this.#clearIdleTimer();
     // Serialize short mutations, never the lifetime of an ACP prompt or approval.
     const pending = (this.#maintenance ?? Promise.resolve()).catch(() => {}).then(() => {
       this.#assertOpen();
-      if (this.#selfTest.running && !localTest) throw new Error('device_busy');
+      if (this.#selfTestRunning && !localTest) throw new Error('device_busy');
       if (!concurrent && this.#active.size) throw new Error('busy');
       return operation();
     });
@@ -167,21 +169,30 @@ export class DeviceHost {
   }
   get activeRunIds(): string[] { return [...this.#active.keys()]; }
   maintenanceStatus() { return { activeRunIds: this.activeRunIds, unresolvedRunIds: this.#store.unresolved() }; }
-  get selfTestStatus(): SelfTestSnapshot | undefined { return this.#selfTest.status; }
-  lookupSelfTest(id: string): { id: string; found: boolean } {
+  get selfTestStatus(): SelfTestSnapshot | undefined { return this.#selfTests.get('codex')?.status; }
+  get selfTestStatuses(): SelfTestSnapshot[] { return [...this.#selfTests.values()].flatMap(test => test.status ? [test.status] : []); }
+  get selfTestProviders(): ProviderKey[] { return [...this.#selfTests.keys()]; }
+  lookupSelfTest(id: string, provider: ProviderKey = 'codex'): { id: string; found: boolean; provider?: ProviderKey } {
     this.#assertOpen();
-    return { id, found: this.#selfTest.status?.id === id || this.#store.get(identity(id)) !== undefined };
+    const test = this.#selfTests.get(provider);
+    if (!test) throw new Error('unsupported_provider');
+    const stored = this.#store.get(identity(id));
+    if (stored && stored.provider !== provider || [...this.#selfTests.entries()].some(([key, other]) => key !== provider && other.status?.id === id))
+      throw new Error('self_test_id_conflict');
+    return { id, found: test.status?.id === id || stored?.provider === provider, ...(provider === 'dsh' ? { provider } : {}) };
   }
-  startSelfTest(id: string): SelfTestSnapshot {
+  startSelfTest(id: string, provider: ProviderKey = 'codex'): SelfTestSnapshot {
     this.#assertOpen();
-    const previous = this.#selfTest.status;
+    const test = this.#selfTests.get(provider);
+    if (!test) throw new Error('unsupported_provider');
+    const previous = test.status;
     if (previous?.id === id) return previous;
-    if (this.#selfTest.running || this.#active.size || this.#maintenance || this.#probing) throw new Error('device_busy');
+    if (this.#selfTestRunning || this.#active.size || this.#maintenance || this.#probing) throw new Error('device_busy');
     if (this.#store.unresolved().length) throw new Error('unresolved_execution');
     if (this.#store.get(id)) throw new Error('self_test_id_conflict');
-    return this.#selfTest.start(id);
+    return test.start(id);
   }
-  async #runSelfTest(id: string, progress: (phase: 'checking' | 'executing', model?: string) => void): Promise<SelfTestOutcome> {
+  async #runSelfTest(id: string, progress: (phase: 'checking' | 'executing', model?: string) => void, selectedProvider: ProviderKey): Promise<SelfTestOutcome> {
     const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(120_000)]);
     const rejected = new AbortController();
     const testSignal = AbortSignal.any([signal, rejected.signal]);
@@ -204,28 +215,30 @@ export class DeviceHost {
       progress('checking');
       const inventory = await this.#inspectInventory(true, true, testSignal) as DeviceInventory;
       testSignal.throwIfAborted();
-      const provider = inventory.providers.find(value => value.key === 'codex');
-      if (provider?.status !== 'ready' || provider.capabilities?.exactFinalAnswer !== true) return { state: 'failed', code: 'self_test_provider_unavailable' };
-      model = provider.models[0];
-      if (!model) return { state: 'failed', code: 'self_test_model_unavailable' };
+      const provider = inventory.providers.find(value => value.key === selectedProvider);
+      if (provider?.status !== 'ready' || selectedProvider === 'codex' && provider.capabilities?.exactFinalAnswer !== true) return { state: 'failed', code: 'self_test_provider_unavailable' };
+      model = selectedProvider === 'dsh' && typeof object(provider.inspection).currentModelId === 'string' ? String(object(provider.inspection).currentModelId) : provider.models[0];
+      if (!model || !provider.models.includes(model)) return { state: 'failed', code: 'self_test_model_unavailable' };
       const inspection = object(provider.inspection);
-      if (!Array.isArray(inspection.permissionModes) || !inspection.permissionModes.some(value => object(value).value === 'read-only'))
+      if (selectedProvider === 'codex' && (!Array.isArray(inspection.permissionModes) || !inspection.permissionModes.some(value => object(value).value === 'read-only')))
         return { state: 'failed', model, code: 'self_test_read_only_unavailable' };
       const modes = Array.isArray(inspection.models) ? inspection.models.map(object) : [];
       const selected = modes.find(value => value.id === model);
-      const config = { mode: 'read-only', ...(Array.isArray(selected?.efforts) && selected.efforts.includes('low') ? { effort: 'low' } : {}) };
+      const config = { ...(selectedProvider === 'codex' ? { mode: 'read-only' } : {}), ...(Array.isArray(selected?.efforts) && selected.efforts.includes('low') ? { effort: 'low' } : {}) };
       await this.#prepare({ runId: id, sessionKey, files: [] }, true);
       testSignal.throwIfAborted();
       progress('executing', model);
-      const response = object(await this.#execute({ provider: 'codex', runId: id, sessionKey, model, config,
+      const response = object(await this.#execute({ provider: selectedProvider, runId: id, sessionKey, model, config,
         prompt: `Reply with exactly ${marker}. Do not call tools, read files, search, or perform any other action.`, retainSession: false }, { call, signal: testSignal }));
       const result = object(response.result);
       if (result.state === 'unknown') return { state: 'unknown', model, code: violation ?? (signal.aborted ? 'self_test_timed_out' : 'self_test_unconfirmed') };
       if (violation) return { state: 'failed', model, code: violation };
       if (result.state !== 'completed') return { state: 'failed', model, code: signal.aborted ? 'self_test_timed_out' : 'self_test_execution_failed' };
       const messages = Array.isArray(result.messages) ? result.messages.map(object) : [];
-      const text = messages.filter(message => message.phase === 'final_answer').map(message => String(message.text)).join('\n').trim();
-      if (text !== marker || typeof result.threadId !== 'string' || typeof result.turnId !== 'string')
+      const text = messages.filter(message => selectedProvider === 'dsh' || message.phase === 'final_answer').map(message => String(message.text)).join('\n').trim();
+      const completion = selectedProvider === 'dsh' ? typeof result.sessionId === 'string' && result.stopReason === 'end_turn'
+        : typeof result.threadId === 'string' && typeof result.turnId === 'string';
+      if (text !== marker || !completion)
         return { state: 'failed', model, code: 'self_test_answer_mismatch' };
       return { state: 'passed', model };
     } catch {
@@ -245,7 +258,7 @@ export class DeviceHost {
   /** Reserve shutdown synchronously so admission cannot race an installation change. */
   closeIfIdle(): Promise<void> {
     this.#assertOpen();
-    if (this.#active.size || this.#maintenance || this.#probing || this.#selfTest.running) throw new Error('device_busy');
+    if (this.#active.size || this.#maintenance || this.#probing || this.#selfTestRunning) throw new Error('device_busy');
     if (this.#store.unresolved().length) throw new Error('unresolved_execution');
     return this.close();
   }
@@ -521,7 +534,7 @@ export class DeviceHost {
   cancel(runId: string) {
     this.#assertOpen();
     identity(runId);
-    if (this.#selfTest.running && this.#selfTest.status?.runId === runId) throw new Error('device_busy');
+    if ([...this.#selfTests.values()].some(test => test.running && test.status?.runId === runId)) throw new Error('device_busy');
     const active = this.#active.get(runId);
     if (active) { active.controller.abort(new Error('cancel_requested')); return { requested: true }; }
     return { requested: false, state: this.#store.get(runId)?.state ?? null };
@@ -529,7 +542,7 @@ export class DeviceHost {
   async steer(runId: string, text: string) {
     this.#assertOpen();
     identity(runId);
-    if (this.#selfTest.running && this.#selfTest.status?.runId === runId) throw new Error('device_busy');
+    if ([...this.#selfTests.values()].some(test => test.running && test.status?.runId === runId)) throw new Error('device_busy');
     if (typeof text !== 'string' || !text || text.length > 100_000) throw new Error('invalid_steer');
     const active = this.#active.get(runId);
     if (active?.runId !== runId || !active.steer) return 'rejected';

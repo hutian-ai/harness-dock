@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'n
 import { resolve, join } from 'node:path';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
-import { DeviceSelfTest, type SelfTestOutcome, type SelfTestSnapshot } from '../apps/daemon/src/device-self-test.ts';
+import { DeviceSelfTest, type SelfTestOutcome, type SelfTestProvider, type SelfTestSnapshot } from '../apps/daemon/src/device-self-test.ts';
 
 async function directory() {
   await mkdir('.local', { recursive: true });
@@ -23,7 +23,7 @@ test('self-test receipt is durable before dispatch and duplicate/lost receipts n
   const job = new DeviceSelfTest(root, daemon, async (runId, progress) => {
     calls++;
     const saved = JSON.parse(await readFile(join(root, 'self-test.json'), 'utf8')) as SelfTestSnapshot;
-    assert.equal(saved.state, 'running'); assert.equal(saved.id, runId); assert.equal(saved.runId, id);
+    assert.equal(saved.state, 'running'); assert.equal(saved.id, runId); assert.equal(saved.runId, id); assert.equal(saved.provider, 'codex');
     progress('executing', 'synthetic-model');
     entered.resolve();
     return outcome.promise;
@@ -61,6 +61,75 @@ test('restart turns an interrupted stored job into unknown without creating nati
   await nextTurn(); assert.equal(calls, 0);
   const saved = JSON.parse(await readFile(join(root, 'self-test.json'), 'utf8'));
   assert.equal(saved.state, 'unknown'); assert.equal(saved.phase, 'finished');
+  assert.equal(saved.provider, undefined, 'legacy Codex receipts retain their original shape');
+});
+
+test('dsh receipts remain separate from legacy Codex history and restart never dispatches either receipt', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  const legacyId = randomUUID(), daemonId = randomUUID();
+  const legacy = JSON.stringify({ id: legacyId, runId: legacyId, daemonId, state: 'passed', phase: 'finished', startedAt: 1, finishedAt: 2 });
+  await writeFile(join(root, 'self-test.json'), legacy, { mode: 0o600 });
+  const outcome = deferred<SelfTestOutcome>(), entered = deferred<void>();
+  let calls = 0;
+  const job = new DeviceSelfTest(root, daemonId, async (id, progress) => {
+    calls++;
+    const saved = JSON.parse(await readFile(join(root, 'self-test-dsh.json'), 'utf8')) as SelfTestSnapshot;
+    assert.equal(saved.id, id); assert.equal(saved.provider, 'dsh'); assert.equal(saved.state, 'running');
+    progress('executing', 'synthetic-dsh-model'); entered.resolve(); return outcome.promise;
+  }, 'dsh');
+  assert.throws(() => job.start(legacyId), { message: 'self_test_id_conflict' });
+  const id = randomUUID(), started = job.start(id);
+  assert.equal(started.provider, 'dsh'); assert.equal(calls, 0);
+  assert.deepEqual(job.start(id), started);
+  await entered.promise; assert.equal(calls, 1);
+  outcome.resolve({ state: 'passed' }); await nextTurn();
+  assert.equal(job.status?.state, 'passed');
+  await writeFile(join(root, 'self-test-dsh.json'), JSON.stringify({ ...job.status, state: 'running', phase: 'executing', finishedAt: undefined }), { mode: 0o600 });
+  let recoveredCalls = 0;
+  const recovered = new DeviceSelfTest(root, randomUUID(), async () => { recoveredCalls++; return { state: 'passed' }; }, 'dsh');
+  assert.equal(recovered.status?.provider, 'dsh'); assert.equal(recovered.status?.state, 'unknown');
+  assert.equal(recovered.start(id).state, 'unknown');
+  assert.equal(await readFile(join(root, 'self-test.json'), 'utf8'), legacy, 'dsh never rewrites the legacy Codex receipt');
+  await nextTurn(); assert.equal(recoveredCalls, 0);
+});
+
+test('the same new self-test id cannot be admitted by both named providers', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  const outcome = deferred<SelfTestOutcome>(), id = randomUUID(), daemonId = randomUUID();
+  let dshCalls = 0;
+  const codex = new DeviceSelfTest(root, daemonId, async () => outcome.promise);
+  const dsh = new DeviceSelfTest(root, daemonId, async () => { dshCalls++; return { state: 'passed' }; }, 'dsh');
+  codex.start(id);
+  assert.throws(() => dsh.start(id), { message: 'self_test_id_conflict' });
+  await nextTurn(); assert.equal(dshCalls, 0); assert.equal(dsh.status, undefined);
+  await assert.rejects(readFile(join(root, 'self-test-dsh.json')), { code: 'ENOENT' });
+  outcome.resolve({ state: 'passed' }); await nextTurn();
+});
+
+test('mislabelled provider storage fails closed before dispatch and never overwrites the receipt', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  let calls = 0;
+  for (const [index, provider, storedProvider] of [
+    [0, 'codex', 'dsh'], [1, 'codex', null], [2, 'dsh', 'codex'], [3, 'dsh', undefined], [4, 'dsh', 'other'],
+  ] as const) {
+    const dir = join(root, String(index)); await mkdir(dir, { mode: 0o700 });
+    const id = randomUUID(), path = join(dir, provider === 'codex' ? 'self-test.json' : 'self-test-dsh.json');
+    const stored = JSON.stringify({ id, runId: id, daemonId: randomUUID(), provider: storedProvider, state: 'passed', phase: 'finished', startedAt: 1, finishedAt: 2 });
+    await writeFile(path, stored, { mode: 0o600 });
+    const job = new DeviceSelfTest(dir, randomUUID(), async () => { calls++; return { state: 'passed' }; }, provider);
+    assert.equal(job.status, undefined);
+    assert.throws(() => job.start(id), { message: 'self_test_storage_unavailable' });
+    assert.equal(await readFile(path, 'utf8'), stored);
+  }
+  const changedDir = join(root, 'changed-after-open'); await mkdir(changedDir, { mode: 0o700 });
+  const opened = new DeviceSelfTest(changedDir, randomUUID(), async () => { calls++; return { state: 'passed' }; }, 'dsh');
+  const changedId = randomUUID(), changedPath = join(changedDir, 'self-test-dsh.json');
+  const changed = JSON.stringify({ id: changedId, runId: changedId, daemonId: randomUUID(), provider: 'codex', state: 'passed', phase: 'finished', startedAt: 1, finishedAt: 2 });
+  await writeFile(changedPath, changed, { mode: 0o600 });
+  assert.throws(() => opened.start(randomUUID()), { message: 'self_test_storage_unavailable' });
+  assert.equal(await readFile(changedPath, 'utf8'), changed);
+  await nextTurn(); assert.equal(calls, 0);
+  assert.throws(() => new DeviceSelfTest(root, randomUUID(), async () => ({ state: 'passed' }), 'other' as SelfTestProvider), /invalid_self_test_provider/);
 });
 
 test('native run rejection is unconfirmed with a stable code and no raw exception persistence', async t => {

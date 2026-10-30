@@ -3,10 +3,13 @@ import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openS
 import { join } from 'node:path';
 import { id as uuid } from '@harness-dock/protocol';
 
+export type SelfTestProvider = 'codex' | 'dsh';
 export interface SelfTestSnapshot {
   id: string;
   runId: string;
   daemonId: string;
+  /** Missing only on receipts written before named self-tests were introduced. */
+  provider?: SelfTestProvider;
   state: 'running' | 'passed' | 'failed' | 'unknown';
   phase: 'checking' | 'executing' | 'finished';
   startedAt: number;
@@ -23,15 +26,17 @@ type Progress = (phase: 'checking' | 'executing', model?: string) => void;
 type Run = (id: string, progress: Progress) => Promise<SelfTestOutcome>;
 
 const MAX_BYTES = 4096;
-const fields = new Set(['id', 'runId', 'daemonId', 'state', 'phase', 'startedAt', 'finishedAt', 'model', 'code']);
+const fields = new Set(['id', 'runId', 'daemonId', 'provider', 'state', 'phase', 'startedAt', 'finishedAt', 'model', 'code']);
 const modelValid = (value: unknown) => value === undefined || typeof value === 'string' && value.length > 0 && value.length <= 500 && !/[\u0000-\u001f]/u.test(value);
 const codeValid = (value: unknown) => value === undefined || typeof value === 'string' && /^[a-z][a-z0-9_:-]{0,127}$/u.test(value);
 const storageError = () => new Error('self_test_storage_unavailable');
 
-function snapshot(value: unknown): SelfTestSnapshot {
+function snapshot(value: unknown, provider: SelfTestProvider): SelfTestSnapshot {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw storageError();
   const item = value as Record<string, unknown>;
   if (Object.keys(item).some(key => !fields.has(key)) || !uuid.safeParse(item.id).success || item.runId !== item.id
+    || item.provider !== undefined && item.provider !== 'codex' && item.provider !== 'dsh'
+    || (item.provider ?? 'codex') !== provider
     || !uuid.safeParse(item.daemonId).success || !['running', 'passed', 'failed', 'unknown'].includes(String(item.state))
     || !['checking', 'executing', 'finished'].includes(String(item.phase))
     || !Number.isSafeInteger(item.startedAt) || Number(item.startedAt) < 0
@@ -50,15 +55,18 @@ export class DeviceSelfTest {
   readonly #run: Run;
   readonly #stateDir: string;
   readonly #daemonId: string;
+  readonly #provider: SelfTestProvider;
   #status?: SelfTestSnapshot;
   #running = false;
   #storageFault = false;
   #unconfirmed = false;
 
-  constructor(stateDir: string, daemonId: string, run: Run) {
+  constructor(stateDir: string, daemonId: string, run: Run, provider: SelfTestProvider = 'codex') {
     if (!uuid.safeParse(daemonId).success) throw new Error('invalid_self_test_id');
+    if (provider !== 'codex' && provider !== 'dsh') throw new Error('invalid_self_test_provider');
     this.#stateDir = stateDir; this.#daemonId = daemonId; this.#run = run;
-    this.#path = join(stateDir, 'self-test.json');
+    this.#provider = provider;
+    this.#path = this.#pathFor(provider);
     try {
       this.#directory();
       this.#status = this.#read();
@@ -78,7 +86,12 @@ export class DeviceSelfTest {
     if (this.#status?.id === id) return { ...this.#status };
     if (this.#running) throw new Error('device_busy');
     if (this.#storageFault) throw storageError();
-    const next: SelfTestSnapshot = { id, runId: id, daemonId: this.#daemonId, state: 'running', phase: 'checking', startedAt: Date.now() };
+    let peer: SelfTestSnapshot | undefined;
+    try { peer = this.#read(this.#provider === 'codex' ? 'dsh' : 'codex'); }
+    catch { this.#storageFault = true; throw storageError(); }
+    if (peer?.id === id) throw new Error('self_test_id_conflict');
+    const next: SelfTestSnapshot = { id, runId: id, daemonId: this.#daemonId, provider: this.#provider,
+      state: 'running', phase: 'checking', startedAt: Date.now() };
     try { this.#persist(next); } catch { this.#storageFault = true; throw storageError(); }
     this.#status = next; this.#running = true; this.#unconfirmed = false;
     // The durable start receipt exists before the first native operation can run.
@@ -124,27 +137,30 @@ export class DeviceSelfTest {
     if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || info.mode & 0o077) throw storageError();
   }
 
-  #read(): SelfTestSnapshot | undefined {
+  #pathFor(provider: SelfTestProvider): string { return join(this.#stateDir, provider === 'codex' ? 'self-test.json' : 'self-test-dsh.json'); }
+
+  #read(provider: SelfTestProvider = this.#provider): SelfTestSnapshot | undefined {
     let fd: number;
-    try { fd = openSync(this.#path, constants.O_RDONLY | constants.O_NOFOLLOW); }
+    try { fd = openSync(this.#pathFor(provider), constants.O_RDONLY | constants.O_NOFOLLOW); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw storageError(); }
     try {
       const info = fstatSync(fd);
       if (!info.isFile() || info.uid !== process.getuid?.() || info.mode & 0o077 || info.size > MAX_BYTES) throw storageError();
       const bytes = Buffer.alloc(MAX_BYTES + 1), count = readSync(fd, bytes, 0, bytes.length, 0);
       if (count > MAX_BYTES) throw storageError();
-      return snapshot(JSON.parse(bytes.subarray(0, count).toString('utf8')));
+      return snapshot(JSON.parse(bytes.subarray(0, count).toString('utf8')), provider);
     } finally { closeSync(fd); }
   }
 
   #persist(value: SelfTestSnapshot): void {
-    const encoded = JSON.stringify(snapshot(value));
+    const encoded = JSON.stringify(snapshot(value, this.#provider));
     if (Buffer.byteLength(encoded) > MAX_BYTES) throw storageError();
     this.#directory();
     // Check the previous destination before atomic replacement, including changes since construction.
     try {
       const previous = lstatSync(this.#path);
       if (!previous.isFile() || previous.isSymbolicLink() || previous.uid !== process.getuid?.() || previous.mode & 0o077) throw storageError();
+      this.#read(); // A replacement must not erase another provider's or an invalid receipt.
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     const pending = `${this.#path}.${randomUUID()}.tmp`;
     let fd: number | undefined;

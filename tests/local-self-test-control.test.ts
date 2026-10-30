@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { request } from 'node:http';
+import { createServer, request } from 'node:http';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { initializeDevice, readConfig, type DeviceConfig } from '../apps/daemon/src/config.ts';
-import { control, serveControl, type LocalStatus } from '../apps/daemon/src/local-control.ts';
-import type { SelfTestSnapshot } from '../apps/daemon/src/device-self-test.ts';
+import { control, serveControl, type LocalStatus, type SelfTestReceipt } from '../apps/daemon/src/local-control.ts';
+import type { SelfTestProvider, SelfTestSnapshot } from '../apps/daemon/src/device-self-test.ts';
 
-async function fixture(t: TestContext, start?: (id: string, status: LocalStatus) => SelfTestSnapshot,
-  lookup?: (id: string, status: LocalStatus) => { id: string; found: boolean }) {
+async function fixture(t: TestContext, start?: (id: string, status: LocalStatus, provider: SelfTestProvider) => SelfTestSnapshot,
+  lookup?: (id: string, status: LocalStatus, provider: SelfTestProvider) => SelfTestReceipt) {
   await mkdir('.local', { recursive: true });
   const root = await mkdtemp(resolve('.local/local-self-test-'));
   const paths = await initializeDevice({ home: join(root, 'device'), cwd: root, endpoint: 'ws://127.0.0.1:1/' });
@@ -20,7 +20,8 @@ async function fixture(t: TestContext, start?: (id: string, status: LocalStatus)
     connected: true, endpoint: config.endpoint, activeRunIds: [], unresolvedRunIds: [] };
   let shutdowns = 0, closed = false;
   const closeServer = await serveControl(config, () => status, async () => { shutdowns++; }, undefined,
-    start ? id => start(id, status) : undefined, lookup ? id => lookup(id, status) : undefined);
+    start ? (id, provider = 'codex') => start(id, status, provider) : undefined,
+    lookup ? (id, provider = 'codex') => lookup(id, status, provider) : undefined);
   const close = async () => { if (!closed) { closed = true; await closeServer(); } };
   t.after(async () => { await close(); await rm(root, { recursive: true, force: true }); });
   return { config, status, close, shutdowns: () => shutdowns };
@@ -185,4 +186,96 @@ test('receipt lookup does not turn an unmatched or invalid receipt into authorit
   await assert.rejects(control(context.config, 'self-test-status', { id: randomUUID() }), /local_control_self_test_receipt_mismatch/);
   const invalid = await fixture(t, undefined, id => ({ id, found: 'no' } as unknown as { id: string; found: boolean }));
   await assert.rejects(control(invalid.config, 'self-test-status', { id: randomUUID() }), /local_control_self_test_receipt_mismatch/);
+});
+
+test('named self-test control routes dsh starts and receipts while retaining legacy Codex status', async t => {
+  let starts = 0, lookups = 0;
+  const records = new Map<string, SelfTestSnapshot>();
+  const context = await fixture(t, (id, status, provider) => {
+    const existing = records.get(id);
+    if (existing) {
+      if ((existing.provider ?? 'codex') !== provider) throw new Error('self_test_id_conflict');
+      return existing;
+    }
+    const current = { ...snapshot(id, status.daemonId), provider };
+    starts++; records.set(id, current); status.selfTests = [...records.values()]; return current;
+  }, (id, _status, provider) => {
+    lookups++;
+    const existing = records.get(id);
+    if (existing && (existing.provider ?? 'codex') !== provider) throw new Error('self_test_id_conflict');
+    return { id, found: existing !== undefined, provider };
+  });
+  const legacy = snapshot(randomUUID(), context.status.daemonId);
+  context.status.selfTest = legacy;
+  context.status.selfTestProviders = ['codex', 'dsh'];
+  const id = randomUUID();
+  const started = await control(context.config, 'self-test', { id, provider: 'dsh' });
+  assert.equal(started?.selfTest?.provider, 'dsh'); assert.equal(started?.selfTest?.id, id);
+  assert.deepEqual((await control(context.config, 'self-test', { id, provider: 'dsh' }))?.selfTest, started?.selfTest);
+  assert.deepEqual((await control(context.config, 'self-test-status', { id, provider: 'dsh' }))?.selfTestReceipt, { id, found: true, provider: 'dsh' });
+  const absent = randomUUID();
+  assert.deepEqual((await control(context.config, 'self-test-status', { id: absent, provider: 'dsh' }))?.selfTestReceipt, { id: absent, found: false, provider: 'dsh' });
+  await assert.rejects(control(context.config, 'self-test', { id }), /local_control_rejected:409:self_test_id_conflict/);
+  await assert.rejects(control(context.config, 'self-test-status', { id, provider: 'codex' }), /local_control_rejected:409:self_test_id_conflict/);
+  const status = await control(context.config, 'status');
+  assert.deepEqual(status?.selfTest, legacy);
+  assert.deepEqual(status?.selfTests, [started?.selfTest]);
+  assert.deepEqual(status?.selfTestProviders, ['codex', 'dsh']);
+  assert.equal(starts, 1); assert.equal(lookups, 3);
+});
+
+test('named self-test requests accept only id and a known provider regardless of JSON key order', async t => {
+  const providers: SelfTestProvider[] = [];
+  const context = await fixture(t, (id, status, provider) => { providers.push(provider); return { ...snapshot(id, status.daemonId), provider }; });
+  const id = randomUUID();
+  assert.equal((await raw(context.config, context.status.daemonId, JSON.stringify({ provider: 'dsh', id }))).status, 200);
+  assert.equal((await raw(context.config, context.status.daemonId, JSON.stringify({ id, provider: 'codex' }))).status, 200);
+  assert.equal((await raw(context.config, context.status.daemonId, JSON.stringify({ id }))).status, 200);
+  assert.deepEqual(providers, ['dsh', 'codex', 'codex']);
+  for (const provider of ['other', '', 'DSH', null, false, [], {}]) {
+    assert.equal((await raw(context.config, context.status.daemonId, JSON.stringify({ id, provider }))).status, 400);
+    await assert.rejects(control(context.config, 'self-test', { id, provider: provider as SelfTestProvider }), /invalid_self_test_request/);
+  }
+  assert.equal((await raw(context.config, context.status.daemonId, JSON.stringify({ id, provider: 'dsh', prompt: 'unaccepted' }))).status, 400);
+  assert.equal(providers.length, 3);
+});
+
+test('named self-test responses fence missing, invalid and crossed provider identities without retrying', async t => {
+  let starts = 0, lookups = 0;
+  for (const provider of [undefined, 'codex', null, 'other'] as const) {
+    const context = await fixture(t, (id, status) => { starts++; return { ...snapshot(id, status.daemonId), provider } as SelfTestSnapshot; },
+      id => { lookups++; return { id, found: false, provider } as SelfTestReceipt; });
+    await assert.rejects(control(context.config, 'self-test', { id: randomUUID(), provider: 'dsh' }), /local_control_self_test_mismatch/);
+    await assert.rejects(control(context.config, 'self-test-status', { id: randomUUID(), provider: 'dsh' }), /local_control_self_test_receipt_mismatch/);
+  }
+  const crossed = await fixture(t, (id, status) => { starts++; return { ...snapshot(id, status.daemonId), provider: 'dsh' }; },
+    id => { lookups++; return { id, found: false, provider: 'dsh' }; });
+  await assert.rejects(control(crossed.config, 'self-test', { id: randomUUID() }), /local_control_self_test_mismatch/);
+  await assert.rejects(control(crossed.config, 'self-test-status', { id: randomUUID(), provider: 'codex' }), /local_control_self_test_receipt_mismatch/);
+  assert.equal(starts, 5); assert.equal(lookups, 5);
+});
+
+test('explicit Codex control remains compatible with a legacy id-only daemon', async t => {
+  const context = await fixture(t);
+  await context.close();
+  const key = createHash('sha256').update(`${resolve(context.config.stateDir)}:${context.status.daemonId}`).digest('hex').slice(0, 32);
+  const socketPath = join(tmpdir(), `hd-${process.getuid?.() ?? 'user'}`, `${key}.sock`);
+  const received: object[] = [];
+  const legacy = createServer((req, res) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      const input = JSON.parse(body) as { id: string };
+      received.push(input);
+      if (Object.keys(input).join() !== 'id') { res.writeHead(400).end(JSON.stringify({ error: 'invalid_self_test_request' })); return; }
+      res.end(JSON.stringify({ ...context.status, ...(req.url === '/self-test-status'
+        ? { selfTestReceipt: { id: input.id, found: true } } : { selfTest: snapshot(input.id, context.status.daemonId) }) }));
+    });
+  });
+  await new Promise<void>(done => legacy.listen(socketPath, done));
+  t.after(() => new Promise<void>(done => legacy.close(() => done())));
+  const id = randomUUID();
+  assert.equal((await control(context.config, 'self-test', { id, provider: 'codex' }))?.selfTest?.id, id);
+  assert.equal((await control(context.config, 'self-test-status', { id, provider: 'codex' }))?.selfTestReceipt?.found, true);
+  assert.deepEqual(received, [{ id }, { id }]);
 });

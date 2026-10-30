@@ -23,7 +23,7 @@ pnpm check 构建 workspace、检查脚本/测试类型并运行确定性控制�
 
 `accept:dsh` 通过本机隔离的 SDK / Server / DeviceHost fixture 验证六类场景：MCP 成功、MCP 错误、调用方与原生项目 skills 共存，以及原生审批允许、拒绝、取消后旧决定失效。允许用例还验证一次性授权不会扩大后续写权限。fixture 只为原生子进程选择 read-only，不修改用户 settings 或已安装 Daemon；必须实际观察到原生只读拒绝和审批回调，未触发审批不能计通过。MCP 错误在原生投影为 failed 时，送达状态保守保持 unknown。
 
-上述本机 fixture 不替代独立 Daemon 进程、独立设备、发行包或业务验收。面板的“测试 Codex”仅验证 Codex。源码摘要、输入、回调与结果留在 ignored 的 `.local/`；独立离线分发检查见 [验证](apps/docs-site/README.md#verification)。
+上述本机 fixture 不替代独立 Daemon 进程、独立设备、发行包或业务验收。源码与新构建候选的面板按后台发现列表选择本机环境（当前支持 Codex/dsh），分别测试并保留历史；Codex 测试使用原生确认的只读模式，dsh 实验固定回显沿用原生权限配置，不提供只读保证。出现工具或额外审批不会判定通过；安装发现也不代表模型就绪。现有 v0.1.0 下载仍只测试 Codex。源码摘要、输入、回调与结果留在 ignored 的 `.local/`；独立离线分发检查见 [验证](apps/docs-site/README.md#verification)。
 
 ## 设计边界
 

@@ -16,10 +16,33 @@ struct DeviceState: Decodable {
     var unresolved: Int?
     var connectionIssue: String?
     var selfTest: SelfTestSnapshot?
+    var providers: [ProviderInstallation]?
+    var selfTests: [SelfTestSnapshot]?
+    var selfTestProviders: [String]?
     var acceptedSelfTestId: String?
+    var acceptedSelfTestProvider: String?
     var selfTestReceipt: SelfTestReceipt?
 }
-struct SelfTestReceipt: Decodable { let id: String; let found: Bool }
+struct ProviderInstallation: Decodable, Identifiable {
+    let key: String
+    let displayName: String
+    let status: String
+    let selfTestSupported: Bool
+    let version: String?
+    let source: String?
+    let executable: String?
+    let home: String?
+    let selfTestKind: String?
+    let acceptanceCommand: String?
+    let acceptanceDescription: String?
+    var id: String { key }
+}
+struct SelfTestReceipt: Decodable {
+    let id: String
+    let found: Bool
+    let provider: String?
+    var providerKey: String { provider ?? "codex" }
+}
 struct SelfTestSnapshot: Decodable {
     let id: String
     let runId: String
@@ -30,6 +53,8 @@ struct SelfTestSnapshot: Decodable {
     let finishedAt: Double?
     let model: String?
     let code: String?
+    let provider: String?
+    var providerKey: String { provider ?? "codex" }
 }
 struct PairingPreview: Decodable { let server: String; let nodeId: String }
 struct FoundDevice: Decodable, Identifiable {

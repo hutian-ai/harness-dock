@@ -8,6 +8,7 @@
 
 - macOS arm64 上 dsh 的具名 ACP SDK 实验适配，复用本机安装、原生 home、登录与配置；首个适配版本为 `@deepseek-ai/dsh 0.1.2-rc.1`。
 - dsh 原生模型与 effort 选择、会话续接、审批 options 转发、MCP 与叠加的调用方命名 skills root。
+- 新构建候选的面板逐项显示后台发现的本机环境（当前支持 Codex/dsh），可选择对应固定测试并分别保留结果；测试运行或启动收据待确认时禁止切换 Harness 和维护后台。
 - `pnpm accept:dsh` 本机 SDK / Server / DeviceHost fixture，覆盖 MCP 成功/错误、调用方与原生项目 skills 共存、审批允许/拒绝/取消后旧决定失效，以及一次性授权作用域。
 
 ### Fixed
@@ -18,7 +19,7 @@
 ### Scope
 
 - dsh 暂无精确最终答案识别与只读结果查回，缺少完成证据保持 unknown，不自动重派。MCP 错误在原生投影为 failed 时，送达状态保守保持 unknown。
-- 面板仍只提供“测试 Codex”。源码和新构建候选包含 dsh 实验实现，不表示现有公开下载、独立 Daemon 进程、独立设备或发行包已完成 dsh 验收。
+- Codex 面板测试使用原生确认的只读模式；dsh 面板测试为实验固定回显，沿用原生权限配置，不提供只读保证，工具与应用授权分别验收。现有公开 v0.1.0 下载仍只提供“测试 Codex”；源码与新构建候选的功能不表示独立 Daemon 进程、独立设备或发行包已完成 dsh 验收。
 
 ## 已有能力与历史变更
 

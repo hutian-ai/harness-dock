@@ -72,10 +72,13 @@ struct PanelView: View {
     private var onboarding: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("连接本机 Codex").font(.system(size: 23, weight: .semibold))
-                Text("把这台 Mac 上的 Codex 接入你的应用。").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text("需要 macOS 13+、Apple Silicon，并已安装和登录 Codex。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("连接本机 Harness").font(.system(size: 23, weight: .semibold))
+                Text("把这台 Mac 上的原生 Harness 接入你的应用。").font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("需要 macOS 13+、Apple Silicon，并安装、登录所选原生 Harness。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            VStack(alignment: .leading, spacing: 0) {
+                providerSelector
+            }.padding(.horizontal, 12).background(Color(nsColor: .controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 10))
             if model.scanning {
                 HStack(spacing: 10) { ProgressView().controlSize(.small); Text("正在检测这台 Mac 的已有连接…").font(.system(size: 12)).foregroundStyle(.secondary) }
             } else if !model.discovered.isEmpty && !model.connectingNew && model.pairing == nil {
@@ -95,14 +98,14 @@ struct PanelView: View {
                         }.buttonStyle(.plain).accessibilityLabel("使用已有设备 \(found.server)")
                     }
                 }.background(Color(nsColor: .controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 10))
-                Text("不会重新配对，原任务记录和 Codex 登录继续保留。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("不会重新配对，原任务记录和原生 Harness 登录继续保留。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button("连接其他服务") { model.connectingNew = true }.buttonStyle(.link).font(.system(size: 12))
             } else {
                 if let invitation = model.pairing {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("确认连接到此服务", systemImage: "link").font(.system(size: 12, weight: .medium)).foregroundStyle(.teal)
                         Text(invitation.server).font(.system(size: 17, weight: .medium)).lineLimit(2)
-                        Text("连接后，该服务获授权的应用可以使用这台 Mac 的 Codex 执行任务。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text("连接后，该服务获授权的应用可以使用这台 Mac 上受支持的原生 Harness 执行任务。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Button("更换邀请", action: model.clearInvitation).buttonStyle(.link).font(.system(size: 11))
                     }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Color(nsColor: .controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 10))
                     Button(action: model.setup) {
@@ -122,7 +125,7 @@ struct PanelView: View {
                     }.buttonStyle(.borderedProminent).controlSize(.large)
                     Button("还没有邀请？查看获取方式") { model.showInvitationHelp = true }.buttonStyle(.link).font(.system(size: 12))
                 }
-                Text("复用本机 Codex 的安装与登录，首次接入无需选择项目目录。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("复用本机 Harness 的安装与登录，首次接入无需选择项目目录。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !model.discovered.isEmpty {
                     Button("返回已有连接") { model.connectingNew = false; model.clearInvitation() }.buttonStyle(.link).font(.system(size: 12))
                 }
@@ -170,7 +173,7 @@ struct PanelView: View {
                 Spacer()
             }
             VStack(spacing: 0) {
-                dataRow("执行环境", value: "Codex · 本机原生", symbol: "terminal")
+                providerSelector
                 Divider().padding(.leading, 36)
                 dataRow("设备执行", value: "\(model.device.active ?? 0) 运行中 · \(model.device.unresolved ?? 0) 结果待核对", symbol: "waveform.path")
             }.padding(.horizontal, 12).background(Color(nsColor: .controlBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 10))
@@ -191,7 +194,7 @@ struct PanelView: View {
                 Spacer(minLength: 0)
                 Button("测试详情") { model.showVerification = true }.buttonStyle(.link).font(.system(size: 11))
             }
-            if model.device.selfTest != nil || model.selfTestStartUnconfirmed { selfTestSummary }
+            if model.selectedSelfTest != nil || model.selectedSelfTestStartUnconfirmed { selfTestSummary }
             if model.device.connectionIssue != nil {
                 message(model.device.connectionIssue == "configuration_mismatch" ? "保存的服务地址与正在运行的设备不一致，请先诊断。" : "连接尚未建立，请检查网络、服务地址与设备配对。", symbol: "wifi.exclamationmark", color: .orange)
             }
@@ -220,18 +223,64 @@ struct PanelView: View {
                     } else {
                         Text(model.device.externalInstallation == true ? "此设备使用其他安装位置，请通过原安装入口维护。" : "首次安装中断后，可直接使用已保存的身份继续，无需再次领取邀请。").font(.caption).fixedSize(horizontal: false, vertical: true)
                     }
-                    Button("手动导入其他设备配置…", action: model.adopt).buttonStyle(.link).disabled(model.busy)
+                    Button("手动导入其他设备配置…", action: model.adopt).buttonStyle(.link).disabled(model.busy || model.selfTestRunning || model.selfTestStartUnconfirmed)
                 }.padding(.top, 10)
             }.font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
     private var footer: some View {
         HStack {
-            Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0") · Codex").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0") · macOS arm64").font(.system(size: 10)).foregroundStyle(.tertiary)
             Spacer()
             if model.device.running == true { Text("后台将继续运行").font(.system(size: 10)).foregroundStyle(.secondary) }
             Button("退出面板", action: quit).buttonStyle(.plain).font(.system(size: 11)).help("只退出面板；已启动的设备后台独立运行").disabled(model.busy)
         }.padding(.horizontal, 20).padding(.vertical, 12)
+    }
+    private var providerSelector: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("本机 Harness").font(.system(size: 11, weight: .medium))
+                Spacer()
+                Text("选择用于本机测试").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            if model.providerChoices.isEmpty {
+                Text("暂无可选环境").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            ForEach(model.providerChoices) { provider in
+                Button { model.selectProvider(provider.key) } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: model.selectedProvider == provider.key ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(model.selectedProvider == provider.key ? .teal : .secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(provider.displayName).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                            Text(provider.version ?? "版本未报告").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Text(model.installationStatus(provider)).font(.system(size: 10)).foregroundStyle(provider.status == "installed" ? .teal : .secondary)
+                    }.padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(!model.canSelectProvider)
+                    .accessibilityLabel("选择 \(model.installationLabel(provider))")
+                    .accessibilityValue(model.selectedProvider == provider.key ? "已选择" : "未选择")
+            }
+            Text(model.selectedProviderDetail).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let installation = model.selectedInstallation {
+                DisclosureGroup("安装详情") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        installationDetail("版本", value: installation.version)
+                        installationDetail("发现来源", value: installation.source)
+                        installationDetail("可执行文件", value: installation.executable)
+                        installationDetail("原生 Home", value: installation.home)
+                    }.padding(.top, 8)
+                }.font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }.padding(.vertical, 12)
+    }
+    private func installationDetail(_ title: String, value: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            Text(value?.isEmpty == false ? value! : "未报告").font(.system(size: 10, design: .monospaced))
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
     }
     private var verification: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -244,14 +293,15 @@ struct PanelView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Label(model.refreshError != nil ? "设备状态尚未读回" : model.device.connected == true ? "设备连接已确认" : "先启动设备并连接服务", systemImage: model.refreshError == nil && model.device.connected == true ? "checkmark.circle.fill" : "network")
                         .font(.system(size: 13, weight: .medium)).foregroundStyle(model.refreshError == nil && model.device.connected == true ? .teal : .secondary)
+                    providerSelector
                     selfTestSummary
                     HStack {
                         selfTestButton.buttonStyle(.borderedProminent)
                         Spacer()
                     }
-                    Text("会实际调用一次模型并使用账户额度。测试使用原生只读模式核对一次回显，不会授予额外工具权限。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Text("测试只证明本机 Codex 的模型执行。设备连接单独显示；应用授权、具体工具、浏览器和插件需按实际用途验证。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if let test = model.device.selfTest {
+                    Text(model.selfTestDescription).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(model.selfTestScopeDetail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let test = model.selectedSelfTest {
                         DisclosureGroup("本次测试记录") {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("执行 ID：\(test.runId)").textSelection(.enabled)
@@ -263,15 +313,19 @@ struct PanelView: View {
                     HStack {
                         Text("检查本机环境").font(.system(size: 13, weight: .semibold))
                         Spacer()
-                        Button(model.checks.isEmpty ? "运行诊断" : "重新诊断", action: model.diagnose).disabled(model.busy || model.selfTestRunning)
+                        Button(model.checks.isEmpty ? "运行诊断" : "重新诊断", action: model.diagnose).disabled(model.busy || model.selfTestRunning || model.selfTestStartUnconfirmed)
                     }
                     Text("诊断检查安装与连接，不发送模型请求。").font(.system(size: 11)).foregroundStyle(.secondary)
                     if !model.checks.isEmpty { diagnostics }
                     DisclosureGroup("开发者：应用端到端测试") {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("在已构建的源码目录使用管理员提供的应用 client.json。先把命令中的路径替换为实际文件；测试会调用模型并使用账户额度。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            Button(model.copiedTestCommand ? "已复制测试命令" : "复制此设备的测试命令", action: model.copyTestCommand).disabled(model.device.nodeId == nil)
-                            Text("测试核对两轮回显和同一会话续接。需要验证审批时，在交互终端追加 --approval，由你选择原生选项。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            if let command = model.selectedAcceptanceCommand {
+                                Text(model.selectedAcceptanceDescription ?? "此环境提供了额外验收入口。请先核对命令中的路径与身份；真实执行会使用模型额度。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                Text(command).font(.system(size: 10, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                Button(model.copiedTestCommand ? "已复制验收命令" : "复制验收命令", action: model.copyTestCommand)
+                            } else {
+                                Text("此环境尚未提供额外验收命令。工具和业务授权需由拥有者应用通过 SDK 按实际用途验证。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
                             Text("每台设备只有一个应用拥有者。若该应用正在连接，请从原应用验证；CLI 测试仅供其未连接时使用，或使用隔离测试设备。设备邀请不能作为应用凭据。").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }.padding(.top, 10)
                     }.font(.system(size: 12))
@@ -291,10 +345,10 @@ struct PanelView: View {
     private var selfTestSummary: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
-                if model.selfTestRunning || model.selfTestStartUnconfirmed && model.busy {
+                if model.selectedSelfTestRunning || model.selectedSelfTestStartUnconfirmed && model.busy {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: model.device.selfTest?.state == "passed" && !model.selfTestStartUnconfirmed ? "checkmark.circle.fill" : model.device.selfTest == nil && !model.selfTestStartUnconfirmed ? "circle.dashed" : "exclamationmark.circle")
+                    Image(systemName: model.selectedSelfTest?.state == "passed" && !model.selectedSelfTestStartUnconfirmed ? "checkmark.circle.fill" : model.selectedSelfTest == nil && !model.selectedSelfTestStartUnconfirmed ? "circle.dashed" : "exclamationmark.circle")
                         .foregroundStyle(model.selfTestColor)
                 }
                 Text(model.selfTestTitle).font(.system(size: 12, weight: .semibold)).foregroundStyle(model.selfTestColor)
@@ -327,9 +381,12 @@ struct PanelView: View {
         }
     }
     private func checkNext(_ code: String) -> String {
+        if let provider = model.providerChoices.first(where: { "\($0.key)_installation" == code }) {
+            return "请在此 Mac 安装并登录 \(provider.displayName)，再重新诊断；原生路径需由设备所有者配置。"
+        }
         switch code {
-        case "codex_installation": return "请在此 Mac 安装并登录 Codex，再重新诊断。"
-        case "native_auth_and_protocol": return "可直接点击“测试 Codex”验证本机模型执行。具体工具与应用授权按实际用途验证。"
+        case "native_installation": return "请先安装并登录要使用的原生 Harness，再重新诊断。"
+        case "native_auth_and_protocol": return "选择已安装的 Harness 后可测试对应的本机模型回显。工具与应用授权按实际用途分别验证。"
         case "daemon": return "后台尚未启动，请返回面板启动设备；已有安装请通过原入口启动。"
         case "daemon_configuration": return "已保存配置与后台不一致，请联系部署者核对服务地址。"
         case "device_authentication": return "请核对网络、服务器与设备授权，必要时联系服务管理员。"
@@ -359,10 +416,11 @@ struct PanelView: View {
         }.font(.system(size: 11)).foregroundStyle(color)
     }
     private func checkTitle(_ code: String) -> String {
-        ["configuration": "设备配置", "runtime": "随包运行时", "supported_device": "设备平台", "workdir": "工作目录",
+        if let provider = model.providerChoices.first(where: { "\($0.key)_installation" == code }) { return "\(provider.displayName) 安装" }
+        return ["configuration": "设备配置", "runtime": "随包运行时", "supported_device": "设备平台", "workdir": "工作目录",
          "daemon": "本地后台进程", "daemon_configuration": "后台配置一致性", "device_authentication": "设备配对与连接",
          "server_transport": "服务器 TLS / 网络", "device_protocol": "协议版本", "server_health": "服务器健康检查",
-         "codex_installation": "Codex 安装", "dsh_installation": "DeepSeek Harness 安装", "native_installation": "原生助手安装", "native_auth_and_protocol": "登录、模型与工具（需独立验收）",
+         "native_installation": "原生助手安装", "native_auth_and_protocol": "登录、模型与工具（需独立验收）",
          "unresolved_execution": "执行结果待核对", "device": "设备诊断"][code] ?? "其他检查"
     }
 }
