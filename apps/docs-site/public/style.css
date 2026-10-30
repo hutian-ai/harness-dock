@@ -21,7 +21,7 @@
 /* The icon describes the theme available after pressing the toggle. */
 .theme-sun{display:none}:root[data-theme=dark] .theme-sun{display:block}:root[data-theme=dark] .theme-moon{display:none}
 
-/* Home: one message, one execution route, then two ways to start. */
+/* Home: application integration, the execution route, and role-based entry points. */
 .home-hero{grid-template-columns:1fr 1.12fr;gap:48px;padding:68px 0 64px;min-height:570px}
 .home-hero h1{font-size:45px;line-height:1.35;letter-spacing:-1.5px;margin:24px 0}
 .home-hero .hero-lead{font-size:16px;line-height:1.95;max-width:440px;margin-bottom:28px}
@@ -50,6 +50,11 @@
 .simple-start .path-links p{font-size:12px}
 .home-more{font-size:12px;line-height:1.9;margin:28px 0 0}
 .home-more>a{text-decoration:underline;text-underline-offset:4px}
+.execution-value{border-top:1px solid var(--line);padding:42px 0 48px}
+.execution-value .principle-list{margin-top:28px}
+@media(max-width:760px){.execution-value{padding:30px 0 12px}}
+.table-hint{display:none}.comparison-table:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+@media(max-width:760px){article .table-hint{display:block;font-size:11px;color:var(--muted);margin-bottom:-10px}}
 @media(min-width:1500px){.home-hero{min-height:620px;gap:65px;padding:80px 0}.home-hero h1{font-size:52px}.home-hero .hero-lead{font-size:18px}}
 @media(max-width:1150px){.home-hero{gap:30px;min-height:530px}.home-hero h1{font-size:39px}.home-hero .hero-lead{font-size:15px}.map-heading{padding:15px;font-size:11px}.map-heading>span:last-child{font-size:9px}.connection-map figcaption{padding:12px 15px;font-size:9px}.simple-start{gap:40px}.simple-start h2{font-size:25px}.harness-progress{column-gap:17px}.harness-progress strong{font-size:12px}}
 @media(max-width:960px) and (min-width:761px){.home-hero{gap:25px;padding:45px 0;min-height:500px}.home-hero h1{font-size:33px}.home-hero .hero-lead{font-size:14px}.home-hero .button{font-size:11px;gap:12px;padding:9px 13px}.map-heading{font-size:10px;padding:13px 11px}.map-heading>span:last-child{display:none}.connection-map figcaption{padding:10px;font-size:9px}.harness-progress{column-gap:16px}.harness-progress>a{margin-left:0}}
@@ -58,6 +63,6 @@
 @media(max-width:370px){.home-hero h1{font-size:30px}.map-mobile{padding:13px}.map-mobile>div{padding-right:9px}.map-mobile small{font-size:9px}.harness-progress{column-gap:21px}.harness-progress>a{width:100%;margin-left:0}}
 @media print{.home-hero{display:block}.connection-map{max-width:600px;margin-top:25px;break-inside:avoid}.simple-start{display:block}}
 
-/* ACP protocol and optional native Harness nodes. */
-.map-protocol{stroke:var(--accent);stroke-width:1.5}.map-protocol-mask{fill:var(--surface);stroke:var(--line-strong)}.map-protocol-label{fill:var(--accent);font-size:12px;font-weight:500}.map-harness-title{fill:var(--accent);font-size:13px;font-weight:500}.map-option{fill:var(--bg);stroke:var(--line-strong)}.map-option-label{fill:var(--text);font-size:11px}
+/* ACP stays inside the device; the native environment is selected on that device. */
+.map-protocol{stroke:var(--accent);stroke-width:1.5}.map-protocol-mask{fill:var(--surface);stroke:var(--line-strong)}.map-protocol-label{fill:var(--accent);font-size:12px;font-weight:500}.map-harness-title{fill:var(--accent);font-size:13px;font-weight:500}
 @media(max-width:500px){.map-mobile .map-harness-options{display:grid;grid-template-columns:1fr auto;row-gap:6px}.map-harness-options>span{top:12px}.map-mobile-options{grid-column:1/-1;font-size:10px;line-height:1.9;color:var(--muted);margin:0}.map-mobile .map-mobile-acp{color:var(--accent);font-size:10px}}

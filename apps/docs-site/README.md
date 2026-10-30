@@ -50,9 +50,9 @@ npm run preview
 
 架构与驱动页使用正文内的静态 SVG 图，样式位于 `public/style.css` 的 `.doc-diagram` 规则；无需 Mermaid 脚本、CDN 或外部字体。修改时保留每张图的 title/desc、唯一 ID 和文字说明，并检查亮色、暗色与窄屏局部滚动。根 README 使用 GitHub 可渲染的 Mermaid，分层与文档站保持一致。
 
-首页保留统一接入不同 Harness 的定位、执行流转图和三个真实入口：设备安装、应用 SDK、服务部署。支持情况紧邻首屏：Codex 已支持，dsh、zcode、opencode 计划接入；完整状态维护在 support 的 harness-roadmap 节。首页不放不可操作的模拟功能卡或像链接的产品名。远程选型说明放在 overview 的 when-to-use 节，以 Codex 为例，保留官方 SDK / App Server 入口及核对日期。首页流转图使用内联 SVG；窄屏改为纵向 HTML，信号动画遵循减少动态效果设置。
+首页以“让你的应用，调用原生执行能力”说明产品定位，导语强调通过 SDK 调用其他机器上的原生 Harness。主要价值依次为应用接入业务流程、复用设备接入、独立后台持有执行与按原身份查回；首屏主操作进入应用 SDK，设备安装保留独立入口。支持情况紧邻首屏：Codex 已支持，dsh、zcode、opencode 计划接入；完整状态维护在 support 的 harness-roadmap 节。首页不放不可操作的模拟功能卡或像链接的产品名。选型说明放在 overview 的 when-to-use 节，区分个人原生远程控制、单 Harness 的 SDK / App Server 集成、Dock 的跨机器接入与执行管理；保留官方入口及核对日期，明确审批与事件并非 Dock 独有，多 Harness 为次要的适配方向。首页流转图使用内联 SVG；窄屏改为纵向 HTML，信号动画遵循减少动态效果设置。
 
-首屏图的任务发起方包括应用、Agent 和自动化服务。ACP 只表示设备后台与原生 Harness 之间的执行协议，不用于应用、Server 与设备的网络连接。图内以一个可选 Harness 分组展示统一接入方向，避免画成同时执行多个助手；当前支持和计划适配在图外区分。ACPX、各 Harness 的具名适配器与原生进程层级见 architecture 和 drivers 页面。
+首屏图从应用经连接 SDK、Server 到独立设备后台，强调后台持有进程与记录、原生审批和结果返回应用。ACP 只表示设备后台与原生 Harness 之间的执行协议，不用于应用、Server 与设备的网络连接。图内展示设备上所选的原生 Harness 及安装、登录、工具和会话，不以多个计划适配对象作为图的重点；当前支持和计划适配在图外区分。ACPX、各 Harness 的具名适配器与原生进程层级见 architecture 和 drivers 页面。
 
 产品与维护文档统一维护在 src/content.json；不再保留重复的 docs/ 目录。支持范围为 macOS arm64 + Codex Developer Alpha，其他 Harness 尚未支持。文档站不包含真实地址、设备身份或凭据。
 
