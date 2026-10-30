@@ -1,6 +1,6 @@
 {
   "name": "harness-dock-docs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Deployable product documentation for harness-dock",
