@@ -8,7 +8,7 @@ import { DeviceHost } from '../apps/daemon/src/device-host.ts';
 import { createProviderAdapters } from '../packages/drivers/src/provider-adapter.ts';
 import type { NativePermissionDecision } from '../packages/drivers/src/execution.ts';
 
-test('dsh admission preserves native permission choices and never resubmits an unknown run', async t => {
+test('dsh admission enforces device support, native permission choices and no replay', async t => {
   const root = await mkdtemp(join(tmpdir(), 'dock-dsh-device-'));
   const executable = join(root, 'dsh');
   await writeFile(executable, '#!/bin/sh\necho "0.1.2-rc.1"\n', { mode: 0o700 });
@@ -32,7 +32,16 @@ test('dsh admission preserves native permission choices and never resubmits an u
   })));
   t.after(async () => { await host.close(); await rm(root, { recursive: true, force: true }); });
   host.bind(async (_method, raw) => (raw as { kind: string }).kind === 'permission' ? answer : null);
-  const inventory = await host.inventory() as { providers: { key: string; capabilities?: { exactFinalAnswer: boolean; resultQuery: string } }[] };
+  const inventory = await host.inventory() as { providers: { key: string; status: string; error?: string; capabilities?: { exactFinalAnswer: boolean; resultQuery: string } }[] };
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+    const dsh = inventory.providers.find(provider => provider.key === 'dsh');
+    assert.equal(dsh?.status, 'not_found');
+    assert.equal(dsh?.error, 'dsh_unsupported_platform');
+    await host.prepare({ runId: 'unsupported-device' });
+    await assert.rejects(host.execute({ provider: 'dsh', runId: 'unsupported-device', prompt: 'synthetic' }), /provider_unavailable/);
+    assert.equal(starts, 0, 'unsupported devices must reject before creating a native execution');
+    return;
+  }
   assert.deepEqual(inventory.providers.find(provider => provider.key === 'dsh')?.capabilities?.exactFinalAnswer, false);
   assert.equal(inventory.providers.find(provider => provider.key === 'dsh')?.capabilities?.resultQuery, 'unsupported');
   const execute = async (runId: string) => {
