@@ -12,11 +12,12 @@ import {
   DeviceInboundBudget, DeviceTransport, DEVICE_TRANSPORT_LIMITS, DEVICE_PROTOCOL_VERSION, DockError, id, type DeviceNodeSummary,
 } from '@harness-dock/protocol';
 import { parseServerConfig, serverConfigRevision, type ServerConfig } from './config.ts';
+import { serveInvitation } from './invitation-http.ts';
 export { parseServerConfig, readServerConfig, type ServerConfig } from './config.ts';
 export { initializeServer, type ServerSetupOptions } from './setup.ts';
 
 export type DockServerOptions = Omit<ServerConfig, 'host' | 'devicePort' | 'clientPort' | 'tls'> & {
-  host?: string; devicePort?: number; clientPort?: number; tls?: { key: string; cert: string };
+  host?: string; devicePort?: number; clientPort?: number; tls?: { key: string; cert: string }; invitationStateDir?: string;
 };
 interface ClientSlot {
   nodeIds: Set<string>;
@@ -44,7 +45,8 @@ export class DockServer {
   private closing?: Promise<void>;
   readonly ready: Promise<void>;
   constructor(options: DockServerOptions) {
-    const config = parseServerConfig({ ...options, tls: options.tls ? { keyFile: 'inline', certFile: 'inline' } : undefined });
+    const { invitationStateDir, ...settings } = options;
+    const config = parseServerConfig({ ...settings, tls: options.tls ? { keyFile: 'inline', certFile: 'inline' } : undefined });
     this.secure = Boolean(options.tls);
     for (const client of config.clients) {
       const slot: ClientSlot = { nodeIds: new Set(client.nodeIds), token: Buffer.from(`Bearer ${client.token}`), inbound: new DeviceInboundBudget() };
@@ -66,7 +68,8 @@ export class DockServer {
       if (request.method === 'GET' && request.url === '/healthz') {
         response.writeHead(this.closing ? 503 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         response.end(JSON.stringify({ status: this.closing ? 'stopping' : 'ok', ...health }));
-      } else response.writeHead(404).end();
+      } else if (!this.closing && serveInvitation(request, response, config, invitationStateDir)) return;
+      else response.writeHead(404).end();
     };
     this.listener = options.tls
       ? createHttpsServer({ ...options.tls, minVersion: 'TLSv1.2' }, handle)

@@ -32,6 +32,17 @@ test('proxy setup exports the public endpoint; deployment generation never overw
   await generateDeployment(files.serverPath, output, { image: 'harness-dock-server:0.1.0' });
   const compose = await readFile(join(output, 'compose.yaml'), 'utf8');
   assert.match(compose, /create_host_path: false/);
+  assert.match(compose, /source: \$\{DOCK_INVITATION_STATE:\?Set DOCK_INVITATION_STATE\}/);
+  assert.match(compose, /HARNESS_DOCK_INVITATION_STATE: \/var\/lib\/harness-dock\/invitations/);
+  const stateDirectory = join(output, 'invitation-state');
+  assert.ok((await stat(stateDirectory)).isDirectory());
+  if (process.platform !== 'win32') assert.equal((await stat(stateDirectory)).mode & 0o777, 0o700);
+  const environment = await readFile(join(output, '.env'), 'utf8');
+  assert.ok(environment.includes(`DOCK_INVITATION_STATE=${JSON.stringify(stateDirectory)}`));
+  const instructions = await readFile(join(output, 'README.txt'), 'utf8');
+  assert.match(instructions, /DOCK_INVITATION_STATE.*absolute persistent directory/);
+  assert.match(instructions, /preserve or privately transfer the entire invitation-state directory/);
+  assert.match(instructions, /state directory at 0700/);
   assert.match(await readFile(join(output, 'nginx.conf'), 'utf8'), /location = \/healthz/);
   for (const name of ['compose.yaml', '.env', 'nginx.conf', 'README.txt']) {
     const content = await readFile(join(output, name), 'utf8');

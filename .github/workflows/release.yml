@@ -1,0 +1,107 @@
+name: Release macOS client
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Verify release source and supported build host
+        run: |
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const pkg=JSON.parse(readFileSync('package.json','utf8'));
+          assert.match(process.env.RELEASE_TAG,/^v\d+\.\d+\.\d+$/);
+          assert.equal(process.env.RELEASE_TAG,`v${pkg.version}`);
+          assert.equal(pkg.private,true);
+          assert.equal(process.platform,'darwin'); assert.equal(process.arch,'arm64');
+          JS
+          git diff --exit-code
+          git merge-base --is-ancestor HEAD origin/main
+          test -f ".github/release-notes/${RELEASE_TAG}.md"
+      - name: Install pinned dependencies
+        run: |
+          npm install --global pnpm@12.15.0
+          pnpm install --frozen-lockfile
+      - name: Check source, native panel and onboarding
+        run: |
+          pnpm check
+          pnpm smoke:source
+          node apps/docs-site/check.mjs
+      - name: Build and verify independent runtime
+        run: |
+          node --import tsx scripts/bundle.ts .local/release-bundle
+          node --import tsx scripts/accept-bundle.ts .local/release-bundle --offline
+          pnpm panel:build --bundles .local/release-bundle --output .local/release-panel
+      - name: Record exact source provenance
+        run: |
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const revision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          const pkg=JSON.parse(readFileSync('package.json','utf8'));
+          const manifest=JSON.parse(readFileSync('.local/release-panel/Harness Dock.app/Contents/Resources/daemon/dock-release.json','utf8'));
+          assert.equal(revision,process.env.GITHUB_SHA); assert.equal(manifest.revision,revision);
+          assert.equal(manifest.version,pkg.version); assert.equal(manifest.platform,'darwin'); assert.equal(manifest.arch,'arm64');
+          assert.equal(execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim(),'');
+          writeFileSync('.local/release-panel/release.json',JSON.stringify({version:pkg.version,tag:process.env.RELEASE_TAG,revision,
+            platform:'darwin',arch:'arm64',minimumMacOS:'13.0',signature:'ad-hoc',notarized:false,
+            source:`https://github.com/${process.env.GITHUB_REPOSITORY}/tree/${revision}`,
+            build:`https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`},null,2)+'\n');
+          JS
+      - name: Publish only the client and its public metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          notes="$GITHUB_WORKSPACE/.github/release-notes/${RELEASE_TAG}.md"
+          cd .local/release-panel
+          version="${RELEASE_TAG#v}"
+          assets=("harness-dock-panel-${version}-darwin-arm64.zip" "SHA256SUMS" "README.txt" "release.json")
+          if gh release view "$RELEASE_TAG" --repo "$repo" --json isDraft > "$RUNNER_TEMP/release-state.json"; then
+            node -e 'if(!JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).isDraft) throw Error("release_already_published: refusing to replace assets")' "$RUNNER_TEMP/release-state.json"
+          else
+            gh release create "$RELEASE_TAG" --repo "$repo" --verify-tag --draft --prerelease \
+              --title "${RELEASE_TAG} — Developer Alpha" --notes-file "$notes"
+          fi
+          for asset in "${assets[@]}"; do
+            if ! gh release view "$RELEASE_TAG" --repo "$repo" --json assets --jq '.assets[].name' | grep -Fx "$asset" > /dev/null; then
+              gh release upload "$RELEASE_TAG" "$asset" --repo "$repo"
+            fi
+          done
+          gh release view "$RELEASE_TAG" --repo "$repo" --json assets > "$RUNNER_TEMP/release-assets.json"
+          node -e 'const names=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).assets.map(x=>x.name).sort(); if(JSON.stringify(names)!==JSON.stringify(process.argv.slice(2).sort())) throw Error("unexpected_release_assets")' "$RUNNER_TEMP/release-assets.json" "${assets[@]}"
+          readback="$RUNNER_TEMP/release-readback"
+          mkdir "$readback"
+          for asset in "${assets[@]}"; do
+            gh release download "$RELEASE_TAG" --repo "$repo" --pattern "$asset" --dir "$readback"
+            cmp "$asset" "$readback/$asset"
+          done
+          (cd "$readback" && shasum -a 256 -c SHA256SUMS)
+          gh release edit "$RELEASE_TAG" --repo "$repo" --draft=false --prerelease

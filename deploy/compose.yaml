@@ -13,6 +13,8 @@ services:
     mem_limit: 384m
     pids_limit: 64
     stop_grace_period: 20s
+    environment:
+      HARNESS_DOCK_INVITATION_STATE: /var/lib/harness-dock/invitations
     ulimits:
       nofile: {soft: 4096, hard: 4096}
     volumes:
@@ -20,6 +22,11 @@ services:
         source: ${DOCK_CONFIG_FILE:?Set DOCK_CONFIG_FILE}
         target: /run/harness-dock/server.json
         read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DOCK_INVITATION_STATE:?Set DOCK_INVITATION_STATE}
+        target: /var/lib/harness-dock/invitations
         bind:
           create_host_path: false
     tmpfs:

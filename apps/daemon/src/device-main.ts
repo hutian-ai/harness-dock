@@ -108,11 +108,11 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
       pid: process.pid, connected: connection.connected, endpoint: config.endpoint,
       ...(connection.connectionError ? { connectionError: connection.connectionError } : {}),
       entrypoint: fileURLToPath(new URL('./cli.js', import.meta.url)), runtime: process.execPath,
-      ...host.maintenanceStatus() }), stop, () => {
+      ...host.maintenanceStatus(), selfTest: host.selfTestStatus }), stop, () => {
         const closing = host.closeIfIdle();
         connection.stop(); stopping = closing;
         return closing;
-      });
+      }, id => host.startSelfTest(id), id => host.lookupSelfTest(id));
     connection.connect();
   } catch (error) { await stop().catch(() => {}); await closeControl?.(); throw error; }
   console.log(`Device ${config.nodeId} connecting to ${config.endpoint}`);

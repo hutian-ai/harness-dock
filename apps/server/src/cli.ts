@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 
 const usage = `harness-dock-server init <new-private-directory> [--public-endpoint wss://dock.example.com/] [--host 127.0.0.1] [--public-host server.example] [--device-port 48518] [--client-port 48519] [--tls-key <key.pem> --tls-cert <cert.pem>]
 harness-dock-server run <server.json>
+harness-dock-server invite <server.json> [--node-id <UUID>] [--endpoint <recipient-WSS>] [--expires-in 900]
 harness-dock-server deploy <server.json> --output <new-directory> --image <fixed-image-tag-or-digest> [--tls-cert <fullchain.pem> --tls-key <privkey.pem>]
 harness-dock-server pair <server.json> <list|device-add|device-export|device-rotate|device-remove|client-add|client-export|client-rotate|client-remove|grant>
   [--node-id <UUID>] [--client <UUID>] [--from <previous-client-UUID>] [--label <name>] [--output <new-private-file>] [--endpoint <recipient-WSS>]
@@ -19,11 +21,21 @@ async function main(): Promise<void> {
     'tls-key': { type: 'string' }, 'tls-cert': { type: 'string' }, help: { type: 'boolean', short: 'h' },
     'public-endpoint': { type: 'string' }, output: { type: 'string' }, image: { type: 'string' },
     'node-id': { type: 'string' }, client: { type: 'string' }, from: { type: 'string' }, label: { type: 'string' },
-    endpoint: { type: 'string' }, 'ca-file': { type: 'string' }, json: { type: 'boolean' }, version: { type: 'boolean' },
+    endpoint: { type: 'string' }, 'expires-in': { type: 'string' }, 'ca-file': { type: 'string' }, json: { type: 'boolean' }, version: { type: 'boolean' },
   } });
   if (values.version) { console.log(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version); return; }
   if (!command || command === 'help' || values.help) { console.log(usage); return; }
-  if (!file || extra.length || command !== 'pair' && action || !['init', 'run', 'pair', 'deploy', 'doctor'].includes(command)) throw new Error(usage);
+  if (!file || extra.length || command !== 'pair' && action || !['init', 'run', 'invite', 'pair', 'deploy', 'doctor'].includes(command)) throw new Error(usage);
+  if (command === 'invite') {
+    const { readServerConfig } = await import('./config.ts');
+    const { createDeviceInvitation } = await import('./invitations.ts');
+    const { config } = await readServerConfig(file);
+    const invitation = createDeviceInvitation(config, { nodeId: values['node-id'], endpoint: values.endpoint,
+      ttlSeconds: values['expires-in'] === undefined ? undefined : Number(values['expires-in']) });
+    // Deliberate owner-side issuance. Normal server logs and pairing listings never contain claims.
+    console.log(`连接邀请（有效至 ${invitation.expiresAt}，仅可领取一次）：\n${invitation.url}`);
+    return;
+  }
   if (command === 'pair') {
     const { managePairing } = await import('./pairing.ts');
     const commands = ['list', 'device-add', 'device-export', 'device-rotate', 'device-remove', 'client-add', 'client-export', 'client-rotate', 'client-remove', 'grant'] as const;
@@ -52,7 +64,8 @@ async function main(): Promise<void> {
   }
   if (Object.keys(values).length) throw new Error('run reads configuration only from server.json');
   const { config, tls } = await readServerConfig(file);
-  const server = new DockServer({ ...config, tls });
+  const server = new DockServer({ ...config, tls,
+    invitationStateDir: resolve(process.env.HARNESS_DOCK_INVITATION_STATE ?? join(dirname(file), 'invitation-state')) });
   await server.ready;
   console.log(`harness-dock server ready: devices ${server.deviceEndpoint}; clients ${server.clientEndpoint}`);
   let stopping = false;

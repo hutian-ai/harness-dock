@@ -1,8 +1,12 @@
 # harness-dock 文档站
 
-Nuxt 风格的独立静态文档，位于 harness-dock 仓库的 `apps/docs-site/`。中性黑白底、绿色强调、两层导航、图标侧栏和三栏阅读布局。仍使用 Node.js 静态生成，无第三方运行时依赖。
+产品文档站是使用者的完整指南，README 提供快速入口。默认快速开始面向设备用户：取得 App → 安装 → 登录原生 Codex → 邀请接入 → 一键测试。SDK 开发与服务端部署各有独立入口，命令行只出现在开发者/管理员章节。当前面向 **0.1.0 Developer Alpha**，客户端下载入口固定指向 [v0.1.0 Release](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0) 的 macOS arm64 ZIP。
 
-## 本地预览
+位于 harness-dock 仓库的 `apps/docs-site/`，使用 Node.js 静态生成，无第三方运行时依赖。中性黑白底、绿色强调、两层导航、图标侧栏和三栏阅读布局。
+
+只使用客户端的用户请阅读站点“快速开始”和“安装执行设备”，通过 [Release 下载客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)；不需要运行下面的文档预览命令。客户端仅完成本地 ad-hoc 签名，尚未完成 Developer ID 签名与公证。
+
+## 维护者：本地预览
 
 从 `apps/docs-site/` 目录执行，需要 Node.js 22+，无需 npm install：
 
@@ -56,7 +60,19 @@ npm run preview
 
 ### quickstart
 
-快速开始：启动预览后访问 `/quickstart/`。
+快速开始：启动预览后访问 `/quickstart/`。首先是从 GitHub Release 下载并安装客户端、原生 Codex 登录、邀请确认和“测试 Codex”；设备用户无须终端、Git、Node、pnpm 或 JSON。源码完整链路已移到开发与验证页的次要章节，SDK 与 server 仍有各自入口。
+
+### usage
+
+执行与测试：启动预览后访问 `/usage/`。首先介绍菜单栏“测试 Codex”：一次固定合成回显、通过/失败/待核对结果与最近检查时间，无需终端或应用凭据；服务器连接单独确认。本机自检由 Daemon 通过已有受保护 socket 和执行链运行，不代表全部工具或业务应用已验收。高级章节保留应用侧两轮合成测试与可选审批：使用当前拥有者的 SDK 连接，CLI 只在该应用身份未连接时使用，不创建第二个控制方。
+
+### pairing
+
+配对与访问管理：启动预览后访问 `/pairing/`。面向管理员，说明设备邀请、单应用拥有者、凭据分发与维护窗口内加载配置。
+
+### troubleshooting
+
+诊断与常见问题：启动预览后访问 `/troubleshooting/`。区分后台停止、连接未建立、状态读取失败、执行中、结果待核对和原生权限限制。
 
 ### sdk
 
@@ -69,6 +85,8 @@ SDK 接入：启动预览后访问 `/sdk/`。
 ### installation
 
 设备安装与维护：启动预览后访问 `/installation/`。
+
+设备邀请以服务器生成的 HTTPS 链接为主要入口，网页唤起客户端、用户确认后领取一次；JSON 导入位于高级设置。反向代理增加 /connect 与 /invitations/redeem，服务端持久保存仅含摘要的消费记录；容器需挂载私有 invitation-state 目录，不能使用易失的 /tmp。菜单栏面板的用户接入与安装步骤统一维护在 installation 页面，普通用户先从 Release 下载并安装客户端，再连接邀请和一键测试，原生源码与构建说明在 `apps/device-panel/README.md`。`pnpm panel:build` 在 macOS arm64 上生成携带运行时的本地 App/ZIP；Developer ID 签名、公证、公开发行和真实目标设备验收分别记录。`pnpm check` 在 macOS arm64 上额外检查 Swift 源码，其他平台明确跳过原生面板检查。
 
 ### architecture
 
@@ -89,6 +107,20 @@ Codex 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分 dock 集
 ### verification
 
 开发与验证：启动预览后访问 `/verification/`。
+
+首版逐项确认以下证据，不把一种验证当作另一种验证的通过：
+
+| 验证层 | 交付前确认 |
+| --- | --- |
+| 确定性与隐私 | `pnpm check`、自检派发/收据/恢复/持久化与回调隔离边界、源码冒烟、隐私扫描与人工复核 |
+| 文档站 | 构建、站内链接、桌面/窄屏和亮暗主题实际查看 |
+| 独立分发 | 同一候选包的仓外离线安装、许可、manifest 和摘要 |
+| 真实 Codex | 精确完成、两轮续接、工具/审批投递、只读恢复和不重派 |
+| 实际 GUI | 邀请、已有设备、断线、状态读取失败、诊断、一键本机测试与历史结果、关闭重开不重派、退出与维护 |
+| 独立设备 | 首装、移动 App、真实登录自启、升级/回滚和用户文件保留 |
+| 远端 CI 与发行 | 对应源码 revision 的 CI、Developer ID/公证、下载入口和发行权限分别确认 |
+
+这是一份验收要求，不是通过记录。实际结果绑定源码 revision、平台和产物摘要，保存在 ignored 的 `.local/`；公开发行另行执行。
 
 ### distribution
 

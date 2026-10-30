@@ -36,20 +36,10 @@ try {
       if (command === 'init') console.log(JSON.stringify(await initializeDevice(options), null, 2));
       else {
         if (!values.pairing || !values.bundle) throw new Error('setup requires --pairing and --bundle');
-        const path = resolve(options.home, 'config.json');
-        try {
-          const existing = await readConfig(path);
-          if (existing.nodeId !== pairing.nodeId || existing.token !== pairing.token || existing.endpoint !== pairing.endpoint || existing.cwd !== resolve(values.cwd))
-            throw new Error('setup_identity_conflict: existing device was preserved; use its installed entrypoint');
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-          await initializeDevice(options);
-        }
-        const { installationRoot, readInstallation, manageInstallation, startInstalled } = await import('./installation.ts');
-        const root = installationRoot(path, values['install-dir']);
-        if (!await readInstallation(root, path)) await manageInstallation('install', { config: path, root, bundle: values.bundle, runtime: values.node });
-        const result = values.autostart ? await manageInstallation('autostart', { config: path, root }) : await startInstalled(path, root);
-        console.log(JSON.stringify({ configPath: path, installation: root, result, next: 'Run the installed doctor command. Connected is not model execution verification.' }, null, 2));
+        const { setupDevice } = await import('./setup.ts');
+        const result = await setupDevice({ ...options, nodeId: pairing.nodeId!, token: pairing.token!, endpoint: pairing.endpoint!,
+          bundle: values.bundle, runtime: values.node, root: values['install-dir'], autostart: values.autostart });
+        console.log(JSON.stringify({ ...result, next: 'Run the installed doctor command. Connected is not model execution verification.' }, null, 2));
       }
     }
   } else {

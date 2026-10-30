@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>HarnessDock</string>
+  <key>CFBundleIdentifier</key><string>org.harness-dock.panel</string>
+  <key>CFBundleName</key><string>Harness Dock</string>
+  <key>CFBundleDisplayName</key><string>Harness Dock</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>org.harness-dock.connect</string>
+    <key>CFBundleURLSchemes</key><array><string>harness-dock</string></array>
+    <key>CFBundleTypeRole</key><string>Viewer</string>
+  </dict></array>
+</dict></plist>

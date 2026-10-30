@@ -20,6 +20,7 @@ export async function generateDeployment(configPath: string, output: string, opt
   if ([cert, key].some(path => !/^\/[a-zA-Z0-9_./-]+$/.test(path))) throw new Error('invalid_proxy_certificate_path');
   const info = await lstat(file);
   await mkdir(root, { mode: 0o700 });
+  await mkdir(join(root, 'invitation-state'), { mode: 0o700 });
   const compose = `services:
   server:
     image: ${options.image}
@@ -33,11 +34,17 @@ export async function generateDeployment(configPath: string, output: string, opt
     mem_limit: 384m
     pids_limit: 64
     stop_grace_period: 20s
+    environment:
+      HARNESS_DOCK_INVITATION_STATE: /var/lib/harness-dock/invitations
     volumes:
       - type: bind
         source: \${DOCK_CONFIG_FILE:?Set DOCK_CONFIG_FILE}
         target: /run/harness-dock/server.json
         read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: \${DOCK_INVITATION_STATE:?Set DOCK_INVITATION_STATE}
+        target: /var/lib/harness-dock/invitations
         bind: {create_host_path: false}
     tmpfs: ["/tmp:size=16m,mode=1777,noexec,nosuid,nodev"]
     logging:
@@ -59,6 +66,11 @@ server {
   ssl_certificate_key ${key};
   ssl_protocols TLSv1.2 TLSv1.3;
   location = /healthz { proxy_pass http://127.0.0.1:${config.clientPort}; }
+  location = /connect { proxy_pass http://127.0.0.1:${config.clientPort}; }
+  location = /invitations/redeem {
+    client_max_body_size 4k;
+    proxy_pass http://127.0.0.1:${config.clientPort};
+  }
   location = / {
     proxy_pass http://$dock_upstream;
     proxy_http_version 1.1;
@@ -71,8 +83,9 @@ server {
 }
 `;
   const envPath = JSON.stringify(file.replace(/\$/g, () => '$$'));
-  for (const [name, content] of Object.entries({ 'compose.yaml': compose, '.env': `DOCK_CONFIG_FILE=${envPath}\n`, 'nginx.conf': nginx,
-    'README.txt': `Generated only; nothing was started or reloaded.\nRequires Linux, Docker Compose, existing DNS and valid TLS files.\nTransfer server.json privately to the deployment host and set DOCK_CONFIG_FILE there.\nThe generated UID/GID must match its non-root owner on that host; update user if needed, never relax 0600.\nCheck: docker compose config --quiet\nReview nginx.conf against the existing host config and certificate paths before installation.\nStart only in your chosen maintenance window: docker compose up -d\nVerify https://${url.host}/healthz and server doctor; health alone does not prove device authentication or model execution.\nNo device or application credentials are embedded in these generated files.\n` }))
+  const statePath = JSON.stringify(join(root, 'invitation-state').replace(/\$/g, () => '$$'));
+  for (const [name, content] of Object.entries({ 'compose.yaml': compose, '.env': `DOCK_CONFIG_FILE=${envPath}\nDOCK_INVITATION_STATE=${statePath}\n`, 'nginx.conf': nginx,
+    'README.txt': `Generated only; nothing was started or reloaded.\nRequires Linux, Docker Compose, existing DNS and valid TLS files.\nTransfer server.json privately to the deployment host and set DOCK_CONFIG_FILE in .env to its absolute path there.\nSet DOCK_INVITATION_STATE in .env to an absolute persistent directory on that host; generated paths refer to the build machine.\nFor a new deployment, create that directory with mode 0700 before starting Compose (bind mounts never create missing host paths).\nFor an existing deployment, preserve or privately transfer the entire invitation-state directory before switching paths; never clear consumed-invitation records during a restart or upgrade.\nThe generated UID/GID must match the non-root runtime owner on that host. Keep server.json at 0600 and the state directory at 0700, both owned by that UID; update Compose user if needed, never relax permissions.\nCheck: docker compose config --quiet\nReview nginx.conf against the existing host config and certificate paths before installation.\nStart only in your chosen maintenance window: docker compose up -d\nVerify https://${url.host}/healthz and server doctor; health alone does not prove device authentication or model execution.\nNo device or application credentials are embedded in these generated files.\n` }))
     await writeFile(join(root, name), content, { mode: 0o600, flag: 'wx' });
   return { directory: root, generatedOnly: true, endpoint: config.publicEndpoint };
 }

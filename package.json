@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "node --test --test-concurrency=1 --import tsx tests/*.test.ts",
-    "check": "pnpm build && tsc -p tsconfig.tests.json && pnpm test",
+    "check": "pnpm build && tsc -p tsconfig.tests.json && pnpm test && pnpm panel:check",
     "smoke:source": "node --import tsx scripts/smoke-source.ts",
     "check:privacy": "node --import tsx scripts/check-privacy.ts",
     "daemon": "node --import tsx apps/daemon/src/cli.ts",
@@ -19,6 +19,8 @@
     "accept:codex": "pnpm build && node --import tsx scripts/accept-codex.ts",
     "bundle": "pnpm build && node --import tsx scripts/bundle.ts",
     "package:local": "node --import tsx scripts/package-release.ts",
+    "panel:build": "node --import tsx scripts/package-panel.ts",
+    "panel:check": "node --import tsx scripts/check-panel.ts",
     "client": "node --import tsx packages/client/src/cli.ts",
     "server": "node --import tsx apps/server/src/cli.ts"
   },
