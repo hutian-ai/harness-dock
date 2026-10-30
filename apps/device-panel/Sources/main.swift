@@ -20,7 +20,8 @@ import SwiftUI
         popover.behavior = .semitransient
         popover.delegate = self
         popover.contentSize = NSSize(width: 400, height: 520)
-        popover.contentViewController = NSHostingController(rootView: PanelView(model: model, quit: { NSApp.terminate(nil) }))
+        popover.contentViewController = NSHostingController(rootView: PanelView(model: model,
+            hide: { [weak self] in self?.popover.performClose(nil) }, quit: { NSApp.terminate(nil) }))
         // Reopening the app reveals the panel; closing it never stops the independently owned daemon.
         show()
         if let invitation = pendingInvitation {

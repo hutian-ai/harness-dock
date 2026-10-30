@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PanelView: View {
     @ObservedObject var model: PanelModel
+    let hide: () -> Void
     let quit: () -> Void
     @State private var maintenance = "upgrade"
     @State private var confirmMaintenance = false
@@ -150,6 +151,8 @@ struct PanelView: View {
                     Button("导入旧版邀请文件（JSON）…", action: model.choosePairing).buttonStyle(.link).font(.system(size: 11))
                     Button("手动导入已有设备配置…", action: model.adopt).buttonStyle(.link).font(.system(size: 11))
                     Button("重新检测本机设备") { Task { await model.scanDevices() } }.buttonStyle(.link).font(.system(size: 11)).disabled(model.scanning)
+                    Divider()
+                    quitButton
                 }.padding(.top, 12)
             }.font(.system(size: 11)).foregroundStyle(.secondary)
             HStack(spacing: 16) {
@@ -228,16 +231,22 @@ struct PanelView: View {
                     installationDetail("执行起始目录", value: model.device.cwd)
                     installationDetail("设备 ID", value: model.device.nodeId)
                     Button("手动导入其他设备配置…", action: model.adopt).buttonStyle(.link).disabled(model.busy || model.selfTestRunning || model.selfTestStartUnconfirmed)
+                    Divider()
+                    quitButton
                 }.padding(.top, 10)
             }.font(.system(size: 11)).foregroundStyle(.secondary)
         }
+    }
+    private var quitButton: some View {
+        Button("退出 LaunchApp", action: quit).buttonStyle(.plain)
+            .help("退出菜单栏客户端，设备后台继续运行").disabled(model.busy)
     }
     private var footer: some View {
         HStack {
             Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0") · macOS arm64").font(.system(size: 11)).foregroundStyle(.tertiary)
             Spacer()
             if model.device.running == true { Text("后台独立运行").font(.system(size: 11)).foregroundStyle(.secondary) }
-            Button("退出面板", action: quit).buttonStyle(.plain).font(.system(size: 11)).help("只退出面板；已启动的设备后台独立运行").disabled(model.busy)
+            Button("收起面板", action: hide).buttonStyle(.plain).font(.system(size: 11)).help("收起弹层，保留菜单栏图标；设备后台继续运行")
         }.padding(.horizontal, 20).padding(.vertical, 12)
     }
     private var providerSelector: some View {
