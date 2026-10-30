@@ -1,0 +1,16 @@
+apps/device-panel/Sources/PanelModel.swift
+  h_26503a7f728cfb 190
+apps/device-panel/Sources/PanelView.swift
+  h_26503a7f728cfb 106,311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "bc3dbf4b0e875a59c88fa253e9ff56f07b26a207",
+  "prompts": {},
+  "humans": {
+    "h_26503a7f728cfb": {
+      "author": "xuanda0201 <268005258+xuanda0201@users.noreply.github.com>"
+    }
+  }
+}
