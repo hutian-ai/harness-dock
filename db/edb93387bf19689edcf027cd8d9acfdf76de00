@@ -1,0 +1,24 @@
+CHANGELOG.md
+  h_26503a7f728cfb 5,23-29
+README.md
+  h_26503a7f728cfb 9,51,56,60,62,73
+apps/device-panel/README.md
+  h_26503a7f728cfb 7,13,15,26,68
+apps/docs-site/README.md
+  h_26503a7f728cfb 3,7,55,61,71,75
+apps/docs-site/src/content.json
+  h_26503a7f728cfb 7,15,23,31,47,55,79,87,103,111,119,127
+apps/docs-site/src/shell.html
+  h_26503a7f728cfb 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "dbedb93387bf19689edcf027cd8d9acfdf76de00",
+  "prompts": {},
+  "humans": {
+    "h_26503a7f728cfb": {
+      "author": "xuanda0201 <268005258+xuanda0201@users.noreply.github.com>"
+    }
+  }
+}
