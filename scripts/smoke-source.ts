@@ -60,7 +60,7 @@ try {
   configPath = initialized.configPath as string;
   const device = JSON.parse(await readFile(configPath, 'utf8'));
   // No native installation, authentication, inherited account home or model call is used.
-  device.providers = { codex: { disabled: true } };
+  device.providers = { codex: { disabled: true }, dsh: { disabled: true } };
   await writeFile(configPath, JSON.stringify(device));
   const started = JSON.parse(await cli('daemon', 'start', configPath));
   client = new ServerClient(await loadClientOptions(paths.clientPath));
@@ -69,7 +69,7 @@ try {
   await until(() => peer.connected, 'device_connection');
   assert.equal(client.listNodes().length, 1);
   const inventory = await peer.request('inventory');
-  assert.deepEqual(inventory.providers.map(provider => ({ key: provider.key, status: provider.status })), [{ key: 'codex', status: 'disabled' }]);
+  assert.deepEqual(inventory.providers.map(provider => ({ key: provider.key, status: provider.status })), [{ key: 'codex', status: 'disabled' }, { key: 'dsh', status: 'disabled' }]);
   const runId = randomUUID(), sessionKey = randomUUID();
   await peer.request('prepare', { runId, sessionKey, files: [] });
   assert.deepEqual(await peer.request('collect', { runId }), []);
@@ -101,4 +101,4 @@ try {
     await writeFile(join(directory, 'result.json'), JSON.stringify({ passed, nativeProviderExecuted: false, modelExecutionVerified: false }, null, 2));
   }
 }
-console.log(`PASS source smoke: source CLIs, pairing, background start/stop/restart, SDK connection, managed files and diagnostics. Codex disabled; no model execution. Evidence: ${relative(root, directory)}`);
+console.log(`PASS source smoke: source CLIs, pairing, background start/stop/restart, SDK connection, managed files and diagnostics. Codex and dsh disabled; no model execution. Evidence: ${relative(root, directory)}`);

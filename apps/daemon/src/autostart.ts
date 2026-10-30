@@ -17,7 +17,7 @@ export interface Autostart {
   path: string;
 }
 
-export const nativePathVariables = ['CODEX_HOME', 'CODEX_CLI_PATH'] as const;
+export const nativePathVariables = ['CODEX_HOME', 'CODEX_CLI_PATH', 'DSH_HOME', 'NVM_DIR'] as const;
 export function launchAgent(root: string, config: string, runtime: string, searchPath: string, userHome: string, environment: Record<string, string> = {}) {
   const label = `org.harness-dock.device.${createHash('sha256').update(root).digest('hex').slice(0, 16)}`;
   const args = [runtime, join(root, 'launch.cjs'), 'run', config, '--background-log'];

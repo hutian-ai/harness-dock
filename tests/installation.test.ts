@@ -156,11 +156,16 @@ test('autostart changes only its owned service and requires confirmed local star
   assert.equal((await readInstallation(install, configPath))?.autostart, false);
   assert.equal(await control(config, 'status'), null);
   assert.equal(calls.at(-1), 'disable');
-  const plan = launchAgent('/private/install & test', '/private/config <test>.json', '/private/node', '/usr/bin:/bin', '/private/user');
+  const plan = launchAgent('/private/install & test', '/private/config <test>.json', '/private/node', '/usr/bin:/bin', '/private/user', {
+    DSH_HOME: '/private/dsh & test', NVM_DIR: '/private/user/.nvm', UNRELATED_SECRET: 'must-not-inherit',
+  });
   assert.match(plan.content, /SuccessfulExit<\/key><false\/>/);
   assert.match(plan.content, /install &amp; test/);
   assert.match(plan.content, /config &lt;test&gt;/);
   assert.match(plan.content, /RunAtLoad/);
+  assert.match(plan.content, /<key>DSH_HOME<\/key><string>\/private\/dsh &amp; test<\/string>/);
+  assert.match(plan.content, /<key>NVM_DIR<\/key>/);
+  assert.ok(!plan.content.includes('must-not-inherit'));
   assert.ok(!plan.content.includes(config.token));
   const plist = join(root, 'agent.plist'); await writeFile(plist, plan.content);
   if (process.platform === 'darwin') await exec('/usr/bin/plutil', ['-lint', plist]);

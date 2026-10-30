@@ -237,6 +237,6 @@ export async function managedStateBytes(stateDir: string, maxBytes: number): Pro
 /** Only derived homes and skills are removed; the configured cwd and original provider homes are never targets. */
 export async function forgetSessionDirectories(stateDir: string, sessionKey: string): Promise<void> {
   const key = digest(sessionKey);
-  for (const parts of [['sessions', key], ['providers', 'codex', key]])
+  for (const parts of [['sessions', key], ['providers', 'codex', key], ['providers', 'dsh', key]])
     await removeManagedDirectory(stateDir, join(stateDir, ...parts));
 }

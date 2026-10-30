@@ -1,7 +1,8 @@
 import { homedir } from 'node:os';
 import { discoverCodexInstallation } from './codex-environment.ts';
+import { discoverDshInstallation } from './dsh-environment.ts';
 
-export type ProviderKey = 'codex';
+export type ProviderKey = 'codex' | 'dsh';
 export interface ProviderOverride {
   executable?: string;
   home?: string;
@@ -27,13 +28,18 @@ export interface DiscoveredProvider {
   candidates: string[];
   reason?: string;
 }
-/** Discover Codex without reading credentials, opening login, or sending model prompts. */
+/** Discover named installations without reading credentials, opening login, or sending model prompts. */
 export async function discoverProviders(options: ProviderDiscoveryOptions = {}): Promise<DiscoveredProvider[]> {
   options.signal?.throwIfAborted();
   return [await discoverCodexInstallation({
     environment: options.environment ?? process.env,
     homeDirectory: options.homeDirectory ?? homedir(),
     override: options.overrides?.codex,
+    signal: options.signal,
+  }), await discoverDshInstallation({
+    environment: options.environment ?? process.env,
+    homeDirectory: options.homeDirectory ?? homedir(),
+    override: options.overrides?.dsh,
     signal: options.signal,
   })];
 }

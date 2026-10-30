@@ -6,7 +6,7 @@ import { lstat, mkdtemp, mkdir, readFile, rename, rm, symlink, link, writeFile }
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { DeviceHost } from '../apps/daemon/src/device-host.ts';
-import { managedStateBytes, forgetSessionDirectories, prepareDirectories } from '../apps/daemon/src/device-files.ts';
+import { digest, managedStateBytes, forgetSessionDirectories, prepareDirectories } from '../apps/daemon/src/device-files.ts';
 import { RotatingLog } from '../apps/daemon/src/rotating-log.ts';
 import { DeviceStore } from '../apps/daemon/src/device-store.ts';
 import { ObservationWriter } from '../apps/daemon/src/observation-writer.ts';
@@ -30,7 +30,7 @@ test('an approval holds only its own session; parallel cancellation, output and 
   let starts = 0;
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 },
-    providers: { codex: { executable, home: root } },
+    providers: { codex: { executable, home: root }, dsh: { disabled: true } },
   }, createProviderAdapters(() => ({
     inspect: async () => ({ models: [{ id: 'synthetic', efforts: [], serviceTiers: [] }], config: { sandbox: 'workspace-write', approvalPolicy: 'on-request', nativeMemoryDisabled: false } }),
     reconcile: async () => null, close: async () => {},
@@ -166,7 +166,8 @@ test('observation streaming never treats a failed local observation write as con
 test('device preparation preserves identity and stable skills, and output publication rejects links', async t => {
   const root = await mkdtemp(join(tmpdir(), 'dock-device-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const config = { mode: 'device' as const, nodeId: randomUUID(), token: 'x'.repeat(32), endpoint: 'ws://127.0.0.1:48518/', cwd: root, stateDir: join(root, 'state') };
+  const config = { mode: 'device' as const, nodeId: randomUUID(), token: 'x'.repeat(32), endpoint: 'ws://127.0.0.1:48518/', cwd: root, stateDir: join(root, 'state'),
+    providers: { codex: { disabled: true }, dsh: { disabled: true } } };
   const host = new DeviceHost(config);
   t.after(() => host.close());
   const files = [{ path: 'skill/SKILL.md', contentBase64: Buffer.from('synthetic').toString('base64') }];
@@ -222,7 +223,8 @@ test('device preparation preserves identity and stable skills, and output public
 test('preparation retries and release recover unregistered directories without altering execution evidence', async t => {
   const root = await mkdtemp(join(tmpdir(), 'dock-prepare-recovery-'));
   const config = { mode: 'device' as const, nodeId: randomUUID(), token: 'x'.repeat(32),
-    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 } };
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), resources: { maxStateBytes: 2 * 1024 * 1024 },
+    providers: { codex: { disabled: true }, dsh: { disabled: true } } };
   const files = [{ path: 'skill/SKILL.md', contentBase64: Buffer.from('synthetic skill').toString('base64') }];
   // Reproduce a restart after files were published but before their SQLite registration.
   const first = new DeviceHost(config);
@@ -270,7 +272,7 @@ test('refreshed capabilities validate reused adapters before starting another ex
   const executions: { effort?: string; mode?: string }[] = [];
   const host = new DeviceHost({ mode: 'device', nodeId: randomUUID(), token: 'x'.repeat(32),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { executable, home: root } },
+    providers: { codex: { executable, home: root }, dsh: { disabled: true } },
   }, createProviderAdapters(() => {
     owners++;
     return {
@@ -340,7 +342,8 @@ test('maintenance shutdown refuses a pending admission or unknown result and res
   const root = await mkdtemp(join(tmpdir(), 'dock-maintenance-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const config = { mode: 'device' as const, nodeId: randomUUID(), token: 'x'.repeat(32),
-    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state') };
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
+    providers: { codex: { disabled: true }, dsh: { disabled: true } } };
   const host = new DeviceHost(config);
   const preparing = host.prepare({ runId: 'prepared' });
   assert.throws(() => host.closeIfIdle(), /device_busy/);
@@ -426,4 +429,19 @@ test('managed cleanup avoids user directories and background logs rotate while r
   assert.equal((await readFile(join(stateDir, 'daemon.log'), 'utf8')), '9'.repeat(100));
   assert.equal((await readFile(join(stateDir, 'daemon.log.2'), 'utf8')), '7'.repeat(100));
   await assert.rejects(readFile(join(stateDir, 'daemon.log.3')), /ENOENT/);
+  await rm(join(stateDir, 'sessions'));
+  const sessionKey = 'forget-this-session', key = digest(sessionKey), otherKey = digest('keep-other-session');
+  const scopes = [['sessions'], ['providers', 'codex'], ['providers', 'dsh']];
+  for (const scope of scopes) {
+    for (const selected of [key, otherKey]) {
+      const path = join(stateDir, ...scope, selected); await mkdir(path, { recursive: true });
+      await writeFile(join(path, 'keep'), selected);
+    }
+  }
+  await forgetSessionDirectories(stateDir, sessionKey);
+  for (const scope of scopes) {
+    await assert.rejects(lstat(join(stateDir, ...scope, key)), { code: 'ENOENT' });
+    assert.equal(await readFile(join(stateDir, ...scope, otherKey, 'keep'), 'utf8'), otherKey);
+  }
+  assert.equal((await readFile(join(outside, 'keep'))).length, expected + 1000, 'native user files remain outside cleanup targets');
 });

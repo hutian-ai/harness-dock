@@ -11,7 +11,7 @@ export async function deviceDiagnostics(path: string): Promise<DiagnosticCheck[]
     checks.push({ check: 'configuration', state: process.platform !== 'win32' && (file.mode & 0o077) ? 'fail' : 'pass', detail: 'Device configuration parsed; it must be readable by its owner only.', next: 'Use chmod 600 on this private config; never paste its contents into support reports.' });
     const [major, minor] = process.versions.node.split('.').map(Number);
     checks.push({ check: 'runtime', state: major! > 22 || major === 22 && minor! >= 19 ? 'pass' : 'fail', detail: `Node ${process.versions.node}; requires 22.19+.` });
-    checks.push({ check: 'supported_device', state: process.platform === 'darwin' && process.arch === 'arm64' ? 'pass' : 'fail', detail: `${process.platform}/${process.arch}; this release supports macOS arm64 + Codex.` });
+    checks.push({ check: 'supported_device', state: process.platform === 'darwin' && process.arch === 'arm64' ? 'pass' : 'fail', detail: `${process.platform}/${process.arch}; device execution supports macOS arm64 (Codex; experimental dsh).` });
     checks.push({ check: 'workdir', state: (await stat(config.cwd)).isDirectory() ? 'pass' : 'fail', detail: 'Configured work directory exists.' });
     const status = await control(config, 'status');
     checks.push({ check: 'daemon', state: status ? 'pass' : 'fail', detail: status ? 'Owning daemon answered through its authenticated local socket.' : 'No owning daemon answered.', next: 'Start the installed entrypoint; status/start never imply model execution.' });
@@ -30,9 +30,12 @@ export async function deviceDiagnostics(path: string): Promise<DiagnosticCheck[]
     } catch (error) {
       checks.push({ check: 'server_health', state: status?.connected ? 'unknown' : 'fail', detail: diagnosticError(error), next: 'Check DNS, trusted CA, server and healthz proxy routing. Separate device ports may not serve healthz.' });
     }
-    const { discoverCodexInstallation } = await import('@harness-dock/drivers');
-    const provider = await discoverCodexInstallation({ environment: process.env, homeDirectory: homedir(), override: config.providers?.codex, signal: AbortSignal.timeout(20_000) });
-    checks.push({ check: 'codex_installation', state: provider.status === 'installed' ? 'pass' : 'fail', detail: `Codex ${provider.status}${provider.version ? ` (${provider.version})` : ''}.`, next: 'Install/log in using native Codex. Set providers.codex.executable/home locally if discovery is ambiguous.' });
+    const { discoverProviders } = await import('@harness-dock/drivers');
+    const providers = await discoverProviders({ environment: process.env, homeDirectory: homedir(), overrides: config.providers, signal: AbortSignal.timeout(20_000) });
+    for (const provider of providers) checks.push({ check: `${provider.key}_installation`, state: provider.status === 'installed' ? 'pass' : 'unknown',
+      detail: `${provider.displayName} ${provider.status}${provider.version ? ` (${provider.version})` : ''}.`,
+      next: `Use the native installation/login. Set providers.${provider.key}.executable/home locally if discovery is ambiguous.` });
+    if (!providers.some(provider => provider.status === 'installed')) checks.push({ check: 'native_installation', state: 'fail', detail: 'No enabled native Harness installation was found.' });
     checks.push({ check: 'native_auth_and_protocol', state: 'unknown', detail: 'Installation discovery does not verify native login, ACP, model access, desktop tools or plugins.', next: 'Use the authorized application client doctor for explicit protocol probing; run client test separately for real execution.' });
     if (status?.unresolvedRunIds?.length) checks.push({ check: 'unresolved_execution', state: 'fail', detail: `${status.unresolvedRunIds.length} execution(s) need reconciliation.`, next: 'Query original run IDs; do not clear state or resend prompts to bypass unknown results.' });
   } catch (error) {

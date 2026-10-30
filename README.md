@@ -21,16 +21,20 @@ flowchart LR
 
 ## 支持哪些 Harness
 
-统一接入不同 Harness 是产品方向，当前安装包只包含 Codex。
+统一接入不同 Harness 是产品方向，当前已发布安装包只包含 Codex；源码新增 dsh 的 SDK 实验接入。
 
 | 原生 Harness | 支持状态 |
 | --- | --- |
 | Codex | 已支持：macOS 13+、Apple Silicon |
-| dsh | 计划接入 |
+| dsh（DeepSeek Harness） | 源码实验接入：macOS arm64，复用本机 dsh；未更新已发布安装包 |
 | zcode | 计划接入 |
 | opencode | 计划接入 |
 
 具体工具能力取决于原生环境和权限。完整平台与能力边界见[支持范围](https://hutian-ai.github.io/harness-dock/support/)。
+
+dsh 实验入口复用现有 SDK 的 `provider: 'dsh'`；设备需安装并配置原生 `@deepseek-ai/dsh`，首个适配版本为 `0.1.2-rc.1`。模型值从设备 inventory 原样选择。原生审批保留 `optionId`，支持会话续接；暂不提供精确最终答案识别或只读结果查回，重启未完成的执行保持 `unknown`。面板的“测试 Codex”只验证 Codex。配置与示例见驱动页。
+
+维护者可运行 `pnpm accept:dsh`，通过本机隔离的 SDK / Server / DeviceHost fixture 验收原生审批允许、拒绝、取消后旧决定失效、一次性授权作用域、MCP 成功/错误与送达、调用方和原生项目 skills 共存。会实际使用模型额度，证据保存在 ignored `.local/dsh-acceptance-*`；本机合成验收不替代独立设备、独立 Daemon 进程或发行包验收。
 
 ## 开始使用
 

@@ -99,7 +99,7 @@ test('device doctor refuses to combine a stale daemon endpoint with a different 
   const address = health.address(); assert.ok(address && typeof address !== 'string');
   const files = await initializeDevice({ home: join(dir, 'device'), cwd: dir, endpoint: `ws://127.0.0.1:${address.port}/` });
   const config = await readConfig(files.configPath);
-  await writeFile(files.configPath, JSON.stringify({ ...config, providers: { codex: { disabled: true } } }));
+  await writeFile(files.configPath, JSON.stringify({ ...config, providers: { codex: { disabled: true }, dsh: { disabled: true } } }));
   const daemonId = randomUUID();
   const close = await serveControl(config, () => ({ nodeId: config.nodeId, daemonId, pid: process.pid, connected: true, endpoint: 'ws://127.0.0.1:1/' }), async () => {});
   t.after(close);

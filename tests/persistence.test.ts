@@ -18,7 +18,7 @@ test('device crash preserves admission, excludes a second owner and never redisp
   await writeFile(executable, `#!${process.execPath}\nconsole.log('codex-cli 1.0.0');\n`, { mode: 0o700 });
   const config: DeviceConfig = { mode: 'device', nodeId: randomUUID(), token: 'synthetic'.repeat(5),
     endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
-    providers: { codex: { executable, home: root } } };
+    providers: { codex: { executable, home: root }, dsh: { disabled: true } } };
   const input = { provider: 'codex', runId: randomUUID(), model: 'synthetic', prompt: 'synthetic' };
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
     import {DeviceHost} from './apps/daemon/src/device-host.ts';
@@ -52,7 +52,8 @@ test('device recovery delegates an opaque context for Codex without discovery or
   const root = await mkdtemp(join(tmpdir(), 'dock-provider-recovery-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const config: DeviceConfig = { mode: 'device', nodeId: randomUUID(), token: 'synthetic'.repeat(5),
-    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state') };
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'),
+    providers: { codex: { disabled: true }, dsh: { disabled: true } } };
   const context = { nativeReference: 'original-turn', providerRevision: 'synthetic' };
   const store = new DeviceStore(config.nodeId, config.stateDir);
   store.admit({ runId: 'original-run', provider: 'codex', input: 'original-identity', state: 'running', environment: context });

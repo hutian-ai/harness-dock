@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { CodexHost, type CodexHostEnvironment } from './codex-host.ts';
 import type { CodexInspection } from './codex.ts';
+import { DshHost, type DshHostEnvironment, type DshInspection } from './dsh.ts';
 import type { DiscoveredProvider } from './discovery.ts';
 import type { NativePermissionRequest, NativePermissionDecision } from './execution.ts';
 import type { McpInvocation, McpToolDefinition } from './mcp-bridge.ts';
 
 export type CodexHostPort = Pick<CodexHost, 'inspect' | 'execute' | 'reconcile' | 'close'>;
+export type DshHostPort = Pick<DshHost, 'inspect' | 'execute' | 'close'>;
 export interface ProviderCapabilities {
   protocol: 'acp';
   sessionResume: 'native' | 'unsupported';
@@ -52,12 +54,16 @@ export interface ProviderAdapters {
   reconcile(provider: string, context: unknown, runId: string, signal: AbortSignal): Promise<{ state: 'unknown' | 'completed' | 'failed' | 'cancelled' } | null>;
   close(): Promise<void>;
 }
-export function createProviderAdapters(codex: CodexHostPort | (() => CodexHostPort) = () => new CodexHost()): ProviderAdapters {
+export function createProviderAdapters(
+  codex: CodexHostPort | (() => CodexHostPort) = () => new CodexHost(),
+  dsh: () => DshHostPort = () => new DshHost(),
+): ProviderAdapters {
   const createCodex = typeof codex === 'function' ? codex : () => codex;
   const recoveryHost = createCodex();
   let inspectionOwnsHost = false;
   return {
     create(provider, options, scope) {
+      if (provider.key === 'dsh') return createDshAdapter(provider, { ...options, dsh: dsh() });
       if (scope === 'inspection') inspectionOwnsHost = true;
       return createProviderAdapter(provider, { ...options, codex: scope === 'inspection' ? recoveryHost : createCodex() });
     },
@@ -69,6 +75,44 @@ export function createProviderAdapters(codex: CodexHostPort | (() => CodexHostPo
   };
 }
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+
+function createDshAdapter(provider: DiscoveredProvider, options: ProviderAdapterOptions & { dsh: DshHostPort }): ProviderAdapter {
+  let inspection = options.inspection as DshInspection | undefined;
+  const environment = (input: Parameters<ProviderAdapter['environment']>[0]): DshHostEnvironment => ({
+    cwd: input.workdir, dshHome: provider.home!, dshBin: provider.executable!,
+    stateDir: join(options.stateDir, 'providers', 'dsh', digest(input.sessionKey), 'execution'),
+    skillDirectory: input.skillDirectory, environment: options.environment,
+  });
+  return {
+    async inspect(signal) {
+      inspection = await options.dsh.inspect(environment({ sessionKey: 'probe', workdir: options.cwd, skillDirectory: '', config: {} }), signal);
+      return { models: inspection.models.map(model => model.id), inspection, capabilities: {
+        protocol: 'acp', browser: 'unverified', sessionResume: inspection.sessionResume ? 'native' : 'unsupported', resultQuery: 'unsupported',
+        exactFinalAnswer: false, callerSkills: true, permissionInteractions: ['options'], desktopTools: 'not_reported',
+      } };
+    },
+    validate({ model, config }) {
+      if (Object.keys(config).some(key => key !== 'effort')) throw new Error('unsupported_config');
+      const selected = inspection?.models.find(value => value.id === (model ?? inspection?.currentModelId));
+      if (config.effort !== undefined && (typeof config.effort !== 'string' || !selected?.efforts.includes(config.effort)))
+        throw new Error('configuration_unavailable');
+    },
+    environment,
+    async execute(input, selectedEnvironment) {
+      input.steering(null);
+      return options.dsh.execute({
+        environment: selectedEnvironment as DshHostEnvironment, runId: input.runId, prompt: input.prompt, model: input.model,
+        effort: typeof input.config.effort === 'string' ? input.config.effort : undefined,
+        resumeThreadId: input.resumeSessionId, retainSession: input.retainSession,
+        signal: input.signal, tools: { name: input.tools?.name ?? 'controller', definitions: input.tools?.definitions ?? [], invocation: input.invocation },
+        onReady: input.ready, onEvent: event => input.observe('event', event), permission: input.permission,
+      });
+    },
+    close: () => options.dsh.close(),
+    forgetSession: () => options.dsh.close(),
+  };
+}
+
 const interactions = ['options', 'form', 'url'] as const;
 /** Codex policy and native recovery stay outside device admission. */
 export function createProviderAdapter(provider: DiscoveredProvider, options: {

@@ -50,11 +50,11 @@ npm run preview
 
 架构与驱动页使用正文内的静态 SVG 图，样式位于 `public/style.css` 的 `.doc-diagram` 规则；无需 Mermaid 脚本、CDN 或外部字体。修改时保留每张图的 title/desc、唯一 ID 和文字说明，并检查亮色、暗色与窄屏局部滚动。根 README 使用 GitHub 可渲染的 Mermaid，分层与文档站保持一致。
 
-首页以“让你的应用，调用原生执行能力”说明产品定位，导语强调通过 SDK 调用其他机器上的原生 Harness。主要价值依次为应用接入业务流程、复用设备接入、独立后台持有执行与按原身份查回；首屏主操作进入应用 SDK，设备安装保留独立入口。支持情况紧邻首屏：Codex 已支持，dsh、zcode、opencode 计划接入；完整状态维护在 support 的 harness-roadmap 节。首页不放不可操作的模拟功能卡或像链接的产品名。选型说明放在 overview 的 when-to-use 节，区分个人原生远程控制、单 Harness 的 SDK / App Server 集成、Dock 的跨机器接入与执行管理；保留官方入口及核对日期，明确审批与事件并非 Dock 独有，多 Harness 为次要的适配方向。首页流转图使用内联 SVG；窄屏改为纵向 HTML，信号动画遵循减少动态效果设置。
+首页以“让你的应用，调用原生执行能力”说明产品定位，导语强调通过 SDK 调用其他机器上的原生 Harness。主要价值依次为应用接入业务流程、复用设备接入、独立后台持有执行与按原身份查回；首屏主操作进入应用 SDK，设备安装保留独立入口。支持情况紧邻首屏：Codex 已支持，dsh 为源码 SDK 实验入口，zcode、opencode 计划接入；完整状态维护在 support 的 harness-roadmap 节。首页不放不可操作的模拟功能卡或像链接的产品名。选型说明放在 overview 的 when-to-use 节，区分个人原生远程控制、单 Harness 的 SDK / App Server 集成、Dock 的跨机器接入与执行管理；保留官方入口及核对日期，明确审批与事件并非 Dock 独有，多 Harness 为次要的适配方向。首页流转图使用内联 SVG；窄屏改为纵向 HTML，信号动画遵循减少动态效果设置。
 
 首屏图从应用经连接 SDK、Server 到独立设备后台，强调后台持有进程与记录、原生审批和结果返回应用。ACP 只表示设备后台与原生 Harness 之间的执行协议，不用于应用、Server 与设备的网络连接。图内展示设备上所选的原生 Harness 及安装、登录、工具和会话，不以多个计划适配对象作为图的重点；当前支持和计划适配在图外区分。ACPX、各 Harness 的具名适配器与原生进程层级见 architecture 和 drivers 页面。
 
-产品与维护文档统一维护在 src/content.json；不再保留重复的 docs/ 目录。支持范围为 macOS arm64 + Codex Developer Alpha，其他 Harness 尚未支持。文档站不包含真实地址、设备身份或凭据。
+产品与维护文档统一维护在 src/content.json；不再保留重复的 docs/ 目录。已发布支持范围为 macOS arm64 + Codex Developer Alpha；源码新增 dsh SDK 实验适配，面板自检仍只测 Codex，其他 Harness 尚未支持。文档站不包含真实地址、设备身份或凭据。
 
 构建、链接检查和页面 QA 不替代产品的真实设备安装、模型执行或部署验收。
 
@@ -98,7 +98,7 @@ SDK 接入：启动预览后访问 `/sdk/`。
 
 ### drivers
 
-Codex 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分 dock 集成层、ACPX 客户端运行库、codex-acp 协议适配器与原生 Codex。
+Harness 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分具名 dock 集成层与 ACPX，分别说明 Codex/codex-acp、dsh 原生 ACP 路径及能力边界。
 
 ### support
 
@@ -120,6 +120,7 @@ Codex 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分 dock 集
 | 文档站 | 构建、站内链接、桌面/窄屏和亮暗主题实际查看 |
 | 独立分发 | 同一候选包的仓外离线安装、许可、manifest 和摘要 |
 | 真实 Codex | 精确完成、两轮续接、工具/审批投递、只读恢复和不重派 |
+| 真实 dsh | `pnpm accept:dsh`：SDK / Server / DeviceHost 本机 fixture、原生审批允许/拒绝/失效与一次性作用域、MCP 成功/错误/送达、调用方与原生项目 skills 共存；不替代独立进程、设备或发行包 |
 | 实际 GUI | 邀请、已有设备、断线、状态读取失败、诊断、一键本机测试与历史结果、关闭重开不重派、退出与维护 |
 | 独立设备 | 首装、移动 App、真实登录自启、升级/回滚和用户文件保留 |
 | 远端 CI 与发行 | 对应源码 revision 的 CI、Developer ID/公证、下载入口和发行权限分别确认 |

@@ -115,7 +115,7 @@ struct DaemonBridge {
                 process.standardOutput = output
                 process.standardError = FileHandle.nullDevice
                 // Keep native environment discovery; never import unrelated shell credentials into the helper.
-                let allowed = ["HOME", "PATH", "SHELL", "TMPDIR", "LANG", "LC_ALL", "CODEX_HOME", "CODEX_CLI_PATH"]
+                let allowed = ["HOME", "PATH", "SHELL", "TMPDIR", "LANG", "LC_ALL", "CODEX_HOME", "CODEX_CLI_PATH", "DSH_HOME", "NVM_DIR"]
                 process.environment = ProcessInfo.processInfo.environment.filter { allowed.contains($0.key) }
                 let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
                 do {

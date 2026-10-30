@@ -46,7 +46,7 @@ function canonical(value: unknown): string {
 function executionInput(value: unknown): DeviceExecuteInput {
   const input = object(value);
   for (const key of Object.keys(input)) if (!['provider', 'runId', 'sessionKey', 'prompt', 'model', 'config', 'resumeSessionId', 'previousRunId', 'retainSession', 'tools'].includes(key)) throw new Error('unsupported_execution_field');
-  if (input.provider !== 'codex') throw new Error('unsupported_provider');
+  if (input.provider !== 'codex' && input.provider !== 'dsh') throw new Error('unsupported_provider');
   identity(input.runId);
   for (const key of ['sessionKey', 'model', 'resumeSessionId', 'previousRunId']) if (input[key] !== undefined) identity(input[key]);
   if (typeof input.prompt !== 'string' || !input.prompt || input.prompt.length > 1_000_000) throw new Error('invalid_prompt');
@@ -459,7 +459,7 @@ export class DeviceHost {
             else if (request.form && decision && typeof decision === 'object' && 'action' in decision
               && ['accept', 'decline', 'cancel'].includes(String(decision.action)) && Buffer.byteLength(JSON.stringify(decision)) <= 32768)
               effective = decision as NativePermissionDecision;
-            else if (!request.form && (!request.options || input.provider !== 'codex')
+            else if (!request.form && !request.options
               && (decision === 'deny' || decision === 'allow' && request.canAllow)) effective = decision;
           }
           const confirmed = decision !== undefined && canonical(decision) === canonical(effective);

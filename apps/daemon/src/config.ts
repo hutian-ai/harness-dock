@@ -23,7 +23,7 @@ const deviceConfig = z.strictObject({
   resources: z.record(z.string(), z.unknown(), { error: 'invalid_resource_limit' }).optional(),
   cwd: absolutePath('Node directories must be absolute'), stateDir: absolutePath('Node directories must be absolute'),
   caFile: absolutePath('Node directories must be absolute').optional(),
-  providers: z.partialRecord(z.enum(['codex']), providerOverride, { error: 'invalid_provider_override' }).optional(),
+  providers: z.partialRecord(z.enum(['codex', 'dsh']), providerOverride, { error: 'invalid_provider_override' }).optional(),
 }, { error: 'invalid_device_config' });
 const devicePairing = z.strictObject({ nodeId: z.string(), token: z.string(), endpoint: z.string() });
 export function parseDevicePairing(input: unknown): Pick<NodeIdentity, 'nodeId' | 'token' | 'endpoint'> {

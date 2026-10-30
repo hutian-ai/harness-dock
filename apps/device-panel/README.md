@@ -1,6 +1,6 @@
 # macOS 设备面板
 
-轻量菜单栏 App，使用系统 AppKit / SwiftUI。支持 macOS 13+、Apple Silicon、Codex。面板先检测已有设备；新设备打开服务器邀请链接，在客户端确认即可安装并连接。工作目录自动设置，用户可直接点击“测试 Codex”验证本机模型执行，查看连接、最近测试结果与设备执行状态，或进行诊断、启停、自启、升级和回滚。
+轻量菜单栏 App，使用系统 AppKit / SwiftUI，支持 macOS 13+、Apple Silicon。已发布 v0.1.0 客户端支持 Codex；源码与新构建候选另含 dsh 的 SDK 实验适配，现有公开下载尚未更新。面板先检测已有设备；新设备打开服务器邀请链接，在客户端确认即可安装并连接。工作目录自动设置，用户可直接点击“测试 Codex”验证本机 Codex 模型执行，查看连接、最近测试结果与设备执行状态，或进行诊断、启停、自启、升级和回滚。
 
 ## 安装与接入
 
@@ -42,7 +42,18 @@ pnpm panel:build --bundles .local/bundles/candidate --output .local/panel/candid
 
 产物为 `Harness Dock.app`、ZIP、摘要与安装说明，全部位于 ignored 的 `.local/`。App 随带 Daemon、Node、依赖、补丁和许可。默认使用当前 Node 及其安装根目录的 LICENSE；可用 `--node /absolute/node --node-license /absolute/LICENSE` 显式选择。运行时必须为 macOS arm64、Node 22.19+，且只链接系统动态库；拒绝依赖外部 Homebrew 动态库的构建。构建只进行本地 ad-hoc 签名，不等于 Developer ID 签名或公证；公开发行还需核对源码来源、验证范围和 Release 资产。
 
-用户将 App 移入 `~/Applications` 后打开，无需安装 Git、pnpm 或 Node。原生 Codex 由用户自己安装、登录和授权。接入向导不会调用模型，也不建立第二条设备身份连接。
+用户将 App 移入 `~/Applications` 后打开，无需安装 Git、pnpm 或 Node。所选原生 Codex/dsh 由用户自己安装、登录和授权；App 不另行安装 dsh 或复制原生认证。接入向导不会调用模型，也不建立第二条设备身份连接。
+
+## 更新本机 App 与后台
+
+替换 `Harness Dock.app` 只更新面板及其随包资源，已经安装的后台仍运行其固定 release。要使用新包中的 dsh 实验适配，需要同时完成后台升级：
+
+1. 先确认已有设备没有活动或 unknown 执行；有待核对任务时，回到原调用方按原身份处理，不通过清理状态绕过维护限制。
+2. 退出面板，以同平台的新构建候选替换本机 App，再打开原配置。退出面板会保留后台；设备身份、私有配置、状态与工作目录不随 App 替换而重新创建。
+3. 在维护区选择“更新至应用版本”。helper 校验随包运行包，并由后台拥有者通过受保护 socket 再次检查空闲、升级和读回状态。不要手动覆盖运行中的 release 或按保存 PID 停机。
+4. 核对已安装后台 release、设备身份与连接状态。升级结果未确认时只读查询状态和日志，不自动重试升级或重发执行。
+
+dsh 任务仍由应用 SDK 以 `provider: 'dsh'` 发起，模型值从设备 inventory 原样选择。面板的“测试 Codex”只验 Codex；更新 App/后台不等于完成 dsh 工具、业务授权或独立设备验收。公开 v0.1.0 下载与本机构建候选的状态分别记录。
 
 ## 所有权与本地接口
 
@@ -76,6 +87,8 @@ open -n ".local/panel/candidate/Harness Dock.app" --args --config "$PWD/.local/p
 ```
 
 原始截图、日志、设备标识及配对文件留在 `.local/`。
+
+dsh 的维护者验收使用 `pnpm accept:dsh`，需要本机原生 dsh 登录与模型额度。六类本机 fixture 场景包括 MCP 成功/错误、调用方与原生项目 skills 共存、原生审批允许/拒绝/取消后旧决定失效；允许用例还核对一次性授权作用域。fixture 仅为测试原生子进程选择 read-only，不修改用户 settings 或已安装后台。MCP 错误在原生投影为 failed 时，送达状态保守保持 unknown。该本机 SDK / Server / DeviceHost 证据不替代独立后台进程、目标 Mac 首装升级或发行包验收，原始输入、回调和结果留在 ignored `.local/`。
 
 ## 邀请链接验收
 

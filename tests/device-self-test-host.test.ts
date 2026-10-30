@@ -37,7 +37,7 @@ async function fixture(t: TestContext, options: {
   const root = await mkdtemp(resolve('.local/self-test-host-')), executable = join(root, 'codex');
   await writeFile(executable, '#!/bin/sh\necho "codex-cli 0.1.0"\n', { mode: 0o700 });
   const config: DeviceConfig = { mode: 'device', nodeId: randomUUID(), token: 'synthetic-self-test-token-value-12345',
-    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), providers: { codex: { executable, home: root } } };
+    endpoint: 'ws://127.0.0.1:1/', cwd: root, stateDir: join(root, 'state'), providers: { codex: { executable, home: root }, dsh: { disabled: true } } };
   const inputs: CodexHostInput<unknown>[] = [], runPorts = new Map<string, number>(), closes: number[] = [];
   const adapters = createProviderAdapters(() => {
     const port = closes.length; closes.push(0);

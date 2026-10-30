@@ -362,7 +362,7 @@ struct PanelView: View {
         ["configuration": "设备配置", "runtime": "随包运行时", "supported_device": "设备平台", "workdir": "工作目录",
          "daemon": "本地后台进程", "daemon_configuration": "后台配置一致性", "device_authentication": "设备配对与连接",
          "server_transport": "服务器 TLS / 网络", "device_protocol": "协议版本", "server_health": "服务器健康检查",
-         "codex_installation": "Codex 安装", "native_auth_and_protocol": "登录、模型与工具（需独立验收）",
+         "codex_installation": "Codex 安装", "dsh_installation": "DeepSeek Harness 安装", "native_installation": "原生助手安装", "native_auth_and_protocol": "登录、模型与工具（需独立验收）",
          "unresolved_execution": "执行结果待核对", "device": "设备诊断"][code] ?? "其他检查"
     }
 }

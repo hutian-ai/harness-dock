@@ -17,6 +17,7 @@
     "daemon": "node --import tsx apps/daemon/src/cli.ts",
     "dev:daemon": "node --import tsx apps/daemon/src/cli.ts run .local/device/config.json",
     "accept:codex": "pnpm build && node --import tsx scripts/accept-codex.ts",
+    "accept:dsh": "pnpm build && node --import tsx scripts/accept-dsh.ts",
     "bundle": "pnpm build && node --import tsx scripts/bundle.ts",
     "package:local": "node --import tsx scripts/package-release.ts",
     "panel:build": "node --import tsx scripts/package-panel.ts",

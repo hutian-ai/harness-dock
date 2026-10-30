@@ -13,15 +13,15 @@ export async function usableFile(path: string, nodeScript = false): Promise<bool
   } catch { return false; }
 }
 
-export async function installedVersion(path: string): Promise<string | null> {
+export async function installedVersion(path: string, packageName = '@openai/codex', signal?: AbortSignal): Promise<string | null> {
+  signal?.throwIfAborted();
   try {
     const canonical = await realpath(path);
     let directory = dirname(canonical);
     for (let depth = 0; depth < 6; depth += 1) {
       try {
         const pkg = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8')) as { name?: string; version?: string };
-        const expected = /^@openai\/codex$/u;
-        if (typeof pkg.name === 'string' && expected.test(pkg.name) && typeof pkg.version === 'string') return pkg.version;
+        if (pkg.name === packageName && typeof pkg.version === 'string') return pkg.version;
       } catch { /* A CLI can be a native executable with no package metadata. */ }
       const parent = dirname(directory);
       if (parent === directory) break;
@@ -31,9 +31,9 @@ export async function installedVersion(path: string): Promise<string | null> {
   try {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
       ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SYSTEMROOT'].includes(key.toUpperCase())));
-    const result = await runBoundedCommand(path, ['--version'], { env, timeoutMs: 5_000, maxOutputCharacters: 4_096 });
-    return result.exitCode === 0 ? result.stdout.trim().replace(/^codex-cli\s+/u, '') : null;
-  } catch { /* Installation discovery is not protocol readiness. */ }
+    const result = await runBoundedCommand(path, ['--version'], { env, signal, timeoutMs: 5_000, maxOutputCharacters: 4_096 });
+    return result.exitCode === 0 ? result.stdout.trim().replace(packageName === '@openai/codex' ? /^codex-cli\s+/u : /^dsh\s+/u, '') : null;
+  } catch { signal?.throwIfAborted(); /* Installation discovery is not protocol readiness. */ }
   return null;
 }
 

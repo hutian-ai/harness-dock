@@ -9,5 +9,7 @@ export { nativePermissionModes, type NativePermissionMode } from './native-permi
 export type { HarnessExecutionInput, NativePermissionRequest, NativePermissionDecision, NativeInteractionResponse } from './execution.ts';
 export { discoverProviders, type ProviderKey, type ProviderOverride, type ProviderDiscoveryOptions, type DiscoveredProvider } from './discovery.ts';
 export { discoverCodexInstallation } from './codex-environment.ts';
+export { discoverDshInstallation } from './dsh-environment.ts';
+export { DshHost, type DshHostEnvironment, type DshInspection, type DshEvidence } from './dsh.ts';
 export { AnswerBudget, boundedObservation, readBoundedText, MAX_ANSWER_BYTES, MAX_OBSERVATION_BYTES } from './output-limits.ts';
 export { createProviderAdapter, createProviderAdapters, type ProviderAdapters, type ProviderAdapterOptions, type ProviderAdapter, type ProviderCapabilities, type ProviderExecution, type ProviderInspection } from './provider-adapter.ts';

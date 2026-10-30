@@ -17,6 +17,7 @@ test('native recovery uses persisted Codex context and never probes or dispatche
   const signal = new AbortController().signal;
   assert.equal(await adapters.reconcile('unregistered-provider', context, result.runId, signal), null);
   assert.equal(await adapters.reconcile('codex', undefined, result.runId, signal), null);
+  assert.equal(await adapters.reconcile('dsh', { stateDir: '/synthetic/state' }, result.runId, signal), null);
   assert.equal(queries, 0);
   assert.equal(await adapters.reconcile('codex', context, result.runId, signal), result);
   assert.equal(queries, 1);
