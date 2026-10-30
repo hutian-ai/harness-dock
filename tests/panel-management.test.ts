@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { test } from 'node:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { DEVICE_PROTOCOL_VERSION } from '../packages/protocol/src/index.ts';
@@ -13,6 +15,7 @@ import { readInstallation } from '../apps/daemon/src/installation.ts';
 import { writeReleaseManifest } from '../apps/daemon/src/release-manifest.ts';
 import { setupDevice } from '../apps/daemon/src/setup.ts';
 import { retireLegacyAutostart } from '../apps/daemon/src/legacy-autostart.ts';
+import { writePanelControlFixture } from './fixtures/panel-control.ts';
 
 async function directory() { await mkdir('.local', { recursive: true }); return mkdtemp(resolve('.local/panel-test-')); }
 
@@ -194,13 +197,15 @@ test('panel setup installs its bundled runtime independently and stop keeps the 
   await copyFile(process.execPath, join(bundle, 'runtime/node'), constants.COPYFILE_FICLONE);
   await chmod(join(bundle, 'runtime/node'), 0o755);
   await writeFile(join(bundle, 'package.json'), JSON.stringify({ name: '@harness-dock/daemon', version: 'panel-fixture', type: 'module' }));
+  await writePanelControlFixture(bundle);
   await writeFile(join(bundle, 'dist/device-main.js'), 'export const fixture = true;');
   await writeFile(join(bundle, 'dist/cli.js'), `
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {serveControl} from ${JSON.stringify(pathToFileURL(resolve('apps/daemon/dist/local-control.js')).href)};
-if(process.argv[2]==='help') console.log('synthetic panel daemon');
+const controlModule=new URL('./local-control.js',import.meta.url);
+const {serveControl}=await import(controlModule.href);
+if(process.argv[2]==='help') console.log(JSON.stringify({controlModule:controlModule.href,protocolModule:import.meta.resolve('@harness-dock/protocol')}));
 else if(process.argv[2]==='run') {
  const config=JSON.parse(await readFile(process.argv[3],'utf8'));
  const status={nodeId:config.nodeId,daemonId:'synthetic-panel-daemon',pid:process.pid,connected:false,endpoint:config.endpoint,
@@ -220,6 +225,12 @@ else if(process.argv[2]==='run') {
   assert.equal(state.configured, true); assert.equal(state.running, true); assert.equal(state.connected, false);
   const installation = (await readInstallation(join(home, 'installation'), configPath))!;
   assert.equal(installation.current.runtime, join(home, 'installation/releases', installation.current.id, 'runtime/node'));
+  const release = join(home, 'installation/releases', installation.current.id);
+  const help = await promisify(execFile)(installation.current.runtime, [join(release, 'dist/cli.js'), 'help']);
+  assert.deepEqual(JSON.parse(help.stdout), {
+    controlModule: pathToFileURL(join(release, 'dist/local-control.js')).href,
+    protocolModule: pathToFileURL(join(release, 'node_modules/@harness-dock/protocol/dist/index.js')).href,
+  });
   const config = await readConfig(configPath), before = await readFile(configPath);
   assert.equal((await stat(configPath)).mode & 0o777, 0o600);
   for (const reason of ['device_busy', 'unresolved_execution']) {
