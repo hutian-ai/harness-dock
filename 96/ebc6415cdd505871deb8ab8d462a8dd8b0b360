@@ -1,0 +1,32 @@
+.github/release-notes/v0.1.2.md
+  h_26503a7f728cfb 1-34
+apps/daemon/package.json
+  h_26503a7f728cfb 3
+apps/device-panel/Info.plist
+  h_26503a7f728cfb 10-11
+apps/docs-site/package.json
+  h_26503a7f728cfb 3
+apps/server/package.json
+  h_26503a7f728cfb 3
+package.json
+  h_26503a7f728cfb 3
+packages/client/package.json
+  h_26503a7f728cfb 3
+packages/drivers/package.json
+  h_26503a7f728cfb 3
+packages/protocol/package.json
+  h_26503a7f728cfb 3
+scripts/package-panel.ts
+  h_26503a7f728cfb 57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "96ebc6415cdd505871deb8ab8d462a8dd8b0b360",
+  "prompts": {},
+  "humans": {
+    "h_26503a7f728cfb": {
+      "author": "xuanda0201 <268005258+xuanda0201@users.noreply.github.com>"
+    }
+  }
+}
