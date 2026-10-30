@@ -1,0 +1,22 @@
+apps/device-panel/README.md
+  h_26503a7f728cfb 39,62,83
+apps/device-panel/Sources/PanelView.swift
+  h_26503a7f728cfb 5,154-155,234-235,240-243,249
+apps/device-panel/Sources/main.swift
+  h_26503a7f728cfb 23-24
+apps/docs-site/src/content.json
+  h_26503a7f728cfb 31,119
+scripts/package-panel.ts
+  h_26503a7f728cfb 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "9c39a024da1f30ed345f8e487f7aa0a22dc48d20",
+  "prompts": {},
+  "humans": {
+    "h_26503a7f728cfb": {
+      "author": "xuanda0201 <268005258+xuanda0201@users.noreply.github.com>"
+    }
+  }
+}
