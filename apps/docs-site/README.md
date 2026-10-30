@@ -82,7 +82,9 @@ npm run preview
 
 SDK 接入：启动预览后访问 `/sdk/`。主入口 `/sdk/#first-task` 使用固定 `sdk-v0.1.0` 开发者发行：SDK、server、macOS arm64 Daemon、校验和与源码元数据。按公开下载、冷缓存离线安装、三个终端启动隔离服务/设备/调用方的顺序，将上传文本整理为 Markdown；示例在 SDK 的 `examples/first-task.mjs`，先落盘私有 receipt，再派发一次，只读查询原任务完成后才保存报告和清理托管文件。它不替代第二台 Mac 首装、App 签名或其他工具验收。 通用执行 CLI 见[通过 CLI 执行任务](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli)：安装发行 SDK 后可调用包内 CLI 提交自己的任务、处理原生审批，并查询原请求记录。
 
-执行 CLI 已于 2026-10-30 在本机 macOS arm64 使用真实 Codex 验证通过：一次任务完成、原生 `allow_once` 审批成功送达且命令退出 0、另起 `status --receipt` 查回同一执行与完整结果。范围仅限本机源码链路，不覆盖跨机器、断线或重启恢复、两轮续接、全部工具或插件、独立发行包及生产部署；详见 [真实 Codex 验证结论与范围](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
+执行 CLI 已于 2026-10-30 在本机 macOS arm64 使用真实 Codex 验证通过：一次任务完成、原生 `allow_once` 审批成功送达且命令退出 0、另起 `status --receipt` 查回同一执行与完整结果。首轮验证范围仅限本机源码链路，不覆盖跨机器、断线或重启恢复、两轮续接、全部工具或插件、独立发行包及生产部署；详见 [真实 Codex 验证结论与范围](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
+
+同日追加验证了执行 CLI（提交 `4fcd3b8`）在原生命令开始后收到 `SIGINT`、退出码为 `130` 并返回 `unknown`，再按原 receipt 从 `running` 查回 `completed`；服务入口 `prepare/execute` 各一次，原生 turn、命令及文件效果也各一次，未重复提交。范围仅限同机中断 CLI 观察、Server/Daemon 持续运行，不覆盖 `SIGKILL`、进程重启、跨机器或真实网络故障恢复；详见 [CLI 中断后按 receipt 查回原执行](https://hutian-ai.github.io/harness-dock/sdk/#execution-cli-interruption-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
 
 ### server
 
