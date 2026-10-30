@@ -1,10 +1,10 @@
 # harness-dock 文档站
 
-产品文档站是使用者的完整指南，README 提供快速入口。默认快速开始面向设备用户：取得 App → 安装 → 登录原生 Codex → 邀请接入 → 一键测试。SDK 开发与服务端部署各有独立入口，命令行只出现在开发者/管理员章节。当前面向 **0.1.0 Developer Alpha**，客户端下载入口固定指向 [v0.1.0 Release](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0) 的 macOS arm64 ZIP。
+产品文档站面向接入方开发者，帮助他判断何时使用 Dock，并跑通“产品发任务 → 所选设备原生执行 → 结果回到产品”。开发者从 SDK 示例开始接入；首页同时提供客户端下载与 SDK 示例入口；设备使用者走“下载 App → 原生 Codex 登录 → 邀请连接 → 本机自检”，管理员走服务部署与配对。原生 Harness 接入与执行管理是产品所处的 AI Infra 层；命令行只出现在开发者/管理员章节。当前面向 **0.1.0 Developer Alpha**，客户端下载入口固定指向 [v0.1.0 Release](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.0) 的 macOS arm64 ZIP。
 
 位于 harness-dock 仓库的 `apps/docs-site/`，使用 Node.js 静态生成，无第三方运行时依赖。中性黑白底、绿色强调、两层导航、图标侧栏和三栏阅读布局。
 
-只使用客户端的用户请阅读站点“快速开始”和“安装执行设备”，通过 [Release 下载客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)；不需要运行下面的文档预览命令。客户端仅完成本地 ad-hoc 签名，尚未完成 Developer ID 签名与公证。
+只使用客户端的用户请阅读站点“设备快速开始”和“安装执行设备”，通过 [Release 下载客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.0/harness-dock-panel-0.1.0-darwin-arm64.zip)；不需要运行下面的文档预览命令。客户端仅完成本地 ad-hoc 签名，尚未完成 Developer ID 签名与公证。
 
 ## 维护者：本地预览
 
@@ -50,9 +50,13 @@ npm run preview
 
 架构与驱动页使用正文内的静态 SVG 图，样式位于 `public/style.css` 的 `.doc-diagram` 规则；无需 Mermaid 脚本、CDN 或外部字体。修改时保留每张图的 title/desc、唯一 ID 和文字说明，并检查亮色、暗色与窄屏局部滚动。根 README 使用 GitHub 可渲染的 Mermaid，分层与文档站保持一致。
 
-首页以“让你的应用，调用原生执行能力”说明产品定位，导语强调通过 SDK 调用其他机器上的原生 Harness。主要价值依次为应用接入业务流程、复用设备接入、独立后台持有执行与按原身份查回；首屏主操作进入应用 SDK，设备安装保留独立入口。支持情况紧邻首屏：Codex 已支持，dsh 为源码 SDK 实验入口，zcode、opencode 计划接入；完整状态维护在 support 的 harness-roadmap 节。首页不放不可操作的模拟功能卡或像链接的产品名。选型说明放在 overview 的 when-to-use 节，区分个人原生远程控制、单 Harness 的 SDK / App Server 集成、Dock 的跨机器接入与执行管理；保留官方入口及核对日期，明确审批与事件并非 Dock 独有，多 Harness 为次要的适配方向。首页流转图使用内联 SVG；窄屏改为纵向 HTML，信号动画遵循减少动态效果设置。
+首页以“让原生 Harness，为你的产品执行任务”表达接入后的价值；AI Infra 只用于产品定义，具体指跨设备原生 Harness 接入、连接与执行管理。内容顺序为：首屏价值与多设备图 → “生成报告”用法示意 → 原生环境复用、设备选择、原执行记录三个收益 → 接入方式选择 → 当前支持与准备条件 → 开发者、设备使用者、管理员三个入口。用法示意不代表已内置业务应用；已发布支持、源码实验和计划适配分别标记。
 
-首屏图从应用经连接 SDK、Server 到独立设备后台，强调后台持有进程与记录、原生审批和结果返回应用。ACP 只表示设备后台与原生 Harness 之间的执行协议，不用于应用、Server 与设备的网络连接。图内展示设备上所选的原生 Harness 及安装、登录、工具和会话，不以多个计划适配对象作为图的重点；当前支持和计划适配在图外区分。ACPX、各 Harness 的具名适配器与原生进程层级见 architecture 和 drivers 页面。
+首屏实色主按钮“下载 macOS 版”直达 v0.1.0 macOS arm64 ZIP，标注 Apple 芯片；描边次按钮“查看接入示例”进入 `/sdk/#first-task`，从可运行的 SDK 示例发起一次任务并读取原结果。两个按钮使用语义前置图标与对角切角背景，链接本身不裁切，以保留完整键盘焦点环；窄屏纵向排列。设备自检与产品任务验收分开，按钮下保留安装说明。窄屏先展示接入与下载操作，再展示执行图。全站沿用现有 UI 样式和组件，页面标题、摘要、示例和角色说明按任务组织，AI Infra 不作为各页口号。
+
+首页与 overview 的选型说明区分个人原生远程入口、已有设备管理的原生 SDK / 服务接口集成、Dock 的跨设备接入与执行管理。会话、审批和事件不作为独有卖点；多 Harness 是后续适配收益。支持进度保留 Codex 已支持、dsh 源码实验、zcode/opencode 计划，完整状态在 support 的 harness-roadmap 节。图与用法示意沿用静态 HTML/SVG，动画遵循减少动态效果设置。
+
+首屏图展示同一 Server 接入多台执行设备，由应用通过连接 SDK 选择本次目标；只高亮一台设备的任务路径，其他设备保留独立连接。所选设备展开独立后台与原生 Harness，其他设备用简化结构表示各自的后台与原生环境；窄屏同样保留多设备分支。图中强调后台持有进程与记录、原生审批和结果沿原路返回应用，不暗示 Server 自动调度、广播或故障迁移。ACP 只表示设备后台与原生 Harness 之间的执行协议，不用于应用、Server 与设备的网络连接。图内展示设备上所选的原生 Harness 及安装、登录、工具和会话，不以多个计划适配对象作为图的重点；当前支持和计划适配在图外区分。ACPX、各 Harness 的具名适配器与原生进程层级见 architecture 和 drivers 页面。
 
 产品与维护文档统一维护在 src/content.json；不再保留重复的 docs/ 目录。已发布支持范围为 macOS arm64 + Codex Developer Alpha；源码与新构建候选可显示并选择后台发现的本机环境（当前支持 Codex/dsh），分别测试、保存历史；Codex 为原生只读回显，dsh 为沿用原生策略的实验固定回显，不提供只读保证。现有公开下载仍只测试 Codex，其他 Harness 尚未支持。文档站不包含真实地址、设备身份或凭据。
 
@@ -64,7 +68,7 @@ npm run preview
 
 ### quickstart
 
-快速开始：启动预览后访问 `/quickstart/`。首先是从 GitHub Release 下载并安装客户端、原生 Codex 登录、邀请确认和“测试 Codex”；另说明源码与新构建候选可选择 Codex/dsh、分别测试。设备用户无须终端、Git、Node、pnpm 或 JSON。源码完整链路已移到开发与验证页的次要章节，SDK 与 server 仍有各自入口。
+设备快速开始：启动预览后访问 `/quickstart/`，开发者从 `/sdk/#first-task` 开始。设备路径首先是从 GitHub Release 下载并安装客户端、原生 Codex 登录、邀请确认和“测试 Codex”；另说明源码与新构建候选可选择 Codex/dsh、分别测试。设备用户无须终端、Git、Node、pnpm 或 JSON。源码完整链路已移到开发与验证页的次要章节，SDK 与 server 仍有各自入口。
 
 ### usage
 
@@ -136,3 +140,5 @@ Harness 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分具名 
 构建与分发：启动预览后访问 `/distribution/`。
 
 SDK 发行由 `.github/workflows/sdk-release.yml` 监听 `sdk-v*` tag，从干净固定 revision 复用 bundle 与离线消费验证，再以 `package-release.ts --sdk-tag` 生成并发布开发者归档；不发布 npm，不修改独立的 App `v*` 发行。发布前后核对来源和摘要，已发布资产不覆盖。
+
+首页下载按钮的 Apple 图标来自 [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/apple.svg)，项目许可为 [CC0-1.0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md)；图标随文字继承颜色，作为装饰隐藏于辅助技术。SDK 代码图标复用站内线性图标风格。

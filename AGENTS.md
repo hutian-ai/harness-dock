@@ -1,8 +1,8 @@
 # harness-dock
 
-Cross-machine native Harness access: application SDK ↔ server ↔ independent device Daemon → named Provider Driver. Devices connect outward.
+Connect native Harnesses to products while execution stays on caller-selected devices. This AI Infra provides cross-device access and execution management: application SDK ↔ server ↔ independent device Daemon → named Provider Driver. Devices connect outward.
 
-- Product scope is native Harness access and execution infrastructure for applications, Agents and automation. Applications own business interaction, authorization and result acceptance. Canonical product and maintainer documentation is in apps/docs-site/src/content.json (architecture, drivers and support pages); apps/docs-site/README.md describes navigation and publishing. Do not build a chat, IDE or plugin-management product.
+- Product scope is cross-device native Harness access and execution management for applications, Agents and automation. Applications own business interaction, business authorization and result acceptance. Canonical product and maintainer documentation is in apps/docs-site/src/content.json (architecture, drivers and support pages); apps/docs-site/README.md describes navigation and publishing. Do not build a chat, IDE or plugin-management product.
 - Device execution is macOS arm64 only. Codex is the released Provider; dsh has an experimental named ACP adapter in source. Keep these concrete discovery and execution paths; do not retain unused Providers or speculative extension frameworks.
 - Keep packages private. Do not publish npm packages, change repository visibility or upload sibling repositories, credentials, runtime data or experiment artifacts without explicit authorization.
 - Use ACP with named thin adapters for installation/environment selection, native dependencies, callbacks and event/session differences. The Codex backend is fixed ACPX/Codex ACP; do not add a parallel native fallback.
