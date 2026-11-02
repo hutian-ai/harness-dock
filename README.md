@@ -6,7 +6,7 @@
 
 Harness Dock 是面向原生 Harness 的 AI Infra，负责跨设备接入、连接与执行管理。应用负责业务交互、业务授权与结果验收，Harness 负责内部工具与原生权限。
 
-[从 SDK 示例开始](https://hutian-ai.github.io/harness-dock/sdk/#first-task) · [产品文档](https://hutian-ai.github.io/harness-dock/) · [App 使用指南](https://hutian-ai.github.io/harness-dock/app/) · [下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.2/harness-dock-panel-0.1.2-darwin-arm64.zip) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.2)
+[从最短 SDK 接入开始](https://hutian-ai.github.io/harness-dock/sdk/#quick-connect) · [产品文档](https://hutian-ai.github.io/harness-dock/) · [App 使用指南](https://hutian-ai.github.io/harness-dock/app/) · [下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.2/harness-dock-panel-0.1.2-darwin-arm64.zip) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.2)
 
 ## 适合谁
 
@@ -14,7 +14,7 @@ Harness Dock 是面向原生 Harness 的 AI Infra，负责跨设备接入、连�
 
 例如，为业务产品加入“生成报告”入口：产品选择获授权且具备所需能力的电脑，提交任务，接收原生审批与进度，再取回报告并按业务规则验收。具体工具能力取决于所选设备的原生环境和权限。
 
-**应用开发者：**[下载 SDK 0.1.0](https://github.com/hutian-ai/harness-dock/releases/tag/sdk-v0.1.0)，按[第一个真实任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)下载、校验和离线安装，把文本笔记整理为 Markdown 报告。首次示例使用发行内的 Server 和独立开发者 Daemon，无需先安装设备 App，也不复用已有 App 后台。SDK、server 和 macOS arm64 开发者 Daemon 均提供带依赖归档，无需克隆仓库或构建源码。
+**应用开发者：**[下载 SDK 0.1.2](https://github.com/hutian-ai/harness-dock/releases/tag/sdk-v0.1.2)，按[最短接入](https://hutian-ai.github.io/harness-dock/sdk/#quick-connect)安装 SDK、领取应用凭据，通过 `connectDock / run / status` 调用在线设备。管理员先用 [Docker 部署 Server](https://hutian-ai.github.io/harness-dock/server/)，设备用户通过 App 邀请连接；也可按[同机独立体验](https://hutian-ai.github.io/harness-dock/sdk/#first-task)使用发行内的独立开发者 Daemon。SDK、Server 和 macOS arm64 开发者 Daemon 均附依赖，无需克隆仓库。
 
 ## 它怎么工作
 
@@ -47,7 +47,7 @@ Dock 封装的是设备接入与跨设备执行管理。会话、审批和事件
 
 ## 开始使用
 
-- **应用开发者**：[从 SDK 示例发起第一个任务](https://hutian-ai.github.io/harness-dock/sdk/#first-task)，学习选设备、发任务、收进度与产物。
+- **应用开发者**：[从最短 SDK 接入发起任务](https://hutian-ai.github.io/harness-dock/sdk/#quick-connect)，学习选设备、发任务、收进度与产物。
 - **设备用户**：[下载 macOS 客户端](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.2/harness-dock-panel-0.1.2-darwin-arm64.zip)，按 [App 使用指南](https://hutian-ai.github.io/harness-dock/app/)完成首次连接、查看状态、按需测试和日常维护；详细安装要求见[安装指南](https://hutian-ai.github.io/harness-dock/installation/)。
 - **服务管理员**：[部署连接服务](https://hutian-ai.github.io/harness-dock/server/)，为应用与执行设备准备共同的入口。
 
@@ -57,9 +57,9 @@ Dock 封装的是设备接入与跨设备执行管理。会话、审批和事件
 
 ## 支持哪些 Harness
 
-App 与开发者 SDK 分别发行。App `v0.1.2` 面向设备用户；SDK `sdk-v0.1.0` 提供连接 SDK、Server 与独立开发者 Daemon。设备执行均限 macOS arm64。
+App 与开发者 SDK 分别发行。App `v0.1.2` 面向设备用户；SDK `sdk-v0.1.2` 提供连接 SDK、Server 与独立开发者 Daemon。设备执行均限 macOS arm64。
 
-| 原生 Harness | App v0.1.2 | SDK sdk-v0.1.0 |
+| 原生 Harness | App v0.1.2 | SDK sdk-v0.1.2 |
 | --- | --- | --- |
 | Codex | 已支持：macOS 13+、Apple Silicon | 已支持：macOS arm64 |
 | dsh（DeepSeek Harness） | 实验适配：macOS arm64，复用本机 dsh | 实验适配：macOS arm64，复用本机 dsh |
