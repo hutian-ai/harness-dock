@@ -12,3 +12,5 @@ export type {
 } from '@harness-dock/protocol';
 export { DockError } from "@harness-dock/protocol";
 export { loadClientOptions, runFirstTest, promptNativePermission } from './onboarding.ts';
+export { connectDock, Dock, type DockRunOptions } from './dock.ts';
+export { ExecutionCommandError } from './execution-command.ts';

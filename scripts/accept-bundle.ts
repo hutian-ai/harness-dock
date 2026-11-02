@@ -49,9 +49,21 @@ await writeFile(join(consumer, 'package.json'), JSON.stringify({
 execFileSync('npm', ['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--cache', join(directory, 'install-cache')], { cwd: consumer, stdio: 'inherit', timeout: 60_000 });
 execFileSync('npm', ['ci', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--cache', join(directory, 'ci-cache')], { cwd: consumer, stdio: 'inherit', timeout: 60_000 });
 await writeFile(join(consumer, 'index.ts'), [
-  "export { ServerClient, DeviceController, DockError } from '@harness-dock/client';",
-  "export type { ServerPeer, DeviceNodeSummary, DeviceRequestHandler } from '@harness-dock/client';",
+  "export { ServerClient, DeviceController, DockError, connectDock, Dock, ExecutionCommandError } from '@harness-dock/client';",
+  "export type { DockRunOptions, ServerPeer, DeviceNodeSummary, DeviceRequestHandler } from '@harness-dock/client';",
   "import type { ServerPeer, DeviceInventory, DeviceExecutionResponse, DevicePermissionDecision } from '@harness-dock/client';",
+  "import { connectDock } from '@harness-dock/client';",
+  "export async function simpleConsumer() {",
+  "  const dock = await connectDock('.local/client.json');",
+  "  try {",
+  "    const task = await dock.run({ prompt: 'never called', receipt: '.local/task.json' });",
+  "    const state: string = task.result.state;",
+  "    await dock.status(task.receipt);",
+  "    // @ts-expect-error receipt is required before dispatch",
+  "    await dock.run({ prompt: 'never called' });",
+  "    return state;",
+  "  } finally { await dock.close(); }",
+  "}",
   "export async function typedConsumer(peer: ServerPeer) {",
   "  const inventory: DeviceInventory = await peer.request('inventory');",
   "  const result: DeviceExecutionResponse = await peer.request('execute', { provider: inventory.providers[0]!.key, runId: 'synthetic', prompt: 'never called' });",
@@ -73,6 +85,8 @@ const clientEntry = await realpath(join(consumer, 'node_modules/@harness-dock/cl
 assert.ok(clientEntry.startsWith(consumer + '/'));
 await cp(join(dirname(dirname(clientEntry)), 'examples/first-task.mjs'), join(consumer, 'first-task.mjs'));
 assert.ok((await readFile(join(dirname(dirname(clientEntry)), 'examples/notes.txt'), 'utf8')).length > 0);
+assert.match(await readFile(join(dirname(dirname(clientEntry)), 'examples/quickstart.mjs'), 'utf8'), /connectDock/);
+assert.ok((await readFile(join(directory, 'server/docker.sh'), 'utf8')).includes('--network host'));
 execFileSync(process.execPath, ['first-task.mjs', '--help'], { cwd: consumer, stdio: 'inherit' });
 const require = createRequire(clientEntry);
 for (const dependency of ['@harness-dock/protocol', 'ws', 'json-rpc-2.0'])

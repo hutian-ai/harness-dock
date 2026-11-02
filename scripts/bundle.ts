@@ -46,10 +46,12 @@ for (const patch of ['acpx@0.21.1.patch', '@agentclientprotocol__codex-acp@2.3.0
 await copyFile(resolve('patches/README.md'), join(root, 'daemon/patches/README.md'));
 for (const target of ['daemon', 'controller', 'server']) await writeBundleNotices(join(root, target));
 await mkdir(join(root, 'controller/examples'));
-for (const example of ['node-client.mjs', 'first-task.mjs', 'notes.txt'])
+for (const example of ['node-client.mjs', 'first-task.mjs', 'quickstart.mjs', 'notes.txt'])
   await copyFile(resolve('examples', example), join(root, 'controller/examples', example));
 await copyFile(resolve('deploy/server.Dockerfile'), join(root, 'server/Dockerfile'));
 await copyFile(resolve('deploy/compose.yaml'), join(root, 'server/compose.yaml'));
+await copyFile(resolve('deploy/server-docker.sh'), join(root, 'server/docker.sh'));
+await chmod(join(root, 'server/docker.sh'), 0o755);
 const [archive] = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], { cwd: join(root, 'controller'), encoding: 'utf8' }));
 await rename(join(root, archive.filename), join(root, 'controller.tgz'));
 let revision: string | undefined;

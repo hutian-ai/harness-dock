@@ -87,7 +87,7 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --repo "$repo" --verify-tag --draft --prerelease --latest=false \
               --title "SDK ${version} — Developer Alpha" \
-              --notes 'Standalone Node.js SDK, server and macOS arm64 device CLI. Requires Node.js 22.19+. No npm publication. Start with https://hutian-ai.github.io/harness-dock/sdk/ and verify SHA256SUMS plus release.json. This developer release is separate from the macOS App release; it does not replace the v0.1.0 App or its provenance.'
+              --notes 'Standalone Node.js SDK, server and macOS arm64 device CLI. Requires Node.js 22.19+. No npm publication. Start with https://hutian-ai.github.io/harness-dock/sdk/ and verify SHA256SUMS plus release.json. This developer release is separate from the macOS App release; it does not replace the macOS App release or its provenance.'
           fi
           for asset in "${assets[@]}"; do
             if ! gh release view "$RELEASE_TAG" --repo "$repo" --json assets --jq '.assets[].name' | grep -Fx "$asset" > /dev/null; then
