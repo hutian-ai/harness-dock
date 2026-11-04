@@ -1,9 +1,10 @@
 import type { ProviderOverride } from '@harness-dock/drivers';
+import { resolveProviderProxy, type ProxyDefaults } from './provider-proxy.ts';
 
 const baseVariables = new Set(['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT']);
 const discoveryVariables = new Set(['CODEX_HOME', 'CODEX_CLI_PATH', 'DSH_HOME', 'NVM_DIR']);
 
-/** Dependency values are chosen in protected local config, never copied from the whole host. */
+/** Proxy defaults are selected separately; other dependencies remain explicit local choices. */
 export const providerDependencyVariables = [
   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
   'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
@@ -24,10 +25,12 @@ export function daemonEnvironment(environment: NodeJS.ProcessEnv): NodeJS.Proces
 }
 
 /** Resolve one Provider's dependencies without inheriting controller credentials or another Provider's choices. */
-export function providerEnvironment(override?: ProviderOverride, environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function providerEnvironment(override?: ProviderOverride, environment: NodeJS.ProcessEnv = process.env, proxyDefaults?: ProxyDefaults): NodeJS.ProcessEnv {
   const selected = override?.environment === undefined ? {} : override.environment;
   if (!isProviderEnvironment(selected)) throw new Error('invalid_provider_environment');
   const base = Object.fromEntries(Object.entries(environment).filter(([key, value]) =>
     typeof value === 'string' && baseVariables.has(key.toUpperCase())));
-  return { ...base, ...selected };
+  const proxy = proxyDefaults ? resolveProviderProxy(selected, proxyDefaults) : undefined;
+  if (proxy?.status.mode === 'unavailable') throw new Error('provider_proxy_unavailable');
+  return { ...base, ...selected, ...proxy?.environment };
 }

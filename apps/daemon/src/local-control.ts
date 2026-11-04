@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { id } from '@harness-dock/protocol';
 import type { DeviceConfig } from './config.ts';
 import type { SelfTestProvider, SelfTestSnapshot } from './device-self-test.ts';
+import type { ProviderProxyStatus } from './provider-proxy.ts';
 
 export interface SelfTestRequest { id: string; provider?: SelfTestProvider }
 export interface SelfTestReceipt { id: string; found: boolean; provider?: SelfTestProvider }
@@ -18,6 +19,7 @@ export interface LocalStatus {
   selfTests?: SelfTestSnapshot[];
   selfTestProviders?: SelfTestProvider[];
   selfTestReceipt?: SelfTestReceipt;
+  providerProxies?: Partial<Record<SelfTestProvider, ProviderProxyStatus>>;
 }
 function socketPath(config: DeviceConfig, daemonId: string): string {
   const key = createHash('sha256').update(`${resolve(config.stateDir)}:${daemonId}`).digest('hex').slice(0, 32);

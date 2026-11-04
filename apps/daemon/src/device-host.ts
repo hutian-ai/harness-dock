@@ -1,13 +1,14 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { arch, hostname, platform, release } from 'node:os';
 import {
-  discoverProviders, createProviderAdapters, boundedObservation, observeStartup, startStartupSpan,
+  discoverProviders, providerKeys, createProviderAdapters, boundedObservation, observeStartup, startStartupSpan,
   type ProviderAdapters, type ProviderAdapter, type ProviderCapabilities, type McpInvocation,
   type DiscoveredProvider, type ProviderKey, type NativePermissionRequest, type NativePermissionDecision,
 } from '@harness-dock/drivers';
 import type { DeviceConfig } from './config.ts';
 import type { DeviceInventory, DeviceExecuteInput as PublicExecuteInput } from '@harness-dock/protocol';
 import { providerEnvironment } from './provider-environment.ts';
+import { resolveProviderProxy, type ProxyDefaults } from './provider-proxy.ts';
 import { collectFiles, digest, prepareDirectories, releaseDirectories, verifySkillFiles, managedStateBytes, forgetSessionDirectories, type DeviceFile } from './device-files.ts';
 import { DeviceStore, type StoredExecution } from './device-store.ts';
 import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
@@ -93,7 +94,7 @@ export class DeviceHost {
   #closed = false;
   #callback?: DeviceCallback;
   readonly #active = new Map<string, ActiveExecution>();
-  constructor(readonly config: DeviceConfig, private readonly providers: ProviderAdapters = createProviderAdapters()) {
+  constructor(readonly config: DeviceConfig, private readonly providers: ProviderAdapters = createProviderAdapters(), private readonly proxyDefaults?: ProxyDefaults) {
     this.nodeId = config.nodeId;
     this.#limits = resourceLimits(config.resources);
     this.#store = new DeviceStore(config.nodeId, config.stateDir, config.resources);
@@ -172,6 +173,12 @@ export class DeviceHost {
   get selfTestStatus(): SelfTestSnapshot | undefined { return this.#selfTests.get('codex')?.status; }
   get selfTestStatuses(): SelfTestSnapshot[] { return [...this.#selfTests.values()].flatMap(test => test.status ? [test.status] : []); }
   get selfTestProviders(): ProviderKey[] { return [...this.#selfTests.keys()]; }
+  get providerProxies() {
+    const defaults = this.proxyDefaults;
+    if (!defaults) return undefined;
+    return Object.fromEntries(providerKeys.filter(key => !this.config.providers?.[key]?.disabled)
+      .map(key => [key, resolveProviderProxy(this.config.providers?.[key]?.environment ?? {}, defaults).status]));
+  }
   lookupSelfTest(id: string, provider: ProviderKey = 'codex'): { id: string; found: boolean; provider?: ProviderKey } {
     this.#assertOpen();
     const test = this.#selfTests.get(provider);
@@ -311,7 +318,7 @@ export class DeviceHost {
           continue;
         }
         try {
-          const environment = providerEnvironment(this.config.providers?.[provider.key]);
+          const environment = providerEnvironment(this.config.providers?.[provider.key], process.env, this.proxyDefaults);
           const key = digest(canonical({ executable: provider.executable, home: provider.home, environment }));
           let adapter = this.#adapters.get(provider.key);
           if (!adapter || this.#adapterKeys.get(provider.key) !== key) {
@@ -423,7 +430,7 @@ export class DeviceHost {
         }
         retained = { sessionKey: key, provider: input.provider, adapter: this.providers.create(this.#discovered.get(input.provider)!, {
           cwd: this.config.cwd, stateDir: this.config.stateDir,
-          environment: providerEnvironment(this.config.providers?.[input.provider]), inspection: available.inspection,
+          environment: providerEnvironment(this.config.providers?.[input.provider], process.env, this.proxyDefaults), inspection: available.inspection,
         }, 'session') };
         this.#sessions.set(adapterKey, retained);
       }

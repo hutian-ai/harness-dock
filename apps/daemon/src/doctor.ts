@@ -3,9 +3,11 @@ import { homedir } from 'node:os';
 import { DEVICE_PROTOCOL_VERSION, diagnosticError, printDiagnostics, queryServerHealth, type DiagnosticCheck } from '@harness-dock/protocol';
 import { readConfig } from './config.ts';
 import { control } from './local-control.ts';
+import type { ProviderProxyStatus } from './provider-proxy.ts';
 
-export async function deviceDiagnostics(path: string): Promise<DiagnosticCheck[]> {
-  const checks: DiagnosticCheck[] = [];
+type DeviceDiagnosticCheck = DiagnosticCheck & { proxy?: ProviderProxyStatus };
+export async function deviceDiagnostics(path: string): Promise<DeviceDiagnosticCheck[]> {
+  const checks: DeviceDiagnosticCheck[] = [];
   try {
     const config = await readConfig(path), file = await stat(path);
     checks.push({ check: 'configuration', state: process.platform !== 'win32' && (file.mode & 0o077) ? 'fail' : 'pass', detail: 'Device configuration parsed; it must be readable by its owner only.', next: 'Use chmod 600 on this private config; never paste its contents into support reports.' });
@@ -35,6 +37,14 @@ export async function deviceDiagnostics(path: string): Promise<DiagnosticCheck[]
     for (const provider of providers) checks.push({ check: `${provider.key}_installation`, state: provider.status === 'installed' ? 'pass' : 'unknown',
       detail: `${provider.displayName} ${provider.status}${provider.version ? ` (${provider.version})` : ''}.`,
       next: `Use the native installation/login. Set providers.${provider.key}.executable/home locally if discovery is ambiguous.` });
+    for (const provider of providers.filter(item => item.status !== 'disabled')) {
+      const proxy = status?.providerProxies?.[provider.key];
+      checks.push({ check: `${provider.key}_proxy`, state: proxy && proxy.mode !== 'unavailable' ? 'pass' : 'unknown',
+        ...(proxy ? { proxy } : {}),
+        detail: proxy ? `Running daemon: source=${proxy.source}, mode=${proxy.mode}. No proxy address or credentials are exposed.`
+          : 'The running daemon has not reported its proxy selection.',
+        next: 'Explicit device proxy settings take precedence over startup environment and fixed macOS system proxies. Restart the idle daemon after changes. PAC/automatic discovery requires explicit settings; model reachability is verified separately.' });
+    }
     if (!providers.some(provider => provider.status === 'installed')) checks.push({ check: 'native_installation', state: 'fail', detail: 'No enabled native Harness installation was found.' });
     checks.push({ check: 'native_auth_and_protocol', state: 'unknown', detail: 'Installation discovery does not verify native login, ACP, model access, desktop tools or plugins.', next: 'Use the authorized application client doctor for explicit protocol probing; run client test separately for real execution.' });
     if (status?.unresolvedRunIds?.length) checks.push({ check: 'unresolved_execution', state: 'fail', detail: `${status.unresolvedRunIds.length} execution(s) need reconciliation.`, next: 'Query original run IDs; do not clear state or resend prompts to bypass unknown results.' });

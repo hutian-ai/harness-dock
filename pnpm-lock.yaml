@@ -204,6 +204,9 @@ importers:
       '@harness-dock/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      execa:
+        specifier: 10.0.1
+        version: 10.0.1
       json-rpc-2.0:
         specifier: 1.8.1
         version: 1.8.1

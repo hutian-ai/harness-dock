@@ -8,6 +8,7 @@ import type { DeviceConfig } from './config.ts';
 import { DeviceHost } from './device-host.ts';
 import { serveControl } from './local-control.ts';
 import { daemonEnvironment } from './provider-environment.ts';
+import { discoverProxyDefaults } from './provider-proxy.ts';
 
 /** Outbound connection recovery restores observation; it never replays requests. */
 export class DeviceConnection {
@@ -95,9 +96,11 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
   const runtimeDirectory = dirname(process.execPath);
   const searchPath = process.env.PATH;
   if (!searchPath?.split(delimiter).includes(runtimeDirectory)) process.env.PATH = searchPath ? `${searchPath}${delimiter}${runtimeDirectory}` : runtimeDirectory;
+  // Capture only proxy dependencies before scrubbing the daemon's parent environment.
+  const proxyDefaults = await discoverProxyDefaults(process.env);
   const permitted = daemonEnvironment(process.env);
   for (const key of Object.keys(process.env)) if (!Object.hasOwn(permitted, key)) delete process.env[key];
-  const host = new DeviceHost(config);
+  const host = new DeviceHost(config, undefined, proxyDefaults);
   const ca = config.caFile ? await readFile(config.caFile, 'utf8') : undefined;
   const connection = new DeviceConnection(host, config, ca);
   let stopping: Promise<void> | undefined;
@@ -108,7 +111,8 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
       pid: process.pid, connected: connection.connected, endpoint: config.endpoint,
       ...(connection.connectionError ? { connectionError: connection.connectionError } : {}),
       entrypoint: fileURLToPath(new URL('./cli.js', import.meta.url)), runtime: process.execPath,
-      ...host.maintenanceStatus(), selfTest: host.selfTestStatus, selfTests: host.selfTestStatuses, selfTestProviders: host.selfTestProviders }), stop, () => {
+      ...host.maintenanceStatus(), providerProxies: host.providerProxies,
+      selfTest: host.selfTestStatus, selfTests: host.selfTestStatuses, selfTestProviders: host.selfTestProviders }), stop, () => {
         const closing = host.closeIfIdle();
         connection.stop(); stopping = closing;
         return closing;

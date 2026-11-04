@@ -8,10 +8,11 @@
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@harness-dock/protocol": "workspace:*",
     "@harness-dock/drivers": "workspace:*",
-    "ws": "8.22.0",
+    "@harness-dock/protocol": "workspace:*",
+    "execa": "10.0.1",
     "json-rpc-2.0": "1.8.1",
+    "ws": "8.22.0",
     "zod": "4.6.6"
   },
   "bin": {

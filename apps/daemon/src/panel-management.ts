@@ -257,8 +257,8 @@ export async function runPanelOperation(input: unknown, bundle: string, home?: s
   }
   if (options.operation === 'doctor') {
     const checks = await deviceDiagnostics(path);
-    // Only codes/states leave the helper; native errors, credentials and inventories stay local.
-    return { checks: checks.map(({ check, state }) => ({ check, state })) };
+    // Proxy metadata contains only source/mode flags, never endpoints or credentials.
+    return { checks: checks.map(({ check, state, proxy }) => ({ check, state, ...(proxy ? { proxy } : {}) })) };
   }
   if (options.operation === 'logs') {
     const file = await open(join(config.stateDir, 'daemon.log'), constants.O_RDONLY | constants.O_NOFOLLOW);

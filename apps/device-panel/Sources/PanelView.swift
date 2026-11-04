@@ -530,12 +530,21 @@ struct PanelView: View {
                 Spacer()
                 Text(check.state == "pass" ? "通过" : check.state == "fail" ? "需检查" : "未验证").font(.system(size: 11)).foregroundStyle(.secondary)
             }
+            if let proxy = check.proxy {
+                Text(proxy.summary).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.leading, 22)
+                Text("确认的是后台启动时选用的网络设置，模型连通性需单独回显核验。")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.leading, 22)
+            }
             if check.state != "pass" {
                 Text(checkNext(check.check)).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.leading, 22)
             }
         }
     }
     private func checkNext(_ code: String) -> String {
+        if code == "codex_proxy" || code == "dsh_proxy" {
+            return "代理按设备配置、启动环境、macOS 系统设置的顺序选择。PAC 或自动发现需显式配置固定代理；更改后在空闲时重启后台。旧后台未报告来源时请更新后台。"
+        }
         if let provider = model.providerChoices.first(where: { "\($0.key)_installation" == code }) {
             return "请在此 Mac 安装并登录 \(provider.displayName)，再重新诊断；原生路径需由设备所有者配置。"
         }
@@ -563,6 +572,8 @@ struct PanelView: View {
         }.font(.system(size: 11)).foregroundStyle(color)
     }
     private func checkTitle(_ code: String) -> String {
+        if code == "codex_proxy" { return "Codex 网络代理" }
+        if code == "dsh_proxy" { return "dsh 网络代理" }
         if let provider = model.providerChoices.first(where: { "\($0.key)_installation" == code }) { return "\(provider.displayName) 安装" }
         return ["configuration": "设备配置", "runtime": "随包运行时", "supported_device": "设备平台", "workdir": "工作目录",
          "daemon": "本地后台进程", "daemon_configuration": "后台配置一致性", "device_authentication": "设备配对与连接",

@@ -74,9 +74,20 @@ struct FoundDevice: Decodable, Identifiable {
     var id: String { configPath }
 }
 struct FoundDevices: Decodable { let devices: [FoundDevice]; let incomplete: Bool }
+struct ProviderProxyStatus: Decodable {
+    let source: String
+    let mode: String
+    let bypassConfigured: Bool
+    var summary: String {
+        let origin = ["device": "设备配置", "environment": "启动环境", "system": "macOS 系统设置", "none": "无代理设置"][source] ?? "来源未确认"
+        let routing = ["proxy": "使用代理", "direct": "直连", "unavailable": "自动识别未完成"][mode] ?? "状态未确认"
+        return "\(routing) · 来源：\(origin)"
+    }
+}
 struct Check: Decodable, Identifiable {
     let check: String
     let state: String
+    var proxy: ProviderProxyStatus? = nil
     var id: String { check }
 }
 struct Checks: Decodable { let checks: [Check] }

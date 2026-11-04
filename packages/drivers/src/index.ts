@@ -7,7 +7,7 @@ export { ToolDeliveryTracker, type ToolDelivery } from './tool-delivery.ts';
 export { CodexExecutor, createCodexRuntime, type CodexExecutionConfig, type CodexExecutionInput, type CodexEvidence, type CodexEvent, type CodexInspection, type CodexMessage, type CodexTokens } from './codex.ts';
 export { nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
 export type { HarnessExecutionInput, NativePermissionRequest, NativePermissionDecision, NativeInteractionResponse } from './execution.ts';
-export { discoverProviders, type ProviderKey, type ProviderOverride, type ProviderDiscoveryOptions, type DiscoveredProvider } from './discovery.ts';
+export { discoverProviders, providerKeys, type ProviderKey, type ProviderOverride, type ProviderDiscoveryOptions, type DiscoveredProvider } from './discovery.ts';
 export { discoverCodexInstallation } from './codex-environment.ts';
 export { discoverDshInstallation } from './dsh-environment.ts';
 export { DshHost, type DshHostEnvironment, type DshInspection, type DshEvidence } from './dsh.ts';

@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { assertEndpoint, id } from '@harness-dock/protocol';
-import type { ProviderKey, ProviderOverride } from '@harness-dock/drivers';
+import { providerKeys, type ProviderKey, type ProviderOverride } from '@harness-dock/drivers';
 import { z } from 'zod';
 
 export type NodeIdentity = { nodeId: string; endpoint: string; token: string; caFile?: string; };
@@ -23,7 +23,7 @@ const deviceConfig = z.strictObject({
   resources: z.record(z.string(), z.unknown(), { error: 'invalid_resource_limit' }).optional(),
   cwd: absolutePath('Node directories must be absolute'), stateDir: absolutePath('Node directories must be absolute'),
   caFile: absolutePath('Node directories must be absolute').optional(),
-  providers: z.partialRecord(z.enum(['codex', 'dsh']), providerOverride, { error: 'invalid_provider_override' }).optional(),
+  providers: z.partialRecord(z.enum(providerKeys), providerOverride, { error: 'invalid_provider_override' }).optional(),
 }, { error: 'invalid_device_config' });
 const devicePairing = z.strictObject({ nodeId: z.string(), token: z.string(), endpoint: z.string() });
 export function parseDevicePairing(input: unknown): Pick<NodeIdentity, 'nodeId' | 'token' | 'endpoint'> {
