@@ -13,6 +13,9 @@ import { collectFiles, digest, prepareDirectories, releaseDirectories, verifySki
 import { DeviceStore, type StoredExecution } from './device-store.ts';
 import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
 import { ObservationWriter } from './observation-writer.ts';
+import { providerDetails } from './provider-details.ts';
+import { deviceBootIdentity } from './device-boot.ts';
+import { MAX_PROMPT_BYTES } from '@harness-dock/protocol';
 import { DeviceSelfTest, type SelfTestOutcome, type SelfTestSnapshot } from './device-self-test.ts';
 
 export type DeviceCallback = (method: string, params: unknown, timeoutMs?: number) => Promise<unknown>;
@@ -22,7 +25,7 @@ interface InventoryProvider {
   key: ProviderKey; displayName: string; status: 'ready' | 'not_found' | 'unavailable' | 'disabled';
   version: string | null; models: string[]; inspection?: unknown; error?: string;
   readiness?: { level: 'protocol'; checkedAt: string; modelExecutionVerified: false };
-  capabilities?: ProviderCapabilities;
+  capabilities?: ProviderCapabilities; checkedAt?: number;
 }
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_request');
@@ -50,7 +53,7 @@ function executionInput(value: unknown): DeviceExecuteInput {
   if (input.provider !== 'codex' && input.provider !== 'dsh') throw new Error('unsupported_provider');
   identity(input.runId);
   for (const key of ['sessionKey', 'model', 'resumeSessionId', 'previousRunId']) if (input[key] !== undefined) identity(input[key]);
-  if (typeof input.prompt !== 'string' || !input.prompt || input.prompt.length > 1_000_000) throw new Error('invalid_prompt');
+  if (typeof input.prompt !== 'string' || !input.prompt || Buffer.byteLength(input.prompt) > MAX_PROMPT_BYTES) throw new Error('invalid_prompt');
   if (input.config !== undefined) object(input.config);
   if (input.retainSession !== undefined && typeof input.retainSession !== 'boolean') throw new Error('invalid_retain_session');
   if (input.tools !== undefined) {
@@ -67,7 +70,7 @@ function executionInput(value: unknown): DeviceExecuteInput {
   return input as unknown as DeviceExecuteInput;
 }
 
-type ActiveExecution = { sessionKey: string; provider: ProviderKey; nativeSessionId?: string; adapter: ProviderAdapter; runId: string; controller: AbortController; promise: Promise<unknown>; historyTruncated: boolean; steer?: (text: string) => Promise<'accepted' | 'rejected' | 'unknown'> };
+type ActiveExecution = { sessionKey: string; provider: ProviderKey; nativeSessionId?: string; adapter: ProviderAdapter; runId: string; controller: AbortController; promise: Promise<unknown>; historyTruncated: boolean; ready: boolean; steer?: (text: string) => Promise<'accepted' | 'rejected' | 'unknown'> };
 
 /** Owns device processes and evidence independently of any controller connection. */
 export class DeviceHost {
@@ -94,7 +97,7 @@ export class DeviceHost {
   #closed = false;
   #callback?: DeviceCallback;
   readonly #active = new Map<string, ActiveExecution>();
-  constructor(readonly config: DeviceConfig, private readonly providers: ProviderAdapters = createProviderAdapters(), private readonly proxyDefaults?: ProxyDefaults) {
+  constructor(readonly config: DeviceConfig, private readonly providers: ProviderAdapters = createProviderAdapters(), private readonly proxyDefaults?: ProxyDefaults, private readonly bootIdentity: string | null = deviceBootIdentity()) {
     this.nodeId = config.nodeId;
     this.#limits = resourceLimits(config.resources);
     this.#store = new DeviceStore(config.nodeId, config.stateDir, config.resources);
@@ -169,7 +172,42 @@ export class DeviceHost {
       throw new Error('resource_exhausted:managed_state_bytes');
   }
   get activeRunIds(): string[] { return [...this.#active.keys()]; }
+  get providerDetails() {
+    return Object.fromEntries((this.#providers ?? []).flatMap(provider => {
+      const details = providerDetails(provider);
+      return details ? [[provider.key, details]] : [];
+    }));
+  }
+  async refreshProviderDetails() {
+    // Inspection must never disturb execution, tests or unresolved work.
+    if (this.#active.size || this.#selfTestRunning || this.#store.unresolved().length || this.#maintenance || this.#probing)
+      throw new Error('device_busy');
+    await this.#inspectInventory(true);
+  }
+  get overview() { return this.#store.overview(); }
   maintenanceStatus() { return { activeRunIds: this.activeRunIds, unresolvedRunIds: this.#store.unresolved() }; }
+  get admissionRecoveryStatus() { return this.#store.admissionRecoveryStatus(this.bootIdentity); }
+  prepareAdmissionRecovery() {
+    return this.#maintain(async () => this.#store.prepareAdmissionRecovery(this.bootIdentity));
+  }
+  resumeAdmission(checkpointId: string) {
+    identity(checkpointId);
+    return this.#maintain(async () => this.#store.resumeAdmission(checkpointId, this.bootIdentity));
+  }
+  /** Local observation only: idle never claims a retained native transport is connected. */
+  get providerActivity(): Record<ProviderKey, 'idle' | 'connecting' | 'executing' | 'checking' | 'unknown'> {
+    const states: Record<ProviderKey, 'idle' | 'connecting' | 'executing' | 'checking' | 'unknown'> = { codex: 'idle', dsh: 'idle' };
+    for (const runId of this.#store.unresolved()) {
+      const provider = this.#store.get(runId)?.provider;
+      if (provider === 'codex' || provider === 'dsh') states[provider] = 'unknown';
+    }
+    for (const [provider, test] of this.#selfTests) if (test.running) states[provider] = 'checking';
+    for (const active of this.#active.values()) {
+      if (active.ready) states[active.provider] = 'executing';
+      else if (states[active.provider] !== 'executing') states[active.provider] = 'connecting';
+    }
+    return states;
+  }
   get selfTestStatus(): SelfTestSnapshot | undefined { return this.#selfTests.get('codex')?.status; }
   get selfTestStatuses(): SelfTestSnapshot[] { return [...this.#selfTests.values()].flatMap(test => test.status ? [test.status] : []); }
   get selfTestProviders(): ProviderKey[] { return [...this.#selfTests.keys()]; }
@@ -308,7 +346,7 @@ export class DeviceHost {
       const providers: InventoryProvider[] = [];
       for (const provider of found) {
         const item: InventoryProvider = { key: provider.key, displayName: provider.displayName,
-          status: provider.status === 'installed' ? 'unavailable' : provider.status, version: provider.version, models: [] };
+          status: provider.status === 'installed' ? 'unavailable' : provider.status, version: provider.version, models: [], checkedAt: Date.now() };
         providers.push(item);
         this.#discovered.set(provider.key, provider);
         if (provider.status !== 'installed') {
@@ -335,6 +373,7 @@ export class DeviceHost {
           item.readiness = { level: 'protocol', checkedAt: new Date().toISOString(), modelExecutionVerified: false };
           item.status = 'ready';
         } catch (error) { item.error = error instanceof Error ? error.message : String(error); }
+        item.checkedAt = Date.now();
       }
       this.#providers = providers;
       return this.#inventory();
@@ -380,7 +419,8 @@ export class DeviceHost {
     if (!value) return null;
     const state = value.state === 'running' && !this.#active.has(runId) ? 'unknown' : value.state;
     return { runId: value.runId, provider: value.provider, state, result: value.result,
-      detailsExpired: value.detailsExpired ?? false, historyTruncated: value.historyTruncated ?? false };
+      detailsExpired: value.detailsExpired ?? false, historyTruncated: value.historyTruncated ?? false,
+      ...(value.admissionRecovery ? { admissionRecovered: true } : {}) };
   }
   async execute(value: unknown): Promise<unknown> {
     return this.#execute(value);
@@ -438,9 +478,10 @@ export class DeviceHost {
       const controller = new AbortController();
       const environment = adapter.environment({ sessionKey: prepared.sessionKey, workdir: prepared.directories.workdir,
         config, skillDirectory: prepared.directories.skillDirectory });
-      const record: StoredExecution = { runId: input.runId, provider: input.provider, input: fingerprint, state: 'running', environment };
+      const record: StoredExecution = { runId: input.runId, provider: input.provider, input: fingerprint, state: 'running', environment,
+        ...(input.model ? { model: input.model } : {}), ...(this.bootIdentity ? { bootId: this.bootIdentity } : {}) };
       this.#store.admit(record); // Persist before any provider process or prompt is started.
-      const active = { runId: input.runId, sessionKey: key, provider: input.provider, nativeSessionId: input.resumeSessionId, adapter, controller, historyTruncated: false, promise: Promise.resolve<unknown>(null), steer: undefined as ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | undefined };
+      const active = { runId: input.runId, sessionKey: key, provider: input.provider, nativeSessionId: input.resumeSessionId, adapter, controller, historyTruncated: false, ready: false, promise: Promise.resolve<unknown>(null), steer: undefined as ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | undefined };
       this.#active.set(input.runId, active);
       active.promise = (async () => {
         // This closure keeps local diagnostic callbacks local even after completion or a remote rebind.
@@ -455,7 +496,7 @@ export class DeviceHost {
           if (sessionId && [...this.#active.values()].some(other => other !== active && other.provider === input.provider && other.nativeSessionId === sessionId)) throw new Error('native_session_busy');
           active.nativeSessionId = sessionId;
           finishNativeStartup();
-          await observeStartup(input.runId, 'device_ready_callback', () => call('ready', { sessionId })); signal.throwIfAborted(); started = true;
+          await observeStartup(input.runId, 'device_ready_callback', () => call('ready', { sessionId })); signal.throwIfAborted(); started = true; active.ready = true;
         };
         const invocation: McpInvocation = { signal,
           onToolCall: async tool => {

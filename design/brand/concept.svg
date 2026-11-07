@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1440" viewBox="0 0 1440 1440">
+<rect width="1440" height="1440" fill="#0C0E0D"/>
+<g transform="translate(0 180)" font-family="Helvetica Neue,Arial,sans-serif">
+<text x="64" y="62" fill="#8C9893" font-size="15" letter-spacing="3">HUTIAN / HARNESS DOCK</text>
+<text x="1376" y="62" text-anchor="end" fill="#65716B" font-size="13" letter-spacing="2">IDENTITY CONCEPT 02</text>
+<path d="M64 90H1376" stroke="#28312C"/>
+<g transform="translate(115 130) scale(1.0546875)">  <g fill="#00C89B">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><text x="770" y="281" fill="#F2F6F4" font-weight="600" font-size="53" letter-spacing="-2">harness-dock</text>
+<text x="773" y="326" fill="#96A59D" font-size="20">Cross-device access. Native execution.</text>
+<path d="M774 373H1310" stroke="#28312C"/>
+<text x="774" y="424" fill="#00C89B" font-size="14" letter-spacing="2">01 / TWO INTERFACES</text>
+<text x="774" y="454" fill="#AAB7AF" font-size="17">Two facing brackets form a balanced whole.</text>
+<text x="774" y="502" fill="#00C89B" font-size="14" letter-spacing="2">02 / CONNECTION</text>
+<text x="774" y="532" fill="#AAB7AF" font-size="17">A central bridge represents device access.</text>
+<text x="774" y="580" fill="#00C89B" font-size="14" letter-spacing="2">03 / HARNESS</text>
+<text x="774" y="610" fill="#AAB7AF" font-size="17">The joined structure forms a compact H.</text>
+<path d="M64 710H1376" stroke="#28312C"/>
+<rect x="64" y="750" width="300" height="190" rx="16" fill="#F1F4F1"/>
+<g transform="translate(134 765) scale(0.3125)">  <g fill="#00C89B">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><rect x="388" y="750" width="300" height="190" rx="16" fill="#151B17"/><g transform="translate(458 765) scale(0.3125)">  <g fill="#F1F4F1">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><rect x="712" y="750" width="300" height="190" rx="16" fill="#00C89B"/><g transform="translate(782 765) scale(0.3125)">  <g fill="#0C0E0D">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><text x="1056" y="780" fill="#8C9893" font-size="13" letter-spacing="2">SMALL SIZES</text><g transform="translate(1056 820) scale(0.125)">  <g fill="#00C89B">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><text x="1088.0" y="918" text-anchor="middle" fill="#8C9893" font-size="12">64</text><g transform="translate(1152 820) scale(0.0625)">  <g fill="#00C89B">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><text x="1168.0" y="918" text-anchor="middle" fill="#8C9893" font-size="12">32</text><g transform="translate(1216 820) scale(0.046875)">  <g fill="#00C89B">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><text x="1228.0" y="918" text-anchor="middle" fill="#8C9893" font-size="12">24</text><g transform="translate(1272 820) scale(0.03125)">  <g fill="#00C89B">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g></g><text x="1280.0" y="918" text-anchor="middle" fill="#8C9893" font-size="12">16</text></g></svg>

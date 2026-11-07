@@ -2,12 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
-/** Package the existing hutian-ai logo at every standard macOS icon size before signing. */
+/** Package the Jiezhou app artwork at every standard macOS icon size before signing. */
 export async function buildPanelIcon(destination: string): Promise<void> {
   const temporary = await mkdtemp(join(dirname(destination), '.app-icon-'));
   try {
     const iconset = join(temporary, 'AppIcon.iconset');
-    const source = resolve('apps/device-panel/Resources/HutianLogo.png');
+    const source = resolve('apps/device-panel/Resources/AppIcon.png');
     await mkdir(iconset);
     for (const size of [16, 32, 128, 256, 512]) {
       for (const scale of [1, 2]) {

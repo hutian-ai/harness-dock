@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import { JSONRPCClient, JSONRPCServer, JSONRPCServerAndClient } from 'json-rpc-2.0';
 import { assertEndpoint, DEVICE_PROTOCOL_HEADER, DEVICE_PROTOCOL_VERSION, DeviceInboundBudget, DeviceTransport, diagnosticError } from '@harness-dock/protocol';
 import type { DeviceConfig } from './config.ts';
+import { assertWindowsPrivatePath } from '@harness-dock/drivers';
 import { DeviceHost } from './device-host.ts';
 import { serveControl } from './local-control.ts';
 import { daemonEnvironment } from './provider-environment.ts';
@@ -100,6 +101,7 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
   const proxyDefaults = await discoverProxyDefaults(process.env);
   const permitted = daemonEnvironment(process.env);
   for (const key of Object.keys(process.env)) if (!Object.hasOwn(permitted, key)) delete process.env[key];
+  await assertWindowsPrivatePath(config.stateDir);
   const host = new DeviceHost(config, undefined, proxyDefaults);
   const ca = config.caFile ? await readFile(config.caFile, 'utf8') : undefined;
   const connection = new DeviceConnection(host, config, ca);
@@ -111,12 +113,14 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
       pid: process.pid, connected: connection.connected, endpoint: config.endpoint,
       ...(connection.connectionError ? { connectionError: connection.connectionError } : {}),
       entrypoint: fileURLToPath(new URL('./cli.js', import.meta.url)), runtime: process.execPath,
-      ...host.maintenanceStatus(), providerProxies: host.providerProxies,
+      ...host.maintenanceStatus(), admissionRecovery: host.admissionRecoveryStatus, providerProxies: host.providerProxies, providerActivity: host.providerActivity, overview: host.overview,
+      providerDetailsSupported: true, providerDetails: host.providerDetails,
       selfTest: host.selfTestStatus, selfTests: host.selfTestStatuses, selfTestProviders: host.selfTestProviders }), stop, () => {
         const closing = host.closeIfIdle();
         connection.stop(); stopping = closing;
         return closing;
-      }, (id, provider) => host.startSelfTest(id, provider), (id, provider) => host.lookupSelfTest(id, provider));
+      }, (id, provider) => host.startSelfTest(id, provider), (id, provider) => host.lookupSelfTest(id, provider),
+      { prepare: () => host.prepareAdmissionRecovery(), resume: id => host.resumeAdmission(id) }, () => host.refreshProviderDetails());
     connection.connect();
   } catch (error) { await stop().catch(() => {}); await closeControl?.(); throw error; }
   console.log(`Device ${config.nodeId} connecting to ${config.endpoint}`);

@@ -1,6 +1,21 @@
-# App icon
+# 界舟 · Harness Dock artwork
 
-`HutianLogo.png` is the existing hutian-ai organization logo from
-[the GitHub organization](https://github.com/hutian-ai), retrieved on 2026-10-30.
-The original is 460 × 460 pixels. Packaging directly resizes this PNG into
-the standard macOS `.icns` sizes.
+The approved mark is `design/brand/jiezhou.svg`: an emerald vessel, geometric
+sails and a docking notch, sharing hutian's 45-degree visual language.
+
+- `JiezhouMark.png`: transparent 1024px mark for inline product branding.
+- `AppIcon.png`: 1024px artwork on a dark rounded tile for macOS `.icns` packaging.
+- `TrayTemplate.png`: transparent monochrome mark with tighter framing for the
+  macOS menu bar. macOS supplies its light/dark color from the alpha channel.
+- `HutianLogo.png`: historical hutian reference, retained for the design family
+  comparison only; not included in packaged application resources.
+
+Regenerate all three product PNGs on macOS:
+
+```sh
+swift scripts/render-brand.swift design/brand/jiezhou.svg apps/device-panel/Resources
+```
+
+`scripts/panel-icon.ts` packages `AppIcon.png` into standard macOS icon sizes.
+Both client frontends use the same transparent mark and tray template; neither
+removes a background at runtime. The SVG is also used by the documentation site.

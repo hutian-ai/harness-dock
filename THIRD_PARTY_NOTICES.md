@@ -40,3 +40,23 @@ these notices and the upstream license files when redistributing modified builds
 Packages offering `(MIT OR GPL-3.0-or-later)` are used under their MIT option.
 Combined license expressions such as `(MIT AND Zlib)` retain both sets of terms.
 The original files remain the authoritative license texts.
+
+## GPUI desktop frontend
+
+The macOS v0.1.3 client uses GPUI Kit 0.9.0 and its locked Rust dependency
+closure. `Contents/Resources/rust-licenses/inventory.json` records the packages,
+declared licenses, source-archive URLs and included notices for the target
+platform. Unmodified source for a dependency is available at its exact crates.io
+archive URL. Keep these notices and source references with redistributed builds.
+
+Some crates omit standalone license files from their published packages.
+`third-party/rust-notices/sources.json` records supplemental upstream files,
+revisions and SHA-256 digests. For packages whose upstream also omits these texts,
+the original package manifest, available README and author declarations are
+retained with the applicable license text. The packaging step verifies these
+files and refuses a missing notice supplement rather than shipping an empty
+notice entry. Review this supplement when updating Cargo.lock.
+
+The Codex and DeepSeek identification artwork retains the Lobe Icons MIT notice
+and brand attribution in `apps/gpui-panel/Resources/README.md`. The artwork does
+not imply endorsement or transfer brand rights.

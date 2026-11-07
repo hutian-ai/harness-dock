@@ -6,8 +6,8 @@ const pages = JSON.parse(await readFile(join(root, 'src/content.json'), 'utf8'))
 const shell = await readFile(join(root, 'src/shell.html'), 'utf8');
 const out = join(root, 'dist');
 const esc = text => String(text).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const groups = ['认识产品', '开始使用', '应用集成', '运行维护','开发与贡献'];
-const order = ['', 'overview', 'support', 'quickstart', 'app', 'installation', 'server', 'usage', 'sdk', 'lifecycle', 'pairing', 'troubleshooting', 'deploy-docs','architecture','drivers','verification','distribution'];
+const groups = ['快速了解', '使用 App', '接入产品', '管理服务', '开发与参考'];
+const order = ['', 'overview', 'support', 'quickstart', 'app', 'usage', 'troubleshooting', 'sdk', 'lifecycle', 'server', 'pairing', 'installation', 'architecture', 'drivers', 'verification', 'distribution', 'deploy-docs'];
 const iconPaths={
 '':'M4 10 12 3l8 7v10H4V10Zm5 10v-7h6v7',
 overview:'M12 8v1m0 3v5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
@@ -34,14 +34,14 @@ for (const [index, page] of sorted.entries()) {
   const href = slug => base + (slug ? slug + '/' : '');
   const nav = groups.map(group => '<div class="nav-group"><div class="nav-heading">'+group+'</div>'+sorted.filter(p=>p.group===group).map(p=>'<a class="nav-link'+(p.slug===page.slug?' selected':'')+'" '+(p.slug===page.slug?'aria-current="page" ':'')+'href="'+href(p.slug)+'">'+navIcon(p.slug)+'<span>'+esc(p.label)+'</span></a>').join('')+'</div>').join('');
   let body = page.body.replaceAll('%BASE%', base);
-  const headings = [...body.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)].map(m=>({id:m[1],text:m[2].replace(/<[^>]+>/g,' ')}));
+  const headings = [...body.matchAll(/<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g)].map(m=>({id:m[2],text:m[3].replace(/<[^>]+>/g,' '),level:m[1]}));
   if(new Set(headings.map(h=>h.id)).size!==headings.length) throw new Error('Duplicate heading IDs: '+page.slug);
   body = body.replace(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g, (_,id,title)=>'<h2 id="'+id+'">'+title+'<a class="heading-anchor" href="#'+id+'" aria-label="链接到此节">#</a></h2>');
-  const toc = page.slug ? '<aside class="page-toc"><div>本页内容</div><nav aria-label="本页目录">'+headings.map(h=>'<a href="#'+h.id+'">'+esc(h.text)+'</a>').join('')+'</nav><div class="toc-note">Developer Alpha<br><span>App 与 SDK 分别发行</span></div></aside>' : '';
+  const toc = page.slug ? '<aside class="page-toc"><div>本页内容</div><nav aria-label="本页目录">'+headings.map(h=>'<a data-level="'+h.level+'" href="#'+h.id+'">'+esc(h.text)+'</a>').join('')+'</nav><div class="toc-note">Developer Alpha<br><span>App 与 SDK 分别发行</span></div></aside>' : '';
   const pageHeader = page.slug ? '<header class="article-header"><div class="breadcrumb">文档 <span>/</span> '+page.group+'</div><h1>'+esc(page.title)+'</h1><p>'+esc(page.description)+'</p></header>' : '';
   const prev=sorted[index-1], next=sorted[index+1];
   const pagination = page.slug ? '<nav class="pagination" aria-label="翻页">'+(prev?'<a href="'+href(prev.slug)+'"><span>← 上一篇</span><strong>'+esc(prev.label)+'</strong></a>':'<div></div>')+(next?'<a class="next" href="'+href(next.slug)+'"><span>下一篇 →</span><strong>'+esc(next.label)+'</strong></a>':'')+'</nav>':'';
-  const values = {TITLE:esc(page.title)+(page.slug?' | harness-dock 文档':' · harness-dock'),DESCRIPTION:esc(page.description),BASE:base,SLUG:page.slug,NAV:nav,BODY:body,TOC:toc,PAGE_HEADER:pageHeader,PAGINATION:pagination,LAYOUT:page.slug?'article-layout':'home-layout',BODY_CLASS:page.slug?'is-docs':'is-home',TAB_DEV:page.group==='开发与贡献'?'active':'',TAB_INTRO:page.group==='认识产品'?'active':'',TAB_START:['quickstart','app','installation','usage'].includes(page.slug)?'active':'',TAB_SDK:page.group==='应用集成'?'active':'',TAB_OPS:['server','pairing','troubleshooting','deploy-docs'].includes(page.slug)?'active':''};
+  const values = {TITLE:esc(page.title)+(page.slug?' | 界舟 · Harness Dock 文档':' · 界舟 · Harness Dock'),DESCRIPTION:esc(page.description),BASE:base,SLUG:page.slug,NAV:nav,BODY:body,TOC:toc,PAGE_HEADER:pageHeader,PAGINATION:pagination,LAYOUT:page.slug?'article-layout':'home-layout',BODY_CLASS:page.slug?'is-docs':'is-home',TAB_DEV:page.group==='开发与参考'?'active':'',TAB_INTRO:page.group==='快速了解'?'active':'',TAB_START:page.group==='使用 App'?'active':'',TAB_SDK:page.group==='接入产品'?'active':'',TAB_OPS:page.group==='管理服务'?'active':''};
   const html = shell.replace(/\{\{([A-Z_]+)\}\}/g, (_,key) => {if(!(key in values)) throw new Error('Unknown template field '+key);return values[key];});
   const dir=page.slug?join(out,page.slug):out;
   await mkdir(dir,{recursive:true});
@@ -50,5 +50,5 @@ for (const [index, page] of sorted.entries()) {
 const plain = html => html.replace(/<[^>]*>/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/\s+/g,' ').trim();
 await writeFile(join(out,'.nojekyll'),'');
 await writeFile(join(out,'search-index.json'),JSON.stringify(sorted.map(p=>({title:p.label,slug:p.slug,description:p.description,text:plain(p.body)}))));
-await writeFile(join(out,'404.html'),'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>404 · harness-dock</title><body style="font:18px/1.8 system-ui;max-width:600px;margin:15vh auto;padding:30px"><h1>404</h1><p>这个文档页面不存在，请使用浏览器后退，或从站点首页重新进入。</p></body></html>');
+await writeFile(join(out,'404.html'),'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>404 · 界舟 · Harness Dock</title><body style="font:18px/1.8 system-ui;max-width:600px;margin:15vh auto;padding:30px"><h1>404</h1><p>这个文档页面不存在，请使用浏览器后退，或从站点首页重新进入。</p></body></html>');
 console.log('Built '+sorted.length+' pages → dist/ (zero runtime dependencies)');

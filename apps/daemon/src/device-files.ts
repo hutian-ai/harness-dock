@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, opendir, readdir, rename, rm, rmdir } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export interface DeviceFile { path: string; contentBase64: string; executable?: boolean }
@@ -12,10 +12,10 @@ const MAX_FILE = 8 * 1024 * 1024, MAX_TOTAL = 16 * 1024 * 1024, MAX_FILES = 64;
 /** Anchor every managed ancestor; checking only the final directory misses parent links. */
 async function checkedDirectories(stateDir: string, path: string): Promise<() => Promise<void>> {
   const root = resolve(stateDir), target = resolve(path), rel = relative(root, target);
-  if (isAbsolute(rel) || rel === '..' || rel.startsWith('../')) throw new Error('unsafe_managed_directory');
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) throw new Error('unsafe_managed_directory');
   let current = root;
   const identities: { path: string; dev: number; ino: number }[] = [];
-  for (const part of ['', ...rel.split('/').filter(Boolean)]) {
+  for (const part of ['', ...rel.split(sep).filter(Boolean)]) {
     if (part) current = join(current, part);
     const info = await lstat(current);
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('unsafe_managed_directory');
@@ -32,10 +32,10 @@ async function checkedDirectories(stateDir: string, path: string): Promise<() =>
 
 async function directory(path: string, root = path): Promise<void> {
   const rel = relative(root, path);
-  if (isAbsolute(rel) || rel === '..' || rel.startsWith('../')) throw new Error('unsafe_managed_directory');
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) throw new Error('unsafe_managed_directory');
   await mkdir(root, { recursive: true, mode: 0o700 });
   let current = root;
-  for (const part of ['', ...rel.split('/').filter(Boolean)]) {
+  for (const part of ['', ...rel.split(sep).filter(Boolean)]) {
     if (part) { current = join(current, part); await mkdir(current, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; }); }
     const info = await lstat(current);
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('unsafe_managed_directory');
@@ -44,7 +44,8 @@ async function directory(path: string, root = path): Promise<void> {
 function safeRelative(path: string): string[] {
   const parts = path.split('/');
   if (!path || isAbsolute(path) || path.includes('\\') || parts.length > 12
-    || parts.some(part => !part || part === '.' || part === '..' || part.includes('\0')))
+    || parts.some(part => !part || part === '.' || part === '..' || part.includes('\0')
+      || process.platform === 'win32' && (/[<>:"|?*\x00-\x1f]/u.test(part) || /[. ]$/u.test(part) || /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(part))))
     throw new Error('unsafe_file_path');
   return parts;
 }
@@ -56,8 +57,9 @@ export async function prepareDirectories(stateDir: string, runId: string, sessio
     if (typeof file.path !== 'string' || typeof file.contentBase64 !== 'string'
       || file.executable !== undefined && typeof file.executable !== 'boolean') throw new Error('invalid_file');
     const parts = safeRelative(file.path);
-    if (seen.has(file.path) || file.contentBase64.length > Math.ceil(MAX_FILE / 3) * 4) throw new Error('file_limits_exceeded');
-    seen.add(file.path);
+    const fileKey = process.platform === 'win32' ? file.path.toLowerCase() : file.path;
+    if (seen.has(fileKey) || file.contentBase64.length > Math.ceil(MAX_FILE / 3) * 4) throw new Error('file_limits_exceeded');
+    seen.add(fileKey);
     const bytes = Buffer.from(file.contentBase64, 'base64');
     if (bytes.toString('base64') !== file.contentBase64) throw new Error('invalid_base64');
     total += bytes.length;
@@ -147,9 +149,9 @@ async function removeManagedDirectory(stateDir: string, target: string): Promise
   let verifyTarget: () => Promise<void>;
   try { verifyTarget = await checkedDirectories(stateDir, target); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') { await verifyParents(); return; } throw error; }
-  const handle = await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  const handle = process.platform === 'win32' ? undefined : await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
-    const expected = await handle.stat();
+    const expected = handle ? await handle.stat() : await lstat(target);
     await verifyTarget();
     const quarantine = await mkdtemp(join(stateDir, '.release-'));
     const verifyQuarantine = await checkedDirectories(stateDir, quarantine);
@@ -164,7 +166,7 @@ async function removeManagedDirectory(stateDir: string, target: string): Promise
     await rm(moved, { recursive: true, force: true });
     await verifyQuarantine();
     await rmdir(quarantine);
-  } finally { await handle.close(); }
+  } finally { await handle?.close(); }
 }
 
 /** Reusing immutable skill paths must not trust files a provider could have changed. */
@@ -190,7 +192,7 @@ export async function verifySkillFiles(stateDir: string, directory: string, expe
     const target = byPath.get(relative(root, file.reference).split('\\').join('/'));
     if (!target || target.contentBase64 !== file.contentBase64) throw new Error('skill_cache_mismatch');
     const info = await lstat(file.reference);
-    if ((info.mode & 0o777) !== (target.executable ? 0o700 : 0o600)) throw new Error('skill_cache_mismatch');
+    if (process.platform !== 'win32' && (info.mode & 0o777) !== (target.executable ? 0o700 : 0o600)) throw new Error('skill_cache_mismatch');
   }
 }
 

@@ -10,6 +10,7 @@ const xml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&
 export interface Autostart {
   loaded(): Promise<boolean>;
   check(runtime: string): Promise<void>;
+  configure(runtime: string, enabled: boolean, previousRuntime?: string): Promise<void>;
   enable(runtime: string, previousRuntime?: string): Promise<void>;
   unload(runtime: string, previousRuntime?: string): Promise<void>;
   disable(runtime: string): Promise<void>;
@@ -47,7 +48,11 @@ export function macAutostart(root: string, config: string, searchPath: string, e
   const run = (...args: string[]) => exec('/bin/launchctl', args, { timeout: 15_000, maxBuffer: 64 * 1024 });
   const loaded = async () => {
     try { await run('print', target); return true; }
-    catch (error) { if ((error as { code?: number }).code === 113) return false; throw error; }
+    catch (error) {
+      // 112 is an absent GUI login domain; 113 is an absent job in that domain.
+      if ([112, 113].includes((error as { code?: number }).code ?? -1)) return false;
+      throw error;
+    }
   };
   async function assertOwned(runtime: string, previousRuntime?: string): Promise<boolean> {
     let actual: string;
@@ -60,18 +65,25 @@ export function macAutostart(root: string, config: string, searchPath: string, e
     if (!await assertOwned(runtime, previousRuntime) && await loaded()) throw new Error('autostart_registration_without_owned_file');
     if (await loaded()) await run('bootout', target);
   };
+  const configure = async (runtime: string, enabled: boolean, previousRuntime?: string) => {
+    const owned = await assertOwned(runtime, previousRuntime);
+    if (!owned && await loaded()) throw new Error('autostart_registration_without_owned_file');
+    if (!owned && !enabled) return;
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const pending = `${path}.${randomUUID()}.tmp`;
+    try { await writeFile(pending, plan(runtime).content, { mode: 0o600, flag: 'wx' }); await rename(pending, path); }
+    finally { await rm(pending, { force: true }); }
+    // This changes the next login's loading policy without stopping, starting,
+    // or replacing a service already loaded in the current login session.
+    await run(enabled ? 'enable' : 'disable', target);
+  };
   return {
-    path, loaded, unload,
+    path, loaded, unload, configure,
     async check(runtime) {
       if (!await assertOwned(runtime) && await loaded()) throw new Error('autostart_registration_without_owned_file');
     },
     async enable(runtime, previousRuntime) {
-      if (!await assertOwned(runtime, previousRuntime) && await loaded()) throw new Error('autostart_registration_without_owned_file');
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      const pending = `${path}.${randomUUID()}.tmp`;
-      try { await writeFile(pending, plan(runtime).content, { mode: 0o600, flag: 'wx' }); await rename(pending, path); }
-      finally { await rm(pending, { force: true }); }
-      await run('enable', target);
+      await configure(runtime, true, previousRuntime);
       if (!await loaded()) await run('bootstrap', `gui/${uid}`, path);
     },
     async disable(runtime) {

@@ -75,9 +75,9 @@ test('managed install stages independently, upgrades, rolls back, and restores a
   assert.equal(await readFile(join(config.stateDir, 'preserved-history'), 'utf8'), 'unknown evidence and session identity');
   assert.equal((await stat(join(install, 'installation.json'))).mode & 0o777, 0o600);
   // A second operation cannot race the current/previous pointers.
-  await writeFile(join(install, 'operation.lock'), 'synthetic concurrent operation');
-  await assert.rejects(manageInstallation('rollback', { config: configPath, root: install }), /installation_busy/);
-  await assert.rejects(startInstalled(configPath, install), /installation_busy/);
+  await writeFile(join(install, 'operation.lock'), 'synthetic concurrent operation', { mode: 0o600 });
+  await assert.rejects(manageInstallation('rollback', { config: configPath, root: install }), /installation_lock_legacy/);
+  await assert.rejects(startInstalled(configPath, install), /installation_lock_legacy/);
   await rm(join(install, 'operation.lock'));
 });
 
@@ -118,7 +118,7 @@ test('installation refuses busy/unknown owners and invalid artifacts before chan
   assert.equal(await readFile(join(install, 'installation.json'), 'utf8'), original);
 });
 
-test('autostart changes only its owned service and requires confirmed local startup', { timeout: 30_000 }, async t => {
+test('login preference preserves the current owner while explicit service changes confirm startup', { timeout: 30_000 }, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'dock-autostart-'))), work = join(root, 'work');
   await mkdir(work);
   const { configPath } = await initializeDevice({ home: join(root, 'device'), cwd: work });
@@ -128,6 +128,7 @@ test('autostart changes only its owned service and requires confirmed local star
   const calls: string[] = []; let loaded = false;
   const service: Autostart = { path: 'synthetic-agent', loaded: async () => loaded,
     check: async () => {},
+    configure: async (_, enabled) => { calls.push(`configure:${enabled}`); },
     enable: async () => { calls.push('enable'); loaded = true; },
     unload: async () => { calls.push('unload'); loaded = false; },
     disable: async () => { calls.push('disable'); loaded = false; },
@@ -138,22 +139,32 @@ test('autostart changes only its owned service and requires confirmed local star
       await startBackground(config, configPath, join(install, 'releases', record.current.id, 'dist/cli.js'), record.current.runtime);
     } };
   const factory = () => service;
-  const enabled = await manageInstallation('autostart', { config: configPath, root: install }, factory);
+  const enabled = await manageInstallation('login-start', { config: configPath, root: install }, factory);
   assert.equal(enabled.autostart, true);
   assert.equal((await readInstallation(install, configPath))?.autostart, true);
-  assert.deepEqual(calls, ['enable', 'start']);
+  assert.deepEqual(calls, ['configure:true']);
+  assert.equal(await control(config, 'status'), null);
   await manageInstallation('upgrade', { config: configPath, root: install, bundle: await bundle(root, 'b') }, factory);
-  assert.deepEqual(calls.slice(2), ['unload', 'enable', 'start']);
+  assert.deepEqual(calls.slice(1), ['unload', 'configure:true']);
+  assert.equal(await control(config, 'status'), null, 'upgrade preserves an enabled but stopped service');
+  await manageInstallation('rollback', { config: configPath, root: install }, factory);
+  assert.equal(await control(config, 'status'), null, 'rollback preserves an enabled but stopped service');
+  assert.equal(loaded, false);
+  // Only an explicit start changes the current stopped state.
+  await manageInstallation('autostart', { config: configPath, root: install }, factory);
   const beforeFailure = (await readInstallation(install, configPath))!;
-  // A loaded but intentionally stopped agent must also receive a confirmed recovery.
-  await control(config, 'stop');
+  // A failed activation must restore the previously running owner.
   await assert.rejects(manageInstallation('upgrade', { config: configPath, root: install, bundle: await bundle(root, 'bad', true) }, factory), /activation_failed_previous_restored/);
   assert.equal((await readInstallation(install, configPath))?.current.id, beforeFailure.current.id);
   assert.equal((await readInstallation(install, configPath))?.autostart, true);
   assert.equal(loaded, true);
   assert.equal((await control(config, 'status'))?.entrypoint, join(install, 'releases', beforeFailure.current.id, 'dist/cli.js'));
-  await manageInstallation('autostart', { config: configPath, root: install, disable: true }, factory);
+  const currentOwner = (await control(config, 'status'))!.daemonId;
+  await manageInstallation('login-start', { config: configPath, root: install, disable: true }, factory);
   assert.equal((await readInstallation(install, configPath))?.autostart, false);
+  assert.equal((await control(config, 'status'))?.daemonId, currentOwner);
+  assert.equal(calls.at(-1), 'configure:false');
+  await manageInstallation('autostart', { config: configPath, root: install, disable: true }, factory);
   assert.equal(await control(config, 'status'), null);
   assert.equal(calls.at(-1), 'disable');
   const plan = launchAgent('/private/install & test', '/private/config <test>.json', '/private/node', '/usr/bin:/bin', '/private/user', {

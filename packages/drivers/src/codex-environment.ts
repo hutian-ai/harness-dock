@@ -41,7 +41,7 @@ function descendant(process: Process, ancestor: number, snapshot: Process[]): bo
 
 /** Extract only named non-credential fields; never return, log or persist raw process output. */
 export function codexHostFields(text: string): { pipe?: string; home?: string } {
-  const pipes = [...text.matchAll(/(?:^|\s)CODEX_APP_TOOLS_PIPE_PATH=(\/tmp\/codex-browser-use\/[0-9a-f-]{36}\.sock)(?=\s|$)/gu)];
+  const pipes = [...text.matchAll(/(?:^|\s)CODEX_APP_TOOLS_PIPE_PATH=(\/tmp\/codex-(?:browser-use|app-tools)\/[0-9a-f-]{36}\.sock)(?=\s|$)/gu)];
   const homes = [...text.matchAll(/(?:^|\s)CODEX_HOME=(.*?)(?=\s[A-Za-z_][A-Za-z0-9_]*=|$)/gu)];
   if (pipes.length > 1 || homes.length > 1) throw new Error('codex_desktop_environment_ambiguous');
   return { pipe: pipes[0]?.[1], home: homes[0]?.[1] };
@@ -127,6 +127,7 @@ export async function discoverCodexInstallation(options: { environment: NodeJS.P
   if (override?.disabled) return { ...descriptor, status: 'disabled' };
   const explicit = override?.executable ?? environment.CODEX_CLI_PATH;
   let candidates: { path: string; source: DiscoveredProvider['source'] }[] = [];
+  let desktopHost: DiscoveredProvider['desktopHost'];
   if (explicit) candidates = explicit.includes('/') || explicit.includes('\\') ? [{ path: resolve(explicit), source: 'configured' }] : (await pathCandidates(explicit, environment, signal)).map(candidate => ({ ...candidate, source: 'configured' }));
   else {
     // A synthetic/other user's home must not discover this user's running desktop or environment.
@@ -142,7 +143,10 @@ export async function discoverCodexInstallation(options: { environment: NodeJS.P
       if (running.length > 1) return { ...descriptor, reason: 'codex_installation_ambiguous', candidates: running.map(value => value.app.executable) };
       const selected = running[0] ?? (applications.length === 1 ? applications[0] : undefined);
       if (!selected && applications.length > 1) return { ...descriptor, reason: 'codex_installation_ambiguous', candidates: applications.map(value => value.app.executable) };
-      if (selected) candidates.push({ path: selected.app.executable, source: 'app' });
+      if (selected) {
+        candidates.push({ path: selected.app.executable, source: 'app' });
+        desktopHost = selected.running ? 'available' : 'unavailable';
+      }
     }
     const shell = environment.SHELL ?? (process.platform !== 'win32' && await samePath(homeDirectory, homedir()) ? userInfo().shell : undefined);
     candidates.push(...await pathCandidates('codex', { ...environment, ...(shell ? { SHELL: shell } : {}) }, signal));
@@ -150,7 +154,13 @@ export async function discoverCodexInstallation(options: { environment: NodeJS.P
   const available = candidates.filter((candidate, index) => candidates.findIndex(other => other.path === candidate.path) === index);
   for (const candidate of available) {
     if (!await usableFile(candidate.path)) continue;
-    return { ...descriptor, status: 'installed', executable: await realpath(candidate.path), source: candidate.source, candidates: available.map(value => value.path), version: await installedVersion(candidate.path) };
+    const executable = await realpath(candidate.path);
+    if (desktopHost === undefined) {
+      const root = applicationRoot(executable);
+      const app = process.platform === 'darwin' && root ? await application(root, signal) : undefined;
+      desktopHost = app ? (await host(app, home, await processes(signal), signal) ? 'available' : 'unavailable') : 'not_applicable';
+    }
+    return { ...descriptor, status: 'installed', executable, desktopHost, source: candidate.source, candidates: available.map(value => value.path), version: await installedVersion(candidate.path, '@openai/codex', signal) };
   }
   return { ...descriptor, reason: explicit ? 'Configured executable not found' : 'Supported installation not found' };
 }

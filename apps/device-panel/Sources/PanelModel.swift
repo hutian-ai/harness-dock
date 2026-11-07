@@ -60,6 +60,11 @@ import UniformTypeIdentifiers
         }
         return "\(refreshError == nil ? "已检测到" : "上次检测到") \(installedProviderCount) 个 Harness"
     }
+    var harnessCountLabel: String {
+        guard device.providers != nil else { return "待检测" }
+        if installedProviderCount == 0 && providerChoices.contains(where: { !["installed", "not_found", "disabled"].contains($0.status) }) { return "待确认" }
+        return refreshError == nil ? "\(installedProviderCount) 个已安装" : "上次检测 \(installedProviderCount) 个"
+    }
     var harnessSummaryDetail: String? {
         if refreshError != nil { return "当前状态尚未刷新，保留上次检测结果。" }
         guard device.providers != nil else { return "刷新状态后查看本机支持的 Harness。" }
@@ -87,6 +92,43 @@ import UniformTypeIdentifiers
         "\(provider.displayName)（\(installationStatus(provider))）"
     }
     func installationStatus(_ provider: ProviderInstallation) -> String { ["installed": "已安装", "not_found": "未发现", "disabled": "已禁用"][provider.status] ?? "待确认" }
+    func providerConnectionLabel(_ provider: ProviderInstallation) -> String {
+        guard refreshError == nil else { return "连接待刷新" }
+        guard provider.status == "installed" else { return installationStatus(provider) }
+        guard device.configured, device.running == true else { return "未连接" }
+        switch device.providerActivity?[provider.key] {
+        case "executing": return "已连接"
+        case "connecting", "checking": return "连接中"
+        case "unknown": return "连接待确认"
+        case "idle":
+            switch provider.desktopHost {
+            case "available": return "可连接"
+            case "unavailable": return "未连接"
+            case "not_applicable": return "待连接"
+            default: return provider.key == "dsh" ? "待连接" : "连接待确认"
+            }
+        default: return "连接待确认"
+        }
+    }
+    func providerConnectionColor(_ provider: ProviderInstallation) -> Color {
+        switch providerConnectionLabel(provider) {
+        case "已连接", "可连接": return PanelTheme.accent
+        case "连接待确认": return .orange
+        case "未连接": return provider.status == "installed" && device.running == true ? .orange : .secondary
+        default: return .secondary
+        }
+    }
+    func providerConnectionDetail(_ provider: ProviderInstallation) -> String {
+        switch providerConnectionLabel(provider) {
+        case "可连接": return "已检测到可用的原生环境，任务开始时会实际建立连接。模型、工具和原生权限仍以实际调用为准。"
+        case "已连接": return "当前任务的原生连接已建立，由设备后台持有。"
+        case "连接中": return "设备后台正在准备本次原生连接。"
+        case "待连接": return "此 Harness 按任务建立连接，当前没有正在连接或执行的任务。"
+        case "未连接": return device.running == true ? "当前未检测到可用的原生连接环境。请打开对应原生应用后刷新。" : "连接设备并启动后台后，才能使用本机 Harness。"
+        case "连接待刷新": return "当前连接状态未能刷新，请刷新后再确认。"
+        default: return "尚未确认当前连接状态，请刷新或查看诊断。历史回显不代表当前仍然连接。"
+        }
+    }
     var selectedProviderSelfTestSupported: Bool {
         selectedInstallation?.selfTestSupported == true && (device.selfTestProviders?.contains(selectedProvider) ?? false)
     }
@@ -127,11 +169,10 @@ import UniformTypeIdentifiers
         if pendingSelfTestId != nil && pendingSelfTestProvider == provider.key { return busy ? "正在启动测试" : "启动结果待核对" }
         guard let test = latestSelfTest(for: provider.key) else { return "尚未测试" }
         if test.state == "running" || test.phase != "finished" { return refreshError == nil ? "测试进行中" : "测试状态待刷新" }
-        let historical = refreshError != nil || isHistorical(test) || provider.status != "installed"
         switch test.state {
-        case "passed": return historical ? "上次回显通过" : "最近回显通过"
+        case "passed": return "上次回显通过"
         case "unknown": return "结果待核对"
-        default: return historical ? "上次回显未通过" : "最近回显未通过"
+        default: return "上次回显未通过"
         }
     }
     func rowTestColor(_ provider: ProviderInstallation) -> Color {
@@ -139,7 +180,7 @@ import UniformTypeIdentifiers
         guard let test = latestSelfTest(for: provider.key) else { return .secondary }
         if test.state == "running" || test.phase != "finished" { return .secondary }
         if test.state == "unknown" || test.state == "failed" { return .orange }
-        return test.state == "passed" && provider.status == "installed" && !isHistorical(test) && refreshError == nil ? PanelTheme.accent : .secondary
+        return .secondary
     }
     func rowTestSymbol(_ provider: ProviderInstallation) -> String? {
         if pendingSelfTestId != nil && pendingSelfTestProvider == provider.key { return busy ? "clock" : "exclamationmark.circle" }
@@ -410,7 +451,11 @@ import UniformTypeIdentifiers
             try FileManager.default.createDirectory(at: self.workURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             var fields: [String: Any] = ["cwd": self.workURL.path]
             if let link = self.invitationLink { fields["invitation"] = link }
-            else if let file = self.pairingURL { fields["pairing"] = file.path }
+            else if let file = self.pairingURL {
+                fields["pairing"] = file.path
+                guard let digest = self.pairing?.pairingDigest else { throw PanelFailure(code: "pairing_changed") }
+                fields["expectedPairingDigest"] = digest
+            }
             if let caURL = self.caURL { fields["caFile"] = caURL.path }
             self.device = try await self.bridge.call("setup", config: self.configPath, fields: fields, as: DeviceState.self)
             self.refreshError = nil

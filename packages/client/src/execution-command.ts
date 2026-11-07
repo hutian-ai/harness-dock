@@ -1,10 +1,10 @@
 import { mkdir, open, readFile, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { id, type DeviceExecuteInput, type DeviceExecutionCallback, type DeviceExecutionResponse } from '@harness-dock/protocol';
+import { id, MAX_PROMPT_BYTES, type DeviceExecuteInput, type DeviceExecutionCallback, type DeviceExecutionResponse } from '@harness-dock/protocol';
 import type { ServerPeer } from './server-client.ts';
 import { record, rpcTimeout } from './server-protocol.ts';
 
-export const MAX_PROMPT_BYTES = 8 * 1024 * 1024;
+export { MAX_PROMPT_BYTES } from '@harness-dock/protocol';
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 60 * 60_000;
 export type RunInput = Pick<DeviceExecuteInput, 'provider' | 'runId' | 'prompt' | 'model'>;
 export type ExecutionPeer = Pick<ServerPeer, 'nodeId' | 'daemonId' | 'connected' | 'request' | 'onExecutionCallback'>;
@@ -41,6 +41,10 @@ export async function writeRunReceipt(path: string, receipt: RunReceipt): Promis
     await file.writeFile(JSON.stringify(receipt, null, 2) + '\n');
     await file.sync();
   } finally { await file.close(); }
+  if (process.platform !== 'win32') {
+    const directory = await open(dirname(path), 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
+  }
 }
 
 export async function readRunReceipt(path: string): Promise<RunReceipt> {
@@ -53,6 +57,17 @@ export async function readRunReceipt(path: string): Promise<RunReceipt> {
   validateRunInput(input as unknown as RunInput);
   if (value.runId !== input.runId) throw new Error('invalid_run_receipt');
   return value as unknown as RunReceipt;
+}
+
+/** Stop waiting locally. The underlying request is neither replayed nor cancelled. */
+function observe<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  return new Promise<T>((resolve, reject) => {
+    const interrupted = () => reject(signal.reason ?? new Error('observation_interrupted'));
+    signal.addEventListener('abort', interrupted, { once: true });
+    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', interrupted));
+    if (signal.aborted) interrupted();
+  });
 }
 
 /** One SDK execution. A lost response never becomes a retry or an automatic release. */
@@ -92,14 +107,14 @@ export async function runTask(peer: ExecutionPeer, input: RunInput, options: {
     return null;
   });
   try {
-    const inventory = record(await peer.request('inventory', {}, 120_000)); fence();
+    const inventory = record(await observe(peer.request('inventory', {}, 120_000), options.signal)); fence();
     if (inventory.nodeId !== peer.nodeId || inventory.daemonId !== boot) throw new Error('device_connection_expired');
     const provider = (Array.isArray(inventory.providers) ? inventory.providers.map(record) : []).find(value => value.key === input.provider);
     if (provider?.status !== 'ready') throw new Error('provider_not_ready');
     if (input.model !== undefined && (!Array.isArray(provider.models) || !provider.models.includes(input.model))) throw new Error('model_unavailable');
-    await peer.request('prepare', { runId: input.runId, files: [] }); fence();
+    await observe(peer.request('prepare', { runId: input.runId, files: [] }), options.signal); fence();
     executionAttempted = true;
-    const response = record(await peer.request('execute', input, timeoutMs)); fence();
+    const response = record(await observe(peer.request('execute', input, timeoutMs), options.signal)); fence();
     const result = record(response.result);
     if (response.provider !== input.provider || !['completed', 'failed', 'cancelled', 'unknown'].includes(String(result.state))) throw new Error('invalid_execution_response');
     return response as unknown as DeviceExecutionResponse;

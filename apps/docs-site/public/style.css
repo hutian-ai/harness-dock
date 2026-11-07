@@ -84,3 +84,10 @@
 @media(min-width:761px) and (max-width:960px){.home-hero .hero-actions>.button{flex:1;min-width:0;gap:8px;padding:13px 14px;font-size:12px}.home-hero .action-icon{flex-basis:16px;width:16px;height:16px}}
 @media(max-width:500px){.home-hero .hero-actions>.button{flex:1;min-width:0}}
 @media(max-width:420px){.home-hero .hero-actions{display:grid;grid-template-columns:1fr;gap:10px}.home-hero .hero-actions>.button{width:100%}}
+
+/* Jiezhou identity; navigation remains compact on narrow screens. */
+.brand>img{flex:none;width:34px;height:34px}.brand>span{display:flex;align-items:baseline;gap:9px}.brand-subtitle{font-size:12px;font-weight:500;letter-spacing:0;color:var(--muted)}@media(max-width:600px){.brand-subtitle{display:none}}
+
+/* Current task sections and retained public anchors share the sticky-header offset. */
+article h3[id],article span[id]{scroll-margin-top:135px}
+.page-toc a[data-level="3"]{padding-left:12px}

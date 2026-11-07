@@ -1,2 +1,2 @@
-# A blank patch context line contains a required leading space.
-patches/*.patch -whitespace
+# Preserve upstream notice bytes, including their original end-of-file spacing.
+third-party/rust-notices/** -whitespace

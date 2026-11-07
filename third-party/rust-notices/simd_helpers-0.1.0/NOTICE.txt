@@ -1,0 +1,4 @@
+The published simd_helpers 0.1.0 package declares MIT but omits standalone license text.
+Its original Cargo manifest and available README are retained, together with the MIT license text.
+Upstream authors: Luca Barbato <lu_zero@gentoo.org>
+Source archive: https://crates.io/api/v1/crates/simd_helpers/0.1.0/download

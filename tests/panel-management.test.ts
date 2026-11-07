@@ -113,7 +113,8 @@ test('panel imports bounded pairing without modifying the source, and projects n
   const pairing = { nodeId: randomUUID(), token: 'synthetic-panel-token-value-that-must-not-leak', endpoint: 'wss://dock.example.com/' };
   await writeFile(file, JSON.stringify(pairing), { mode: 0o644 });
   const preview = await runPanelOperation({ operation: 'pairing', config, pairing: file }, root);
-  assert.deepEqual(preview, { server: 'dock.example.com', nodeId: pairing.nodeId });
+  assert.deepEqual(preview, { server: 'dock.example.com', nodeId: pairing.nodeId,
+    pairingDigest: createHash('sha256').update(JSON.stringify(pairing)).digest('hex') });
   assert.ok(!JSON.stringify(preview).includes(pairing.token));
   assert.equal((await stat(file)).mode & 0o777, 0o644);
   for (const data of [{ ...pairing, token: 'short' }, { ...pairing, endpoint: 'ws://dock.example.com/' }, { ...pairing, nodeId: 'invalid' }, { ...pairing, command: 'arbitrary' }]) {
@@ -127,6 +128,21 @@ test('panel imports bounded pairing without modifying the source, and projects n
   assert.equal(unconfigured.configured, false);
   assert.ok(Array.isArray(unconfigured.providers));
   assert.ok(unconfigured.providers.every(provider => provider.selfTestSupported === false));
+});
+
+test('pairing import distinguishes a device config and malformed JSON without changing device identity', async t => {
+  const root = await directory(); t.after(() => rm(root, { recursive: true, force: true }));
+  const original = await initializeDevice({ home: join(root, 'original'), cwd: root, endpoint: 'wss://dock.example.com/' });
+  const before = await readFile(original.configPath, 'utf8');
+  const config = join(root, 'new-device/config.json');
+  await assert.rejects(runPanelOperation({ operation: 'pairing', config, pairing: original.configPath }, root),
+    error => panelError(error) === 'device_config_is_not_pairing');
+  assert.equal(await readFile(original.configPath, 'utf8'), before);
+  await assert.rejects(stat(config), { code: 'ENOENT' });
+  const malformed = join(root, 'malformed.json');
+  await writeFile(malformed, '{');
+  await assert.rejects(runPanelOperation({ operation: 'pairing', config, pairing: malformed }, root),
+    error => panelError(error) === 'invalid_device_pairing');
 });
 
 test('panel adopts existing identity read-only and does not confuse a stale owner with the saved server', async t => {
@@ -221,7 +237,8 @@ else if(process.argv[2]==='run') {
   t.after(async () => {
     try { await control(await readConfig(configPath), 'stop'); } finally { await rm(root, { recursive: true, force: true }); }
   });
-  const state = await runPanelOperation({ operation: 'setup', config: configPath, pairing, cwd: root }, bundle) as Awaited<ReturnType<typeof panelStatus>>;
+  const preview = await runPanelOperation({ operation: 'pairing', config: configPath, pairing }, bundle) as { pairingDigest: string };
+  const state = await runPanelOperation({ operation: 'setup', config: configPath, pairing, expectedPairingDigest: preview.pairingDigest, cwd: root }, bundle) as Awaited<ReturnType<typeof panelStatus>>;
   assert.equal(state.configured, true); assert.equal(state.running, true); assert.equal(state.connected, false);
   const installation = (await readInstallation(join(home, 'installation'), configPath))!;
   assert.equal(installation.current.runtime, join(home, 'installation/releases', installation.current.id, 'runtime/node'));

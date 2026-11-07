@@ -158,7 +158,7 @@ import SwiftUI
         assert(model.allSelfTests.count == 3 && model.latestSelfTest(for: "codex")?.id == "codex", "Legacy records merge without replacing per-Harness latest records")
         assert(model.latestSelfTest(for: "dsh")?.id == "dsh")
         model.openProviderDetails("codex")
-        assert(model.rowTestColor(codex) == PanelTheme.accent && !model.selfTestIsHistorical)
+        assert(model.rowTestColor(codex) != PanelTheme.accent && model.rowTestLabel(codex) == "上次回显通过" && !model.selfTestIsHistorical)
         model.refreshError = "synthetic-unavailable"
         assert(model.harnessSummaryTitle.hasPrefix("上次") && model.installedProviderCount == 2, "Refresh failure keeps a clearly historical installation count")
         assert(model.rowTestColor(codex) != PanelTheme.accent && model.selfTestColor != PanelTheme.accent, "Stale success cannot be presented as current")

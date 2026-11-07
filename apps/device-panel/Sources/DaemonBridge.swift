@@ -21,6 +21,7 @@ struct DeviceState: Decodable {
     var updateAvailable: Bool?
     var active: Int?
     var unresolved: Int?
+    var providerActivity: [String: String]?
     var connectionIssue: String?
     var selfTest: SelfTestSnapshot?
     var providers: [ProviderInstallation]?
@@ -43,6 +44,7 @@ struct ProviderInstallation: Decodable, Identifiable {
     let acceptanceCommand: String?
     let acceptanceDescription: String?
     let experimental: Bool?
+    var desktopHost: String? = nil
     var id: String { key }
 }
 struct SelfTestReceipt: Decodable {
@@ -64,7 +66,7 @@ struct SelfTestSnapshot: Decodable {
     let provider: String?
     var providerKey: String { provider ?? "codex" }
 }
-struct PairingPreview: Decodable { let server: String; let nodeId: String }
+struct PairingPreview: Decodable { let server: String; let nodeId: String; let pairingDigest: String? }
 struct FoundDevice: Decodable, Identifiable {
     let configPath: String
     let server: String
@@ -102,7 +104,9 @@ struct PanelFailure: LocalizedError {
     var errorDescription: String? {
         switch code {
         case "setup_identity_conflict": return "这里已有另一份设备配置，已保留。请重新检测已有设备，或在高级设置中导入原配置。"
-        case "invalid_device_pairing", "pairing_required": return "这不是有效的连接邀请文件。请向服务管理员领取邀请链接；旧文件可在高级设置中导入。"
+        case "device_config_is_not_pairing": return "这是本机设备配置，不是配对文件。请使用服务器管理员导出的 device-pairing.json 或邀请链接。"
+        case "invalid_device_pairing", "pairing_required": return "无法识别此配对文件。请重新获取服务器管理员导出的配对文件或邀请链接。"
+        case "pairing_changed": return "配对文件已变更，请重新选择并核对服务器后再接入。"
         case "invalid_invitation": return "邀请链接不完整或地址无效。请复制服务管理员提供的完整链接。"
         case "invitation_expired": return "邀请已过期，请向服务管理员领取新链接。"
         case "invitation_unavailable": return "邀请已过期、已领取或已撤销。请向服务管理员领取新链接。"

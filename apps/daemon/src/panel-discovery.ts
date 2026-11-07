@@ -8,6 +8,7 @@ const exec = promisify(execFile);
 
 /** Inspect only this product's bounded user registrations, including stopped installations. */
 export async function panelExternalInstallation(configPath: string, expectedRoot: string, home = homedir()) {
+  if (process.platform === 'win32') return { external: false, incomplete: false };
   const agents = join(home, 'Library/LaunchAgents');
   let names: string[];
   try { names = (await readdir(agents)).filter(name => /^org\.harness-dock\.device\.[a-f0-9]{16}\.plist$/u.test(name)).sort(); }
@@ -48,7 +49,8 @@ export async function panelExternalInstallation(configPath: string, expectedRoot
 export async function panelConfigurationPaths(selected: string, selectedOnly = false, home = homedir()) {
   const paths = new Set([selected]);
   let incomplete = false;
-  if (!selectedOnly) {
+  if (!selectedOnly && process.platform === 'win32') paths.add(join(home, 'AppData/Local/HarnessDock/.local/device/config.json'));
+  if (!selectedOnly && process.platform !== 'win32') {
     paths.add(join(home, '.harness-dock/.local/device/config.json'));
     const agents = join(home, 'Library/LaunchAgents');
     try {

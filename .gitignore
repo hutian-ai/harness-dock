@@ -6,6 +6,7 @@ dist/
 *.log
 .DS_Store
 coverage/
+apps/gpui-panel/target/
 
 # Local credentials and node state must never be published.
 .env.*

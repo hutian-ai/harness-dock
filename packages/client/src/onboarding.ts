@@ -47,7 +47,11 @@ export async function clientDoctor(options: ServerClientOptions, nodeId?: string
       } else checks.push({ check: 'codex_protocol', state: 'unknown', detail: 'Native protocol not probed.', next: 'Repeat doctor with --probe to explicitly inspect the native ACP environment without a model prompt.' });
     }
   } catch (error) {
-    checks.push({ check: 'application_or_device', state: 'fail', detail: diagnosticError(error), next: 'Check application credentials, protocol and existing use of this application identity. No existing connection was replaced.' });
+    const failure = diagnosticError(error);
+    const next = failure === 'server_tls_rejected' ? 'Check the trusted CA, certificate validity and hostname. Never disable certificate verification.'
+      : failure === 'server_handshake_rejected' ? 'Check application credentials, protocol, proxy routing and existing use of this application identity. The server does not reveal which authentication condition failed.'
+      : 'Check DNS, network reachability and the intended service endpoint, then application credentials and device status. No existing connection was replaced.';
+    checks.push({ check: 'application_or_device', state: 'fail', detail: failure, next });
   } finally { await client.close(); }
   return checks;
 }

@@ -57,7 +57,9 @@ test('an approval holds only its own session; parallel cancellation, output and 
     }
     return null;
   });
-  await host.inventory();
+  await host.refreshProviderDetails();
+  assert.deepEqual(host.providerDetails.codex?.models, [{ id: 'synthetic', efforts: [] }]);
+  assert.equal(starts, 0, 'capability inspection never dispatches a model prompt');
   await assert.rejects(host.execute({ provider: 'other', runId: 'unsupported', prompt: 'synthetic' }), /unsupported_provider/);
   assert.equal(starts, 0, 'unsupported Providers must be rejected before dispatch');
   const request = (runId: string, sessionKey = runId) => ({ provider: 'codex', runId, sessionKey, prompt: runId, model: 'synthetic' });
@@ -71,6 +73,8 @@ test('an approval holds only its own session; parallel cancellation, output and 
   await host.prepare({ runId: 'approval' });
   const first = host.execute(request('approval'));
   await waiting.promise;
+  await assert.rejects(host.refreshProviderDetails(), /device_busy/);
+  assert.deepEqual(host.providerDetails.codex?.models, [{ id: 'synthetic', efforts: [] }], 'cached capabilities survive busy refusal');
   const replay = host.execute(request('approval'));
   await assert.rejects(host.prepare({ runId: 'same-session', sessionKey: 'approval' }), /session_busy/);
   await host.prepare({ runId: 'other-session', sessionKey: 'approval-alias' });

@@ -1,3 +1,5 @@
+> App v0.1.3 uses [the GPUI frontend](../gpui-panel/README.md) on macOS 15+ arm64. This directory retains the older Swift frontend and shared packaging resources; published v0.1.2 remains available for macOS 13+.
+
 # macOS 设备面板
 
 设备面板是设备持有人的轻量接入、状态与维护入口：把这台 Mac 上的原生 Harness 接到 Dock，供调用方产品选择并发起任务。执行由独立 Daemon 持有，任务、原生审批和结果回到调用方应用。业务授权与结果验收归应用，内部工具与原生权限归 Harness。

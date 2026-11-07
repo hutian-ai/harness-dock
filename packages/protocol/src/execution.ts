@@ -1,4 +1,5 @@
 /** Public JSON contracts. No provider implementation or application domain types. */
+export const MAX_PROMPT_BYTES = 8 * 1024 * 1024;
 export type DeviceExecutionState = 'running' | 'completed' | 'cancelled' | 'failed' | 'unknown';
 export interface DeviceProviderCapabilities {
   protocol: 'acp';
@@ -66,6 +67,8 @@ export interface DeviceExecutionResponse { provider: string; result: DeviceExecu
 export interface DeviceExecutionSnapshot {
   runId: string; provider: string; state: DeviceExecutionState; result?: DeviceExecutionResult;
   detailsExpired: boolean; historyTruncated: boolean;
+  /** Local owner recovered device admission after a verified host restart; result state stays unchanged. */
+  admissionRecovered?: boolean;
 }
 export interface DeviceExecutionEvent { sequence: number; kind: string; payload: unknown }
 type Callback<K extends string, P> = { runId: string; kind: K; payload: P };

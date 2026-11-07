@@ -14,12 +14,12 @@ import SwiftUI
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = PanelTheme.statusItemImage()
         if item.button?.image == nil { item.button?.title = "HD" }
-        item.button?.toolTip = "Harness Dock"
+        item.button?.toolTip = "界舟 · Harness Dock"
         item.button?.target = self
         item.button?.action = #selector(toggle)
         popover.behavior = .semitransient
         popover.delegate = self
-        popover.contentSize = NSSize(width: 400, height: 520)
+        popover.contentSize = NSSize(width: 400, height: 360)
         popover.contentViewController = NSHostingController(rootView: PanelView(model: model,
             resize: { [weak self] height in self?.updatePanelHeight(height) },
             hide: { [weak self] in self?.popover.performClose(nil) }, quit: { NSApp.terminate(nil) }))

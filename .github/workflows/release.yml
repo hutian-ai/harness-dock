@@ -14,7 +14,7 @@ concurrency:
 jobs:
   release:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
@@ -46,16 +46,22 @@ jobs:
         run: |
           npm install --global pnpm@12.15.0
           pnpm install --frozen-lockfile
+      - name: Install the desktop Rust toolchain
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          rustc --version
       - name: Check source, native panel and onboarding
         run: |
           pnpm check
           pnpm smoke:source
           node apps/docs-site/check.mjs
+          MACOSX_DEPLOYMENT_TARGET=15.0 CARGO_TARGET_DIR=.local/gpui-build cargo test --locked --release --manifest-path apps/gpui-panel/Cargo.toml
       - name: Build and verify independent runtime
         run: |
           node --import tsx scripts/bundle.ts .local/release-bundle
           node --import tsx scripts/accept-bundle.ts .local/release-bundle --offline
-          pnpm panel:build --bundles .local/release-bundle --output .local/release-panel
+          pnpm panel:gpui:build --bundles .local/release-bundle --output .local/release-panel
       - name: Record exact source provenance
         run: |
           node --input-type=module - <<'JS'
@@ -67,9 +73,11 @@ jobs:
           const manifest=JSON.parse(readFileSync('.local/release-panel/Harness Dock.app/Contents/Resources/daemon/dock-release.json','utf8'));
           assert.equal(revision,process.env.GITHUB_SHA); assert.equal(manifest.revision,revision);
           assert.equal(manifest.version,pkg.version); assert.equal(manifest.platform,'darwin'); assert.equal(manifest.arch,'arm64');
+          const desktop=JSON.parse(execFileSync('cargo',['metadata','--locked','--no-deps','--format-version','1','--manifest-path','apps/gpui-panel/Cargo.toml'],{encoding:'utf8'}));
+          assert.equal(desktop.packages.find(p=>p.name==='harness-dock-panel').version,pkg.version);
           assert.equal(execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim(),'');
           writeFileSync('.local/release-panel/release.json',JSON.stringify({version:pkg.version,tag:process.env.RELEASE_TAG,revision,
-            platform:'darwin',arch:'arm64',minimumMacOS:'13.0',signature:'ad-hoc',notarized:false,
+            frontend:'gpui',platform:'darwin',arch:'arm64',minimumMacOS:'15.0',signature:'ad-hoc',notarized:false,
             source:`https://github.com/${process.env.GITHUB_REPOSITORY}/tree/${revision}`,
             build:`https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`},null,2)+'\n');
           JS
@@ -83,7 +91,7 @@ jobs:
           notes="$GITHUB_WORKSPACE/.github/release-notes/${RELEASE_TAG}.md"
           cd .local/release-panel
           version="${RELEASE_TAG#v}"
-          assets=("harness-dock-panel-${version}-darwin-arm64.zip" "SHA256SUMS" "README.txt" "release.json")
+          assets=("harness-dock-panel-gpui-${version}-darwin-arm64.zip" "SHA256SUMS" "README.txt" "release.json")
           if gh release view "$RELEASE_TAG" --repo "$repo" --json isDraft > "$RUNNER_TEMP/release-state.json"; then
             node -e 'if(!JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).isDraft) throw Error("release_already_published: refusing to replace assets")' "$RUNNER_TEMP/release-state.json"
           else

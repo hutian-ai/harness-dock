@@ -1,150 +1,107 @@
-# harness-dock 文档站
+# 界舟 · Harness Dock 文档站
 
-产品文档站面向接入方开发者，帮助他判断何时使用 Dock，并跑通“产品发任务 → 所选设备原生执行 → 结果回到产品”。开发者优先从已有服务的 SDK 最短接入开始，只领取应用凭据；无服务时再选择 Docker 部署或同机独立体验；设备使用者取得管理员邀请后，走“下载 App → 邀请连接这台 Mac → 准备原生 Harness → 按需测试 → 回到调用方应用”；管理员从公开 Server 归档开始部署与配对。原生 Harness 接入与执行管理是产品所处的 AI Infra 层。App `v0.1.2` 与 SDK `sdk-v0.1.2` 分别发行：App 与 SDK 均包含 Codex 支持与实验性 dsh 适配；SDK 发行仍固定为 sdk-v0.1.2。设备安装教程默认对应可下载的 App，不以未发布界面作为操作前提。
+产品文档的唯一内容来源是 `src/content.json`；静态生成器不依赖第三方运行时。README 负责项目入口，文档站负责完整使用路径，本文件只说明内容维护与发布。
 
-位于 harness-dock 仓库的 `apps/docs-site/`，使用 Node.js 静态生成，无第三方运行时依赖。中性黑白底、绿色强调、两层导航、图标侧栏和三栏阅读布局。
+## 内容怎么组织
 
-只使用客户端的用户先阅读 [App 使用指南](https://hutian-ai.github.io/harness-dock/app/)，按首次连接、日常查看、测试和维护的顺序操作；需要详细安装要求时再读“安装执行设备”。客户端可从 [Release 下载](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.2/harness-dock-panel-0.1.2-darwin-arm64.zip)，不需要运行下面的文档预览命令。客户端仅有 ad-hoc 签名，尚未完成 Developer ID 签名与公证。
+先帮助读者判断产品是否适合，再按正在做的事引导。不要要求设备用户先理解 ACP、Daemon、receipt 或发行验收。
 
-## 维护者：本地预览
+| 导航 | 面向谁 | 页面 |
+| --- | --- | --- |
+| 快速了解 | 首次了解产品的人 | 首页、产品介绍、版本与支持范围 |
+| 使用 App | 执行电脑的持有人 | 安装与连接、App 使用指南、模型测试、常见问题 |
+| 接入产品 | 应用、Agent 与自动化开发者 | SDK 接入、任务与断线处理 |
+| 管理服务 | 自托管服务管理员 | 部署 Server、邀请与访问权限 |
+| 开发与参考 | 项目开发者与维护者 | 后台升级、架构、驱动、验证、构建发行、文档部署 |
 
-从 `apps/docs-site/` 目录执行，需要 Node.js 22+，无需 npm install：
+写作规则：先说用户要完成什么，再给准备条件、步骤、成功后的下一步。每页有明确读者；不把源码候选、旧版按钮、测试结论和当前操作穿插叙述。技术约束放在影响操作的位置，完整实现细节链接到参考页。已存在的公开锚点应保留，避免外部链接失效。
+
+当前设备指南对应 **App v0.1.3、macOS 15+、Apple 芯片**。旧 Swift App v0.1.2 保留 macOS 13+ 下载。SDK 继续独立发行 `sdk-v0.1.2`；源码新增 API 不得写成该 SDK 下载已有的能力。Windows 仍为待实机验收的 CLI/Daemon 源码路径，没有桌面发行。
+
+## 本地预览
+
+需要 Node.js 22+，不需要 npm install：
 
 ```sh
-npm run build
-npm run check
-npm run preview
+node apps/docs-site/build.mjs
+node apps/docs-site/check.mjs
+node apps/docs-site/serve.mjs
 ```
 
-打开 http://localhost:4173。也可以从仓库根目录执行 `node apps/docs-site/build.mjs`、`node apps/docs-site/check.mjs`、`node apps/docs-site/serve.mjs`。生产产物在 `apps/docs-site/dist/`。
+打开 http://localhost:4173。输出位于 ignored `dist/`。修改 `src/content.json` 更新正文与页面元数据，`build.mjs` 维护导航顺序，`src/shell.html` 维护公共布局，`public/` 维护资源。保持现有黑白与绿色视觉系统，支持浅深色、键盘导航和窄屏。
+
+交付前检查首页角色入口、App 首次连接、SDK 首个任务、支持范围和下载地址；实际查看桌面与窄屏、亮色与暗色、搜索与页内目录。不要仅以链接检查代替内容和页面审阅。
 
 ## GitHub Pages
 
-仓库根目录的 `.github/workflows/docs-pages.yml` 会在 main 上的文档变更、相关 PR 或手动触发时构建并检查文档。Pages 部署使用单独的 job，仅上传文档站静态文件，不上传产品源码、.local、运行配置或依赖。
+`.github/workflows/docs-pages.yml` 在 main 上的文档变更、PR 或手动触发时构建和检查；只有 main、非 PR 且仓库变量 `DOCS_PAGES_ENABLED=true` 时部署。仅上传静态站点，不上传源码运行数据、配置、账号或 `.local/`。
 
-首次启用：
+Pages 来源使用 GitHub Actions。默认地址为 https://hutian-ai.github.io/harness-dock/，实际发布结果以对应 Actions run 为准。未启用变量时只检查，不代替已部署的证明。
 
-1. 确认仓库当前可见性与账户套餐允许使用 GitHub Pages。
-2. Settings → Pages → Build and deployment → Source 选择 GitHub Actions。
-3. Settings → Secrets and variables → Actions → Variables 添加 `DOCS_PAGES_ENABLED`，值为 `true`。
-4. 在 main 推送文档更新，或在 Actions 手动运行 Docs Pages。
+其他静态托管可直接发布 `dist/`，站点支持仓库子路径。搜索应通过 HTTP 使用，不用 file://。
 
-部署仅在变量开启且来源为 main 时执行；未开启时只构建检查。默认站点路径为 https://hutian-ai.github.io/harness-dock/，是否已部署及实际入口以 Actions 输出为准。
+## 页面索引
 
-## 其他托管
+### overview
 
-- 静态托管：构建后上传 dist/ 的全部内容。
-- Netlify / Vercel：项目根目录选择 apps/docs-site，使用附带配置。
-- Cloudflare Pages：根目录 apps/docs-site；构建 npm run build；发布 dist；Node 22。
-- Docker：在 apps/docs-site 中运行 `docker build -t harness-dock-docs .`，然后 `docker run --rm -p 8080:80 harness-dock-docs`。
-
-每页都是独立 HTML，导航、资源和搜索使用相对路径，支持仓库子路径。通过 HTTP 预览搜索，不要用 file:// 打开。
-
-## 修改内容
-
-- src/content.json：页面、分组、摘要和正文 HTML。
-- src/shell.html：布局与头部导航。
-- public/style.css：视觉系统与响应式布局。
-- public/app.js：搜索、菜单、复制和主题。
-- build.mjs：静态页面、目录、导航、搜索索引和 .nojekyll。
-
-架构与驱动页使用正文内的静态 SVG 图，样式位于 `public/style.css` 的 `.doc-diagram` 规则；无需 Mermaid 脚本、CDN 或外部字体。修改时保留每张图的 title/desc、唯一 ID 和文字说明，并检查亮色、暗色与窄屏局部滚动。根 README 使用 GitHub 可渲染的 Mermaid，分层与文档站保持一致。
-
-首页以“让原生 Harness，为你的产品执行任务”表达接入后的价值；AI Infra 只用于产品定义，具体指跨设备原生 Harness 接入、连接与执行管理。内容顺序为：首屏价值与多设备图 → “生成报告”用法示意 → 原生环境复用、设备选择、原执行记录三个收益 → 接入方式选择 → 当前支持与准备条件 → 开发者、设备使用者、管理员三个入口。用法示意不代表已内置业务应用；已发布支持、实验适配、后续源码变化与计划适配分别标记。
-
-首屏实色主按钮“下载 macOS 版”直达 v0.1.2 macOS arm64 ZIP，标注 Apple 芯片；描边次按钮“查看接入示例”进入 `/sdk/#quick-connect`，先完成已有服务下的最短 SDK 接入。两个按钮使用语义前置图标与对角切角背景，链接本身不裁切，以保留完整键盘焦点环；窄屏纵向排列。设备自检与产品任务验收分开，按钮下保留安装说明。窄屏先展示接入与下载操作，再展示执行图。全站沿用现有 UI 样式和组件，页面标题、摘要、示例和角色说明按任务组织，AI Infra 不作为各页口号。
-
-首页与 overview 的选型说明区分个人原生远程入口、已有设备管理的原生 SDK / 服务接口集成、Dock 的跨设备接入与执行管理。会话、审批和事件不作为独有卖点；多 Harness 是后续适配收益。支持进度保留 Codex 已支持、dsh App/SDK 实验、zcode/opencode 计划，完整状态在 support 的 harness-roadmap 节。图与用法示意沿用静态 HTML/SVG，动画遵循减少动态效果设置。
-
-首屏图展示同一 Server 接入多台执行设备，由应用通过连接 SDK 选择本次目标；只高亮一台设备的任务路径，其他设备保留独立连接。所选设备展开独立后台与原生 Harness，其他设备用简化结构表示各自的后台与原生环境；窄屏同样保留多设备分支。图中强调后台持有进程与记录、原生审批和结果沿原路返回应用，不暗示 Server 自动调度、广播或故障迁移。ACP 只表示设备后台与原生 Harness 之间的执行协议，不用于应用、Server 与设备的网络连接。图内展示设备上所选的原生 Harness 及安装、登录、工具和会话，不以多个计划适配对象作为图的重点；当前支持和计划适配在图外区分。ACPX、各 Harness 的具名适配器与原生进程层级见 architecture 和 drivers 页面。
-
-产品与维护文档统一维护在 src/content.json，不再保留重复的 docs/ 目录。App `v0.1.2` 面向 macOS 13+、Apple Silicon，包含 Codex 支持与 dsh 实验适配；独立 SDK 仍为 `sdk-v0.1.2`。App 首页突出已检测到的 Harness 数量、安装列表和服务连接；点击条目查看安装信息、固定回显、分环境历史与诊断，“设置与维护”收纳日志、版本、自启和后台操作，右上角按钮收起面板。App 使用指南以新版界面为默认，仅在历史对照中保留 v0.1.1 的按钮说明。Codex 固定回显使用原生只读模式，dsh 沿用原生策略，不提供只读保证。文档站不包含真实地址、设备身份或凭据。
-
-构建、链接检查和页面 QA 不替代产品的真实设备安装、模型执行或部署验收。
-
-## 文档索引
-
-文档内容的唯一来源为 [src/content.json](src/content.json)，本地构建与部署共用相同内容。
+产品价值、适用场景和任务路径。只用“产品 → Server → 所选电脑”解释关系，内部层次放到 architecture。
 
 ### quickstart
 
-设备快速开始：启动预览后访问 `/quickstart/`。默认介绍 App `v0.1.2`：先取得管理员邀请，安装客户端、连接这台 Mac，实际执行前安装并登录原生 Harness，按需点击条目进入详情测试，最后回到提供邀请的应用。下载附近说明 macOS 可能阻止首次打开并提供求助入口。旧版 v0.1.1 的按钮另列对照，完整日常操作链接到“App 使用指南”。开发者直接进入 `/sdk/#first-task`；管理员进入 Server 部署。设备用户无须终端、Git、Node、pnpm 或 JSON。
+普通设备用户四步：安装 → 输入管理员邀请 → 核对服务器和执行目录 → 回到调用方产品。说明已有设备 config.json 不是配对文件。
 
 ### app
 
-App 使用指南：启动预览后访问 `/app/`。这是设备用户从下载到日常使用的集中入口，覆盖首次邀请连接、菜单栏打开面板、安装与连接状态、按需模型回显、收起/退出/停止后台的区别、自启和更新、常见问题下一步。默认说明 App `v0.1.2` 的 Harness 列表和按条目操作，旧版 v0.1.1 按钮映射保留在历史对照中。安装细节、应用端到端验收和管理员操作仍链接到各自页面。
+App 当前界面的唯一操作指南。覆盖侧栏、只读原生配置、模型目录、执行状态和用量、刷新周期、停止/移除、登录连接与 Finder 日志。`preview-connect` 等既有锚点保留；打包器从这段生成随包离线帮助，名字不代表候选功能。
 
 ### usage
 
-执行与测试：启动预览后访问 `/usage/`。默认说明 App `v0.1.2` 的 Codex/dsh 固定回显、连接与分环境结果状态；dsh 保持实验性。本机自检不代表全部工具或业务应用已验收。高级应用两轮测试与可选审批使用已发布 SDK 的 `node_modules/@harness-dock/client/dist/cli.js`，从安装 SDK 的项目目录运行，沿用拥有者的应用凭据；该身份已有连接时复用原应用验证，不另建控制方。候选 bundle 与源码命令只作为显式补充。
-
-### pairing
-
-配对与访问管理：启动预览后访问 `/pairing/`。面向管理员，说明设备邀请、单应用拥有者、凭据分发与维护窗口内加载配置。
-
-### troubleshooting
-
-诊断与常见问题：启动预览后访问 `/troubleshooting/`。区分后台停止、连接未建立、状态读取失败、执行中、结果待核对和原生权限限制。
-
-### sdk
-
-SDK 接入：启动预览后访问 `/sdk/`。最前面的 `/sdk/#quick-connect` 面向已有服务与在线设备的应用开发者，介绍SDK `sdk-v0.1.2` 的 `connectDock / run / status`，直接使用固定发行归档安装。`run` 在设备请求前独占保存私有 receipt，复用 CLI 的设备身份与审批边界，不自动重派、释放产物或取消原生任务；多设备必须指定 nodeId。文件、工具和会话续接仍走底层 API。已有服务说明随后，同机独立体验保留 `/sdk/#first-task` 与固定发行的完整命令，再展开底层 API、CLI 和恢复规则。候选源码能力与已发布能力仍须分别标记。
-
-### server
-
-服务端部署：启动预览后访问 `/server/`。推荐 Linux 管理员从已发布 `sdk-v0.1.2` 的 Server 归档开始，校验后解压，使用归档自带 Dockerfile 构建镜像，在容器内初始化私有配置、生成 Compose 与 Nginx 片段，再准备 TLS 并部署。宿主机无需 Node.js。发行的 server bundle 附带 docker.sh 管理入口，初始化、部署文件生成、邀请和诊断均可在容器内完成。源码构建是维护者选项。文档命令核对不代表已完成实际部署。
-
-### installation
-
-设备安装与维护：启动预览后访问 `/installation/`。
-
-设备邀请以服务器生成的 HTTPS 链接为主要入口，网页唤起客户端、用户确认后领取一次；JSON 导入位于高级设置。反向代理增加 /connect 与 /invitations/redeem，服务端持久保存仅含摘要的消费记录；容器需挂载私有 invitation-state 目录，不能使用易失的 /tmp。菜单栏 App 的日常操作统一从 `/app/` 进入，安装前提、邀请接入及维护细节在 installation 页面；普通用户先从 Release 下载并安装客户端，再通过邀请连接并回到调用方应用。环境检查按需进行，原生源码与构建说明在 `apps/device-panel/README.md`。`pnpm panel:build` 在 macOS arm64 上生成携带运行时的本地 App/ZIP；Developer ID 签名、公证、公开发行和真实目标设备验收分别记录。`pnpm check` 在 macOS arm64 上额外检查 Swift 源码，其他平台明确跳过原生面板检查。
-
-### architecture
-
-架构与执行契约：启动预览后访问 `/architecture/`。
-
-### drivers
-
-Harness 集成与 ACP 分层：启动预览后访问 `/drivers/`。区分具名 dock 集成层与 ACPX，分别说明 Codex/codex-acp、dsh 原生 ACP 路径及能力边界。
+解释可选模型响应测试与业务任务验收的区别；复杂的真实 Harness 检查归 verification。
 
 ### support
 
-支持范围：启动预览后访问 `/support/`。
+集中维护 App/SDK 版本、最低系统、Harness 状态和未支持平台。安装被发现不表示就绪；本机覆盖后的原生默认也不等于出厂默认。
+
+### sdk
+
+应用开发者从 `quick-connect` 开始，使用固定 SDK 发行完成第一个任务；`first-task` 保留同机完整体验。`source-observation` 明确属于尚未独立发行的源码 API。不要修改已发布 SDK 示例去调用新源码接口。
+
+### server
+
+管理员通过 SDK 发行的 Server 归档部署 Linux 服务，优先使用随包 Dockerfile、Compose、docker.sh，宿主不要求 Node。部署后分发设备邀请与独立应用凭据。命令核对不代表生产部署已验收。
+
+### pairing
+
+设备邀请与应用访问是不同身份。维护邀请生成、授权、转移、轮换与加载状态检查，不把设备本地配置当作新配对文件。
+
+### installation
+
+维护者安装独立后台、升级与回滚；保留用户身份、配置、历史与工作文件。Windows 实验路径和旧安装恢复明确标注，不夹在普通 App 首次连接中。
 
 ### lifecycle
 
-执行生命周期与资源：启动预览后访问 `/lifecycle/`。
+面向开发者的执行、会话、断线、产物和恢复契约。缺少终态证据保持 unknown；不自动重派 prompt、工具或审批决定。
+
+### troubleshooting
+
+按可观察问题给出下一步：没有邀请、文件选错、未连接、Harness 不可用、任务待确认、停止被拒绝、原生权限与更新。工具诊断不调用模型。
+
+### architecture
+
+明确 SDK、Server、设备后台与具名 Driver 的职责；业务和原生权限所有权不迁入 Dock。
+
+### drivers
+
+Codex 使用固定 ACPX/Codex ACP；dsh 使用具名薄适配。保留安装/home、回调、原生模型标识和权限的实际约束。
 
 ### verification
 
-开发与验证：启动预览后访问 `/verification/`。
-
-交付前逐项确认以下证据，不把一种验证当作另一种验证的通过：
-
-| 验证层 | 交付前确认 |
-| --- | --- |
-| 确定性与隐私 | `pnpm check`、自检派发/收据/恢复/持久化与回调隔离边界、源码冒烟、隐私扫描与人工复核 |
-| 文档站 | 构建、站内链接、桌面/窄屏和亮暗主题实际查看 |
-| 独立分发 | 同一候选包的仓外离线安装、许可、manifest 和摘要 |
-| 真实 Codex | 精确完成、两轮续接、工具/审批投递、只读恢复和不重派 |
-| 真实 dsh | `pnpm accept:dsh`：SDK / Server / DeviceHost 本机 fixture、原生审批允许/拒绝/失效与一次性作用域、MCP 成功/错误/送达、调用方与原生项目 skills 共存；不替代独立进程、设备或发行包 |
-| 实际 GUI | 邀请与已有设备复用、环境检查不阻挡接入、首页 Harness 数量/安装列表及独立服务连接、条目详情中的固定回显/诊断/分环境历史、关闭重开不重派、测试运行或收据待确认时仅浏览其他条目且不改变原测试归属、禁止另启测试与维护、“设置与维护”的受保护操作 |
-| 独立设备 | 首装、移动 App、真实登录自启、升级/回滚和用户文件保留 |
-| 远端 CI 与发行 | 对应源码 revision 的 CI、Developer ID/公证、下载入口和发行权限分别确认 |
-
-这是一份验收要求，不是通过记录。实际结果绑定源码 revision、平台和产物摘要，保存在 ignored 的 `.local/`；公开发行另行执行。
-
-执行 CLI 已于 2026-10-30 在本机 macOS arm64 使用真实 Codex 验证通过：一次任务完成、原生 `allow_once` 审批成功送达且命令退出 0、另起 `status --receipt` 查回同一执行与完整结果。首轮验证范围仅限本机源码链路，不覆盖跨机器、断线或重启恢复、两轮续接、全部工具或插件、独立发行包及生产部署；详见 [真实 Codex 验证结论与范围](https://hutian-ai.github.io/harness-dock/verification/#execution-cli-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
-
-同日追加验证了执行 CLI（提交 `4fcd3b8`）在原生命令开始后收到 `SIGINT`、退出码为 `130` 并返回 `unknown`，再按原 receipt 从 `running` 查回 `completed`；服务入口 `prepare/execute` 各一次，原生 turn、命令及文件效果也各一次，未重复提交。该 SIGINT 验证范围仅限同机中断 CLI 观察、Server/Daemon 持续运行，不覆盖 `SIGKILL`、进程重启、跨机器或真实网络故障恢复；详见 [CLI 中断后按 receipt 查回原执行](https://hutian-ai.github.io/harness-dock/verification/#execution-cli-interruption-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
-
-同日还验证了执行 CLI（验证时提交 `7a51fd1`）被 `SIGKILL` 强制结束、stdout 为空且没有最终 JSON 后，完整 receipt 保持原指纹，并能从 `running` 查回原执行的 `completed` 结果；`prepare/execute`、原生 turn、命令、文件效果及持久执行行均各一次，未重复提交。范围仅限同机强杀 CLI、Server/Daemon 持续运行；未覆盖服务强杀或重启、断电、跨机、真实网络故障、原生进程崩溃或新审批请求，详见 [CLI 被 SIGKILL 后按 receipt 查回原执行](https://hutian-ai.github.io/harness-dock/verification/#execution-cli-sigkill-acceptance)。原始记录仅保存在 ignored 的 `.local/`，不提交。
+验收要求与通过记录分开。确定性测试、离线分发、真实 Harness、实际 GUI、独立设备和生产部署是不同证据。原始输入、地址、日志、输出与配置只留 ignored `.local/`；公开内容使用示例。
 
 ### distribution
 
-构建与分发：启动预览后访问 `/distribution/`。
+App `v*` 与 SDK `sdk-v*` 独立工作流；从干净固定提交构建，附依赖许可、摘要与来源元数据，下载读回后发布。SDK workspace 保持 private，不发布 npm。源代码提交不等于发布、模型能力或目标设备已验收。
 
-SDK 发行由 `.github/workflows/sdk-release.yml` 监听 `sdk-v*` tag，从干净固定 revision 复用 bundle 与离线消费验证，再以 `package-release.ts --sdk-tag` 生成并发布开发者归档；不发布 npm，不修改独立的 App `v*` 发行。发布前后核对来源和摘要，已发布资产不覆盖。
+### deploy-docs
 
-首页下载按钮的 Apple 图标来自 [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/apple.svg)，项目许可为 [CC0-1.0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md)；图标随文字继承颜色，作为装饰隐藏于辅助技术。SDK 代码图标复用站内线性图标风格。
+文档站本身的构建与部署参考，不出现在普通设备用户的使用路径中。

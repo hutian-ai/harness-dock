@@ -30,6 +30,19 @@ interface Connection {
 }
 export type ExecutionCallbackHandler<TResult = DeviceExecutionCallbackResult> = (params: DeviceExecutionCallback, context: Parameters<DeviceRequestHandler>[1]) => TResult | Promise<TResult>;
 
+/** Keep endpoint, certificate text and server response bodies out of application diagnostics. */
+function connectionFailure(error: Error): DockError {
+  const code = (error as NodeJS.ErrnoException).code ?? '';
+  if (code.startsWith('ERR_TLS_') || ['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'CERT_HAS_EXPIRED',
+    'CERT_NOT_YET_VALID', 'CERT_REVOKED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY'].includes(code))
+    return new DockError('server_tls_rejected');
+  if (/^Unexpected server response: \d{3}$/.test(error.message)) return new DockError('server_handshake_rejected');
+  if (['ENOTFOUND', 'EAI_AGAIN'].includes(code)) return new DockError('server_dns_failed');
+  if (code === 'ECONNREFUSED') return new DockError('server_connection_refused');
+  if (code === 'ETIMEDOUT' || error.message === 'Opening handshake has timed out') return new DockError('server_connection_timeout');
+  return new DockError('server_transport_failed');
+}
+
 /** A remote node is a stable identity; neither reconnection nor a status event dispatches work. */
 export class ServerPeer {
   private state: DeviceNodeSummary;
@@ -78,6 +91,7 @@ export class ServerClient {
   private retry?: NodeJS.Timeout;
   private closed = false;
   private attempts = 0;
+  private lastConnectionError?: DockError;
   private resolveReady!: () => void;
   private rejectReady!: (error: unknown) => void;
   private readonly initialTimer: NodeJS.Timeout;
@@ -90,7 +104,7 @@ export class ServerClient {
     rpcTimeout(timeout);
     this.ready = new Promise((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject; });
     this.initialTimer = setTimeout(() => {
-      this.rejectReady(new DockError('server_connection_timeout'));
+      this.rejectReady(this.lastConnectionError ?? new DockError('server_connection_timeout'));
       void this.close();
     }, timeout);
     this.connect();
@@ -98,6 +112,8 @@ export class ServerClient {
   get connected(): boolean {
     return Boolean(this.connection?.serverId && this.connection.socket.readyState === WebSocket.OPEN);
   }
+  /** Sanitized latest connection failure; cleared after an authenticated server snapshot. */
+  get connectionError(): string | undefined { return this.lastConnectionError?.kind; }
   listNodes(): DeviceNodeSummary[] { return [...this.nodes.values()].map(node => node.summary()); }
   node(nodeId: string): ServerPeer | undefined { return this.nodes.get(nodeId); }
   onConnection(listener: (node: DeviceNodeSummary) => void): () => void {
@@ -162,6 +178,7 @@ export class ServerClient {
       }
       for (const node of summaries) this.update(node);
       this.attempts = 0;
+      this.lastConnectionError = undefined;
       clearTimeout(this.initialTimer);
       this.resolveReady();
     });
@@ -197,7 +214,14 @@ export class ServerClient {
     socket.on('message', data => {
       void transport.receive(data.toString(), message => rpc.receiveAndSend(message)).catch(() => socket.terminate());
     });
-    socket.on('error', () => {});
+    socket.on('error', error => {
+      if (this.connection !== connection || this.closed) return;
+      this.lastConnectionError = connectionFailure(error);
+      if (!connection.serverId && ['server_tls_rejected', 'server_handshake_rejected'].includes(this.lastConnectionError.kind)) {
+        this.rejectReady(this.lastConnectionError);
+        void this.close();
+      }
+    });
     socket.on('close', () => {
       clearInterval(connection.heartbeat);
       transport.close(new DockError('server_disconnected'));

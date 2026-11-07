@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#172b25"/><path d="M8 10h9M8 16h16M8 22h9" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="24" cy="10" r="2.5" fill="#5bd6a2"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="48 64 416 384" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">界舟 · Jiezhou</title>
+  <desc id="desc">An angular jade-green vessel with two geometric sails. The balanced hull represents a dock, while the separate sails evoke independent native execution environments connected through the vessel.</desc>
+  <g fill="#00C89B" transform="translate(0 16)">
+    <path d="M112 256V208L240 80V256H112Z"/>
+    <path d="M272 128L400 256H272V128Z"/>
+    <path d="M64 288H224V336H288V288H448L336 400H176L64 288Z"/>
+  </g>
+</svg>

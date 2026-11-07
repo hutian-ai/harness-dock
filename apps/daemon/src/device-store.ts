@@ -1,18 +1,65 @@
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
+import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { assertWindowsPrivatePath } from '@harness-dock/drivers';
 import type { PreparedDirectories } from './device-files.ts';
 import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
+import { readDeviceOverview, reportedUsage, type DeviceOverview, type ReportedUsage } from './device-overview.ts';
 
 export interface StoredPreparation { input: string; sessionKey: string; directories: PreparedDirectories; released?: boolean; createdAt?: number; releasedAt?: number }
 export interface StoredExecution {
   runId: string; provider: string; input: string; state: 'running' | 'completed' | 'cancelled' | 'failed' | 'unknown';
+  bootId?: string; admissionRecovery?: { checkpointId: string; verifiedAt: string; evidence: 'host_restarted' };
   result?: unknown; environment?: unknown; createdAt?: number; settledAt?: number; detailsExpired?: boolean; historyTruncated?: boolean;
+  model?: string; finishedAt?: number; lastObservedAt?: number; usage?: ReportedUsage;
 }
+interface RecoveryCheckpoint { id: string; runs: { runId: string; input: string; bootId: string }[] }
+export interface AdmissionRecoveryStatus {
+  unresolvedCount: number; supported: boolean; checkpointId?: string; requiresRestart: boolean; canResume: boolean;
+}
+
+/** Read existing owner evidence without creating, migrating or settling any execution. */
+export async function readStoredActivity(nodeId: string, stateDir: string, includeOverview = false): Promise<{ unresolved: number; overview?: DeviceOverview } | undefined> {
+  const path = join(stateDir, 'runs.sqlite');
+  let file;
+  try { file = await lstat(path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  const directory = await lstat(stateDir);
+  if (!directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink()
+    || process.platform !== 'win32' && (directory.uid !== process.getuid?.() || directory.mode & 0o077
+      || file.uid !== process.getuid?.() || file.mode & 0o077)) throw new Error('invalid_state_file_permissions');
+  await assertWindowsPrivatePath(stateDir);
+  await assertWindowsPrivatePath(path);
+  const database = new DatabaseSync(path, { readOnly: true });
+  try {
+    // Read the identity and counts in one snapshot. A live exclusive owner makes this
+    // unavailable rather than allowing a durable snapshot to masquerade as live state.
+    database.exec('BEGIN');
+    const owner = database.prepare('SELECT id FROM node').all();
+    if (owner.length !== 1 || owner[0]?.id !== nodeId) throw new Error('state_node_mismatch');
+    if (database.prepare(`SELECT 1 FROM device_executions WHERE json_type(value) IS NOT 'object'
+      OR json_type(value,'$.state') IS NOT 'text'
+      OR json_extract(value,'$.state') NOT IN ('running','completed','cancelled','failed','unknown')
+      OR json_extract(value,'$.runId') IS NOT run_id LIMIT 1`).get()) throw new Error('invalid_execution_state');
+    const row = database.prepare(`SELECT count(*) AS unresolved FROM device_executions
+      WHERE json_extract(value,'$.state')='running'
+        OR (json_extract(value,'$.state')='unknown' AND json_extract(value,'$.admissionRecovery') IS NULL)`).get();
+    const unresolved = row?.unresolved;
+    if (typeof unresolved !== 'number' || !Number.isSafeInteger(unresolved) || unresolved < 0) throw new Error('invalid_execution_state');
+    const overview = includeOverview ? readDeviceOverview(database, 'persisted') : undefined;
+    const current = await lstat(path);
+    if (!current.isFile() || current.isSymbolicLink() || current.dev !== file.dev || current.ino !== file.ino) throw new Error('state_file_changed');
+    return { unresolved, ...(overview ? { overview } : {}) };
+  } finally { database.close(); }
+}
+
 /** Durable admission identities outlive disposable output; this is never a prompt replay queue. */
 export class DeviceStore {
   readonly #db: DatabaseSync;
   readonly #limits: DeviceResourceLimits;
+  #overview?: DeviceOverview;
   constructor(nodeId: string, stateDir: string, resources: Partial<DeviceResourceLimits> = {}) {
     this.#limits = resourceLimits(resources);
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -28,8 +75,10 @@ export class DeviceStore {
         CREATE INDEX IF NOT EXISTS device_events_run_sequence ON device_events(run_id,sequence);
         CREATE TABLE IF NOT EXISTS device_executions (run_id TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS device_executions_state ON device_executions(json_extract(value,'$.state'));
+        CREATE INDEX IF NOT EXISTS device_executions_created ON device_executions(json_extract(value,'$.createdAt'));
         CREATE INDEX IF NOT EXISTS device_preparations_session ON device_preparations(json_extract(value,'$.sessionKey'));
         CREATE TABLE IF NOT EXISTS device_event_stats (run_id TEXT PRIMARY KEY, event_count INTEGER NOT NULL, event_bytes INTEGER NOT NULL, truncated INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS device_admission_recovery (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS device_closed_sessions (session_key TEXT PRIMARY KEY);
         INSERT OR IGNORE INTO device_event_stats(run_id,event_count,event_bytes) SELECT run_id,count(*),sum(length(CAST(payload AS BLOB))) FROM device_events GROUP BY run_id;
         COMMIT;`);
@@ -56,17 +105,82 @@ export class DeviceStore {
     return row ? { ...JSON.parse(String(row.value)), ...(row.truncated ? { historyTruncated: true } : {}) } : undefined;
   }
   admit(execution: StoredExecution): void {
-    this.#db.prepare('INSERT INTO device_executions VALUES (?,?)').run(execution.runId, JSON.stringify({ ...execution, createdAt: Date.now() }));
+    const now = Date.now();
+    this.#db.prepare('INSERT INTO device_executions VALUES (?,?)').run(execution.runId, JSON.stringify({ ...execution, createdAt: now, lastObservedAt: now }));
+    this.#overview = undefined;
   }
   save(execution: StoredExecution): void {
     const stored = this.get(execution.runId);
-    const value = { ...stored, ...execution, ...(execution.state !== 'running' && execution.state !== 'unknown' ? { settledAt: stored?.settledAt ?? Date.now() } : {}) };
+    const now = Date.now(), terminal = execution.state !== 'running' && execution.state !== 'unknown';
+    const result = execution.result && typeof execution.result === 'object' ? execution.result as Record<string, unknown> : undefined;
+    const usage = reportedUsage(result?.usage);
+    const value = { ...stored, ...execution,
+      ...(stored?.state === 'running' ? { lastObservedAt: now } : {}),
+      ...(terminal ? { settledAt: stored?.settledAt ?? now, finishedAt: stored?.finishedAt ?? now } : {}),
+      ...(usage ? { usage } : {}),
+    };
     const encoded = JSON.stringify(value);
     if (Buffer.byteLength(encoded) > this.#limits.maxResultBytes) throw new Error('execution_result_too_large');
     this.#db.prepare('UPDATE device_executions SET value=? WHERE run_id=?').run(encoded, execution.runId);
+    this.#overview = undefined;
+  }
+  overview(now = Date.now()): DeviceOverview {
+    // The control handler reads status several times per request. Reuse its bounded projection.
+    if (!this.#overview || now < this.#overview.capturedAt || now - this.#overview.capturedAt >= 1_000)
+      this.#overview = readDeviceOverview(this.#db, 'live', now, this.#limits.maxConcurrentExecutions);
+    return this.#overview;
   }
   unresolved(): string[] {
-    return this.#db.prepare("SELECT run_id FROM device_executions WHERE json_extract(value,'$.state')='unknown' LIMIT 100").all().map(row => String(row.run_id));
+    return this.#db.prepare("SELECT run_id FROM device_executions WHERE json_extract(value,'$.state')='unknown' AND json_extract(value,'$.admissionRecovery') IS NULL LIMIT 100").all().map(row => String(row.run_id));
+  }
+  private recoveryCheckpoint(): RecoveryCheckpoint | undefined {
+    const row = this.#db.prepare('SELECT value FROM device_admission_recovery WHERE id=1').get();
+    return row ? JSON.parse(String(row.value)) as RecoveryCheckpoint : undefined;
+  }
+  private recoveryMatches(checkpoint: RecoveryCheckpoint): boolean {
+    const ids = this.unresolved().sort();
+    return ids.length === checkpoint.runs.length && ids.every((runId, index) => {
+      const saved = checkpoint.runs[index]!;
+      return saved.runId === runId && this.get(runId)?.input === saved.input;
+    });
+  }
+  admissionRecoveryStatus(bootId: string | null): AdmissionRecoveryStatus {
+    const ids = this.unresolved(), checkpoint = this.recoveryCheckpoint();
+    const valid = checkpoint && this.recoveryMatches(checkpoint);
+    const canResume = !!bootId && !!valid && checkpoint.runs.every(run => run.bootId !== bootId);
+    return { unresolvedCount: ids.length, supported: !!bootId,
+      ...(valid ? { checkpointId: checkpoint.id } : {}), requiresRestart: !!valid && !canResume, canResume };
+  }
+  prepareAdmissionRecovery(bootId: string | null): AdmissionRecoveryStatus {
+    if (!bootId) throw new Error('admission_recovery_unsupported');
+    const previous = this.recoveryCheckpoint();
+    if (previous && this.recoveryMatches(previous)) return this.admissionRecoveryStatus(bootId);
+    const ids = this.unresolved().sort();
+    if (!ids.length) throw new Error('admission_recovery_changed');
+    const checkpoint: RecoveryCheckpoint = { id: randomUUID(), runs: ids.map(runId => {
+      const run = this.get(runId)!;
+      // Older records gain a checkpoint now; they need a subsequent verified host restart.
+      return { runId, input: run.input, bootId: run.bootId ?? bootId };
+    }) };
+    this.#db.prepare('INSERT OR REPLACE INTO device_admission_recovery VALUES (1,?)').run(JSON.stringify(checkpoint));
+    return this.admissionRecoveryStatus(bootId);
+  }
+  resumeAdmission(checkpointId: string, bootId: string | null): AdmissionRecoveryStatus {
+    if (!bootId) throw new Error('admission_recovery_unsupported');
+    const checkpoint = this.recoveryCheckpoint();
+    if (!checkpoint || checkpoint.id !== checkpointId || !this.recoveryMatches(checkpoint)) throw new Error('admission_recovery_changed');
+    if (!this.admissionRecoveryStatus(bootId).canResume) throw new Error('admission_recovery_restart_required');
+    this.#db.exec('BEGIN');
+    try {
+      for (const item of checkpoint.runs) {
+        const record = this.get(item.runId)!;
+        // Preserve unknown, input fingerprint, native context and outputs. Only admission is recovered.
+        this.save({ ...record, admissionRecovery: { checkpointId, verifiedAt: new Date().toISOString(), evidence: 'host_restarted' } });
+      }
+      this.#db.prepare('DELETE FROM device_admission_recovery WHERE id=1').run();
+      this.#db.exec('COMMIT');
+    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+    return this.admissionRecoveryStatus(bootId);
   }
   markReleased(runId: string): void {
     this.#db.prepare("UPDATE device_preparations SET value=json_set(value,'$.released',json('true'),'$.releasedAt',?) WHERE run_id=?").run(Date.now(), runId);
@@ -81,6 +195,7 @@ export class DeviceStore {
     try {
       this.#db.prepare('INSERT INTO device_events (run_id,kind,payload) VALUES (?,?,?)').run(runId, exceeded ? 'history_truncated' : kind, content);
       this.#db.prepare(`INSERT INTO device_event_stats VALUES (?,1,?,?) ON CONFLICT(run_id) DO UPDATE SET event_count=event_count+1,event_bytes=event_bytes+excluded.event_bytes,truncated=excluded.truncated`).run(runId, Buffer.byteLength(content), exceeded ? 1 : 0);
+      this.#db.prepare("UPDATE device_executions SET value=json_set(value,'$.lastObservedAt',?) WHERE run_id=? AND json_extract(value,'$.state')='running'").run(Date.now(), runId);
       this.#db.exec('COMMIT');
     } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
     return !exceeded;

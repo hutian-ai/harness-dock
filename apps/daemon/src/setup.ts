@@ -1,14 +1,16 @@
 import { resolve } from 'node:path';
-import { initializeDevice, readConfig } from './config.ts';
+import { initializeDevice, prepareDeviceHome, readConfig, type DeviceConfig } from './config.ts';
 import { installationRoot, manageInstallation, readInstallation, startInstalled } from './installation.ts';
 
 export interface DeviceSetupOptions {
   home: string; cwd: string; nodeId: string; token: string; endpoint: string;
   bundle: string; runtime?: string; root?: string; caFile?: string; autostart?: boolean;
+  providers?: DeviceConfig['providers']; resources?: DeviceConfig['resources'];
 }
 
 /** Shared by the CLI and local device panel. Existing identities are never overwritten. */
 export async function setupDevice(options: DeviceSetupOptions): Promise<{ configPath: string; installation: string; result: unknown }> {
+  if (process.platform === 'win32' && options.autostart) throw new Error('windows_autostart_not_available: use start after login');
   const path = resolve(options.home, 'config.json');
   try {
     const existing = await readConfig(path);
@@ -17,7 +19,8 @@ export async function setupDevice(options: DeviceSetupOptions): Promise<{ config
       throw new Error('setup_identity_conflict');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    await initializeDevice(options);
+    await prepareDeviceHome(options);
+    await initializeDevice(options, true);
   }
   const root = installationRoot(path, options.root);
   if (!await readInstallation(root, path))

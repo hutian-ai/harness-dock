@@ -14,7 +14,7 @@ export async function discoverDshInstallation(options: {
   const home = await realpath(selectedHome).catch(() => selectedHome);
   const descriptor: DiscoveredProvider = { key: 'dsh', displayName: 'dsh', status: 'not_found', executable: null, home, version: null, source: null, candidates: [] };
   if (override?.disabled) return { ...descriptor, status: 'disabled' };
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') return { ...descriptor, reason: 'dsh_unsupported_platform' };
+  if (!(process.platform === 'darwin' && process.arch === 'arm64') && !(process.platform === 'win32' && process.arch === 'x64')) return { ...descriptor, reason: 'dsh_unsupported_platform' };
   const explicit = override?.executable;
   let candidates: { path: string; source: DiscoveredProvider['source'] }[];
   if (explicit) candidates = explicit.includes('/') || explicit.includes('\\')
@@ -23,7 +23,7 @@ export async function discoverDshInstallation(options: {
   else {
     const ownerHome = await realpath(homeDirectory).catch(() => resolve(homeDirectory));
     const actualHome = await realpath(homedir()).catch(() => homedir());
-    const shell = environment.SHELL ?? (ownerHome === actualHome ? userInfo().shell : undefined);
+    const shell = environment.SHELL ?? (process.platform !== 'win32' && ownerHome === actualHome ? userInfo().shell : undefined);
     candidates = await pathCandidates('dsh', { ...environment, ...(shell ? { SHELL: shell } : {}) }, signal);
     if (!candidates.length) {
       const versions = join(environment.NVM_DIR ?? join(homeDirectory, '.nvm'), 'versions', 'node');

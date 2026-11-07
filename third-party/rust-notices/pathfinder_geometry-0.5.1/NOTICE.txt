@@ -1,0 +1,4 @@
+The published pathfinder_geometry 0.5.1 package declares MIT/Apache-2.0 but omits standalone license text.
+Its original Cargo manifest and available README are retained, together with the Apache-2.0 license text.
+Upstream authors: Patrick Walton <pcwalton@mimiga.net>
+Source archive: https://crates.io/api/v1/crates/pathfinder_geometry/0.5.1/download

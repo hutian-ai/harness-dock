@@ -134,7 +134,7 @@ export class DeviceSelfTest {
   #directory(): void {
     mkdirSync(this.#stateDir, { recursive: true, mode: 0o700 });
     const info = lstatSync(this.#stateDir);
-    if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || info.mode & 0o077) throw storageError();
+    if (!info.isDirectory() || info.isSymbolicLink() || process.platform !== 'win32' && (info.uid !== process.getuid?.() || info.mode & 0o077)) throw storageError();
   }
 
   #pathFor(provider: SelfTestProvider): string { return join(this.#stateDir, provider === 'codex' ? 'self-test.json' : 'self-test-dsh.json'); }
@@ -145,7 +145,7 @@ export class DeviceSelfTest {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw storageError(); }
     try {
       const info = fstatSync(fd);
-      if (!info.isFile() || info.uid !== process.getuid?.() || info.mode & 0o077 || info.size > MAX_BYTES) throw storageError();
+      if (!info.isFile() || process.platform !== 'win32' && (info.uid !== process.getuid?.() || info.mode & 0o077) || info.size > MAX_BYTES) throw storageError();
       const bytes = Buffer.alloc(MAX_BYTES + 1), count = readSync(fd, bytes, 0, bytes.length, 0);
       if (count > MAX_BYTES) throw storageError();
       return snapshot(JSON.parse(bytes.subarray(0, count).toString('utf8')), provider);
@@ -159,7 +159,7 @@ export class DeviceSelfTest {
     // Check the previous destination before atomic replacement, including changes since construction.
     try {
       const previous = lstatSync(this.#path);
-      if (!previous.isFile() || previous.isSymbolicLink() || previous.uid !== process.getuid?.() || previous.mode & 0o077) throw storageError();
+      if (!previous.isFile() || previous.isSymbolicLink() || process.platform !== 'win32' && (previous.uid !== process.getuid?.() || previous.mode & 0o077)) throw storageError();
       this.#read(); // A replacement must not erase another provider's or an invalid receipt.
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     const pending = `${this.#path}.${randomUUID()}.tmp`;
@@ -170,8 +170,10 @@ export class DeviceSelfTest {
       created = true;
       writeFileSync(fd, encoded); fsyncSync(fd); closeSync(fd); fd = undefined;
       renameSync(pending, this.#path);
-      const directory = openSync(this.#stateDir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-      try { fsyncSync(directory); } finally { closeSync(directory); }
+      if (process.platform !== 'win32') {
+        const directory = openSync(this.#stateDir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        try { fsyncSync(directory); } finally { closeSync(directory); }
+      }
     } finally {
       if (fd !== undefined) closeSync(fd);
       if (created) try { unlinkSync(pending); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }

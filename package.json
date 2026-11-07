@@ -1,6 +1,6 @@
 {
   "name": "harness-dock",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -21,6 +21,8 @@
     "bundle": "pnpm build && node --import tsx scripts/bundle.ts",
     "package:local": "node --import tsx scripts/package-release.ts",
     "panel:build": "node --import tsx scripts/package-panel.ts",
+    "panel:gpui:build": "node --import tsx scripts/package-panel.ts --frontend gpui",
+    "panel:gpui:check": "node --import tsx scripts/check-gpui-panel.ts",
     "panel:check": "node --import tsx scripts/check-panel.ts",
     "client": "node --import tsx packages/client/src/cli.ts",
     "server": "node --import tsx apps/server/src/cli.ts"

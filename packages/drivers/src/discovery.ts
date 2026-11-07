@@ -32,6 +32,8 @@ export interface DiscoveredProvider {
   source: 'bundled' | 'managed' | 'path' | 'app' | 'configured' | null;
   candidates: string[];
   reason?: string;
+  /** Verified local desktop host discovery only; not a persistent ACP/model connection. */
+  desktopHost?: 'available' | 'unavailable' | 'not_applicable';
 }
 /** Discover named installations without reading credentials, opening login, or sending model prompts. */
 export async function discoverProviders(options: ProviderDiscoveryOptions = {}): Promise<DiscoveredProvider[]> {

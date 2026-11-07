@@ -1,3 +1,4 @@
+export { protectWindowsDirectory, assertWindowsPrivatePath, protectWindowsPipe } from './windows-security.ts';
 export { ExecaError } from 'execa';
 export { observeStartup, startStartupSpan } from './startup-trace.ts';
 export { runBoundedCommand } from './process-command.ts';

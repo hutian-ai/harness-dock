@@ -14,7 +14,7 @@ struct PanelView: View {
     let quit: () -> Void
     @State private var maintenance = "upgrade"
     @State private var confirmMaintenance = false
-    @State private var homeHeight: CGFloat = 520
+    @State private var homeHeight: CGFloat = 360
     private let poll = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
     private var needsSetup: Bool {
         !model.device.configured || model.resumeSetup || model.pairing != nil && model.device.managed != true
@@ -44,15 +44,15 @@ struct PanelView: View {
                     if model.loading { ProgressView().frame(maxWidth: .infinity, minHeight: 170) }
                     else if model.showVerification { verification }
                     else if model.showDetails && !needsSetup { settings }
-                    else if needsSetup { harnessOverview; Divider(); onboarding }
+                    else if needsSetup { onboarding; Divider(); harnessOverview }
                     else { device }
                     if !model.showVerification || !model.hasSelectedSelfTestFeedback { operationFeedback }
-                    if let error = model.refreshError {
+                    if let error = model.refreshError, page != "home" {
                         message(error, symbol: "arrow.clockwise", color: .orange)
                         Button("刷新状态") { Task { await model.refresh() } }
                             .buttonStyle(.plain).foregroundStyle(PanelTheme.action).font(.system(size: 12)).disabled(model.busy)
                     }
-                }.padding(20).background(measureHeight("content"))
+                }.padding(page == "home" ? 16 : 20).background(measureHeight("content"))
             }
         }
         .frame(width: 400, height: panelHeight)
@@ -99,19 +99,17 @@ struct PanelView: View {
         }
     }
     private var header: some View {
-        HStack(spacing: 10) {
-            PanelBrandMark().frame(width: 30, height: 30)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(PanelTheme.appName).font(.system(size: 16, weight: .semibold)).lineLimit(1)
-                Text("让应用调用这台 Mac").font(.system(size: 11)).foregroundStyle(.secondary)
-            }
+        HStack(spacing: 9) {
+            PanelBrandMark().frame(width: 24, height: 24)
+            Text(PanelTheme.appName).font(.system(size: 14, weight: .semibold)).lineLimit(1)
             Spacer()
             if model.busy { ProgressView().controlSize(.small) }
-            Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.plain).help("刷新设备状态").accessibilityLabel("刷新设备状态").disabled(model.busy)
-                .frame(width: 24, height: 24)
+            Button { Task { await model.refresh() } } label: {
+                Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }.buttonStyle(PanelIconButtonStyle()).help("刷新连接状态").accessibilityLabel("刷新设备状态").disabled(model.busy)
             hideButton
-        }.padding(.horizontal, 20).padding(.vertical, 16)
+        }.padding(.horizontal, 18).padding(.vertical, 12)
     }
     private func navigationHeader(_ title: String, back: @escaping () -> Void) -> some View {
         HStack {
@@ -221,172 +219,229 @@ struct PanelView: View {
         }.disabled(model.busy)
     }
     private var device: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            harnessOverview
-            Divider()
+        VStack(alignment: .leading, spacing: 20) {
             serviceConnection
-            Divider()
-            Button { model.showDetails = true } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "gearshape").font(.system(size: 17)).foregroundStyle(.secondary)
-                    Text("设置与维护").font(.system(size: 13, weight: .medium))
-                    Spacer()
-                    if model.canUpgradeBackground {
-                        Text("可更新").font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.secondary)
-                }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            harnessOverview
+            VStack(spacing: 8) {
+                Divider()
+                Button { model.showDetails = true } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "gearshape").font(.system(size: 12))
+                        Text("设置与维护").font(.system(size: 12))
+                        Spacer()
+                        if model.canUpgradeBackground {
+                            Text("有更新").font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(PanelTheme.accent)
+                        }
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }.foregroundStyle(.secondary).padding(.horizontal, 6).padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                }.buttonStyle(PanelRowButtonStyle())
+            }
         }
     }
     private var harnessOverview: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(model.harnessSummaryTitle).font(.system(size: 18, weight: .semibold))
-            if let detail = model.harnessSummaryDetail {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text("本机 Harness").font(.system(size: 11, weight: .medium))
+                Spacer()
+                Text(model.harnessCountLabel).font(.system(size: 11))
+            }.foregroundStyle(.secondary).padding(.horizontal, 3)
+            if let detail = model.harnessSummaryDetail, model.refreshError == nil || needsSetup {
                 Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if !model.providerChoices.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(model.providerChoices.enumerated()), id: \.element.key) { index, provider in
-                        if index > 0 { Divider().padding(.leading, 48) }
+                        if index > 0 { Divider().padding(.leading, 56) }
                         harnessRow(provider)
                     }
-                }
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.09), lineWidth: 1))
+                }.background(PanelTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(PanelTheme.separator.opacity(0.5), lineWidth: 0.5))
             } else {
-                Button("检查安装与连接", action: model.openLocalChecks)
+                Button("检查本机环境", action: model.openLocalChecks)
                     .buttonStyle(.plain).foregroundStyle(PanelTheme.action).font(.system(size: 12))
             }
-            if model.selfTestStartUnconfirmed {
+            if model.localTestNeedsAttention {
                 Button(action: model.openLocalChecks) {
-                    Label("核对原测试的启动结果", systemImage: "exclamationmark.circle")
-                }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.orange)
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle")
+                        Text(model.localTestNoticeTitle)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: 9))
+                    }.font(.system(size: 11)).foregroundStyle(.orange).padding(.horizontal, 4).padding(.vertical, 5)
+                }.buttonStyle(.plain)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func harnessRow(_ provider: ProviderInstallation) -> some View {
-        Button { model.openProviderDetails(provider.key) } label: {
+        let installed = provider.status == "installed"
+        return Button { model.openProviderDetails(provider.key) } label: {
             HStack(spacing: 11) {
-                Image(systemName: "terminal").font(.system(size: 23, weight: .regular))
-                    .foregroundStyle(.secondary).frame(width: 26)
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text(provider.displayName).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
-                        if provider.experimental == true {
-                            Text("实验适配").font(.system(size: 10)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3), lineWidth: 1))
-                                .help("此 Harness 的 Dock 适配目前为实验性；模型回显测试状态单独显示。")
-                        }
+                Image(systemName: "terminal.fill").font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(installed ? Color.primary.opacity(0.75) : Color.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(Color.primary.opacity(installed ? 0.045 : 0.025), in: RoundedRectangle(cornerRadius: 8))
+                HStack(spacing: 6) {
+                    Text(provider.displayName).font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(installed ? Color.primary : Color.secondary)
+                    if provider.experimental == true {
+                        Text("实验").font(.system(size: 10)).foregroundStyle(.tertiary)
+                            .help("此 Harness 的 Dock 适配目前为实验性。")
                     }
-                    HStack(spacing: 5) {
-                        Text(model.installationStatus(provider)).foregroundStyle(.secondary)
-                        if provider.status == "installed" || model.latestSelfTest(for: provider.key) != nil {
-                            Text("·").foregroundStyle(.tertiary)
-                            if let symbol = model.rowTestSymbol(provider) {
-                                Image(systemName: symbol).foregroundStyle(model.rowTestColor(provider))
-                            }
-                            Text(model.rowTestLabel(provider)).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }.font(.system(size: 11))
                 }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.secondary)
-            }.padding(12).frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(!model.canOpenProviderDetails)
-            .accessibilityLabel("\(model.installationLabel(provider))，\(model.rowTestLabel(provider))，查看详情")
+                Spacer(minLength: 8)
+                HStack(spacing: 5) {
+                    if installed {
+                        Circle().fill(model.providerConnectionColor(provider)).frame(width: 5, height: 5)
+                    }
+                    Text(installed ? model.providerConnectionLabel(provider) : model.installationStatus(provider))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }.help(installed ? model.providerConnectionDetail(provider) : model.installationLabel(provider))
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary).padding(.leading, 3)
+            }.padding(.horizontal, 13).padding(.vertical, 13)
+                .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(PanelRowButtonStyle()).disabled(!model.canOpenProviderDetails)
+            .accessibilityLabel("\(model.installationLabel(provider))，\(model.providerConnectionLabel(provider))，查看连接与测试")
     }
     private var serviceConnection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("服务连接").font(.system(size: 13, weight: .medium))
-                Spacer()
-                Circle().fill(model.connectionColor).frame(width: 7, height: 7)
-                Text(model.connectionTitle).font(.system(size: 12)).foregroundStyle(.primary)
+        let connected = model.refreshError == nil && model.device.running == true && model.device.connected == true && model.device.connectionIssue == nil
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: connected ? "checkmark.circle.fill" : "network")
+                    .font(.system(size: 24, weight: .regular)).foregroundStyle(model.connectionColor)
+                    .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(connected ? "这台 Mac 已接入" : model.refreshError != nil ? "连接状态待确认" : model.connectionTitle)
+                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
+                    Text(connected ? "回到提供邀请的应用，开始任务。" : model.connectionDetail)
+                        .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
-            Text(model.device.server ?? "服务地址尚未读回").font(.system(size: 12)).foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-            Text(model.connectionDetail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.device.running != true && model.device.managed == true {
-                Button("启动后台") { model.action("start") }.buttonStyle(PanelPrimaryButtonStyle()).controlSize(.large)
+                Button("启动后台") { model.action("start") }.buttonStyle(PanelPrimaryButtonStyle())
                     .disabled(model.busy || model.maintenanceBlocked)
             } else if model.device.managed != true && model.device.externalInstallation != true {
                 Button("继续连接这台 Mac", action: model.continueSetup).buttonStyle(PanelPrimaryButtonStyle())
                     .disabled(model.busy || model.maintenanceBlocked)
             }
-            if model.device.connectionIssue != nil || model.device.running == true && model.device.connected != true {
-                Button("检查连接", action: model.openLocalChecks).buttonStyle(.plain)
-                    .foregroundStyle(PanelTheme.action).font(.system(size: 12)).disabled(model.busy)
+            if model.refreshError != nil {
+                Button("刷新状态") { Task { await model.refresh() } }
+                    .buttonStyle(.bordered).controlSize(.small).font(.system(size: 11)).disabled(model.busy)
+            } else if model.device.connectionIssue != nil || model.device.running == true && model.device.connected != true {
+                Button("检查连接") { model.openLocalChecks(); model.diagnose() }
+                    .buttonStyle(.bordered).controlSize(.small).font(.system(size: 11)).disabled(model.busy)
             }
-        }
+        }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
+            .background(model.connectionColor.opacity(connected ? 0.055 : 0.04), in: RoundedRectangle(cornerRadius: 12))
     }
     private var settings: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("设备后台").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Text(model.backgroundStateLabel).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("登录后自动启动").font(.system(size: 12))
+                    Spacer()
+                    Toggle("登录后自动启动", isOn: Binding(get: { model.device.autostart == true }, set: { model.action("autostart", fields: ["enabled": $0]) }))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                }.disabled(model.busy || model.maintenanceBlocked || model.device.managed != true)
+                if let reason = model.maintenanceBlockReason { message(reason, symbol: "clock", color: .orange) }
+                if model.device.managed == true {
+                    HStack {
+                        Button(model.device.running == true ? "停止后台" : "启动后台") {
+                            model.action(model.device.running == true ? "stop" : "start")
+                        }.disabled(model.busy || model.maintenanceBlocked)
+                        Spacer()
+                        if model.canUpgradeBackground {
+                            Button("更新后台…") { maintenance = "upgrade"; confirmMaintenance = true }
+                                .disabled(model.busy || model.maintenanceBlocked)
+                        }
+                    }.controlSize(.small)
+                } else {
+                    Text("请通过原安装入口维护此后台。").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                DisclosureGroup("版本与回滚") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(model.backgroundVersionDetail).font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if model.device.managed == true {
+                            Button("回滚至上一版本…") { maintenance = "rollback"; confirmMaintenance = true }
+                                .controlSize(.small).disabled(model.busy || model.maintenanceBlocked || model.device.canRollback != true)
+                        }
+                    }.padding(.top, 8)
+                }.font(.system(size: 11)).foregroundStyle(.secondary)
+            }.panelSurface()
+            VStack(alignment: .leading, spacing: 12) {
+                Text("排查问题").font(.system(size: 13, weight: .semibold))
+                Button(action: { model.openLocalChecks(); model.diagnose() }) {
+                    Label("检查安装与连接", systemImage: "stethoscope")
+                }.buttonStyle(.plain).font(.system(size: 12)).disabled(model.busy || model.selfTestRunning || model.selfTestStartUnconfirmed)
+                Button(action: model.readLogs) { Label("查看本地日志", systemImage: "doc.text") }
+                    .buttonStyle(.plain).font(.system(size: 12)).disabled(model.busy)
+            }.panelSurface()
+            DisclosureGroup("设备信息与高级设置") {
+                VStack(alignment: .leading, spacing: 12) {
+                    installationDetail("连接服务", value: model.device.server)
+                    installationDetail("执行起始目录", value: model.device.cwd)
+                    installationDetail("设备 ID", value: model.device.nodeId)
+                    Button("导入其他设备配置…", action: model.adopt)
+                        .buttonStyle(.plain).font(.system(size: 11)).disabled(model.busy || model.selfTestRunning || model.selfTestStartUnconfirmed)
+                }.padding(.top, 10)
+            }.font(.system(size: 11)).foregroundStyle(.secondary).panelSurface()
             HStack {
-                Text("设备后台").font(.system(size: 13, weight: .semibold))
+                Text("界舟 · Harness Dock \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0")")
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
                 Spacer()
-                Text(model.backgroundStateLabel).font(.system(size: 12)).foregroundStyle(.secondary)
-            }
-            Text(model.backgroundVersionDetail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("登录后自动启动后台", isOn: Binding(get: { model.device.autostart == true }, set: { model.action("autostart", fields: ["enabled": $0]) }))
-                .toggleStyle(.switch).controlSize(.small).font(.system(size: 12))
-                .disabled(model.busy || model.maintenanceBlocked || model.device.managed != true)
-            if let reason = model.maintenanceBlockReason { message(reason, symbol: "clock", color: .orange) }
-            if model.device.managed == true {
-                HStack(spacing: 10) {
-                    Button("停止后台") { model.action("stop") }.disabled(model.device.running != true)
-                    if model.canUpgradeBackground { Button("更新后台…") { maintenance = "upgrade"; confirmMaintenance = true } }
-                    Button("回滚…") { maintenance = "rollback"; confirmMaintenance = true }.disabled(model.device.canRollback != true)
-                }.disabled(model.busy || model.maintenanceBlocked).controlSize(.small)
-            } else {
-                Text(model.device.externalInstallation == true ? "请通过原安装入口维护此后台。" : "连接中断后可继续使用已保存的身份，无需再次领取邀请。")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Divider()
-            Button(action: model.readLogs) {
-                Label("查看本地日志", systemImage: "doc.text")
-            }.buttonStyle(.plain).foregroundStyle(PanelTheme.action).font(.system(size: 12)).disabled(model.busy)
-            Button("安装与连接诊断", action: model.openLocalChecks)
-                .buttonStyle(.plain).foregroundStyle(PanelTheme.action).font(.system(size: 12)).disabled(model.busy)
-            Divider()
-            installationDetail("执行起始目录", value: model.device.cwd)
-            installationDetail("设备 ID", value: model.device.nodeId)
-            Button("手动导入其他设备配置…", action: model.adopt).buttonStyle(.plain).foregroundStyle(PanelTheme.action).font(.system(size: 12)).disabled(model.busy || model.selfTestRunning || model.selfTestStartUnconfirmed)
-            Divider()
-            Text("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0") · macOS arm64")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-            Text("收起或退出面板后，已启动的设备后台继续独立运行。")
-                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            quitButton
+                quitButton.font(.system(size: 11)).foregroundStyle(.secondary)
+            }.padding(.horizontal, 3)
+            Text("退出面板后，后台与任务继续运行。")
+                .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 3)
         }
     }
     private var quitButton: some View {
-        Button("退出 LaunchApp", action: quit).buttonStyle(.plain)
+        Button("退出界舟", action: quit).buttonStyle(.plain)
             .help("退出菜单栏客户端，设备后台继续运行").disabled(model.busy)
     }
     private var hideButton: some View {
         Button(action: hide) {
             Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
-                .frame(width: 24, height: 24).contentShape(Rectangle())
-        }.buttonStyle(.plain).foregroundStyle(.secondary)
+                .frame(width: 28, height: 28).contentShape(Rectangle())
+        }.buttonStyle(PanelIconButtonStyle()).foregroundStyle(.secondary)
             .accessibilityLabel("收起面板").help("收起弹层，保留菜单栏图标；设备后台继续运行")
     }
     @ViewBuilder private var operationFeedback: some View {
         if let progress = model.busyMessage { message(progress, symbol: "clock", color: .secondary) }
         if let error = model.error { message(error, symbol: "exclamationmark.triangle", color: .orange) }
-        if let notice = model.notice { message(notice, symbol: "info.circle", color: .secondary) }
+        if let notice = model.notice {
+            HStack(alignment: .top, spacing: 8) {
+                message(notice, symbol: "info.circle", color: .secondary)
+                Spacer(minLength: 0)
+                Button { model.notice = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 9)).frame(width: 18, height: 18)
+                }.buttonStyle(PanelIconButtonStyle()).accessibilityLabel("关闭提示")
+            }
+        }
     }
     private var installationSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("本机安装").font(.system(size: 13, weight: .semibold))
+            Text("连接与环境").font(.system(size: 13, weight: .semibold))
             if let installation = model.selectedInstallation {
                 detailRow("安装状态", value: model.installationStatus(installation))
-                Divider()
-                detailRow("版本", value: installation.version ?? "未报告")
-                DisclosureGroup("安装详情") {
+                if installation.status == "installed" {
+                    detailRow("连接状态", value: model.providerConnectionLabel(installation))
+                    Text(model.providerConnectionDetail(installation)).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                DisclosureGroup("技术信息") {
                     VStack(alignment: .leading, spacing: 10) {
+                        installationDetail("版本", value: installation.version)
                         installationDetail("发现来源", value: installation.source)
                         installationDetail("可执行文件", value: installation.executable)
                         installationDetail("原生 Home", value: installation.home)
@@ -414,20 +469,18 @@ struct PanelView: View {
     }
     private var verification: some View {
         VStack(alignment: .leading, spacing: 12) {
-            installationSummary
-            Divider()
+            installationSummary.panelSurface()
             VStack(alignment: .leading, spacing: 8) {
                 Text("模型回显测试").font(.system(size: 13, weight: .semibold))
                 selfTestSummary
-                Text("仅证明本次模型回显，工具与应用授权需分别验证。")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !model.selectedReadOnlyEcho && model.selectedInstallation != nil {
                     Text("沿用原生权限配置，不提供只读保证。")
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 selfTestButton.buttonStyle(PanelPrimaryButtonStyle()).controlSize(.large)
                 if model.hasSelectedSelfTestFeedback { operationFeedback }
-                Text("会调用模型并使用账户额度。").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("使用模型额度；仅核对一次回显，工具与应用授权需单独验证。")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let reason = model.maintenanceBlockReason {
                     message(reason, symbol: "clock", color: .orange)
                 } else if model.device.running != true {
@@ -435,8 +488,7 @@ struct PanelView: View {
                 } else if !model.selectedProviderSelfTestSupported {
                     Text("当前后台未提供此 Harness 的模型测试。").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-            }
-            Divider()
+            }.panelSurface()
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("安装与连接诊断").font(.system(size: 13, weight: .semibold))
@@ -446,8 +498,7 @@ struct PanelView: View {
                 }
                 Text("检查本机环境，不调用模型。").font(.system(size: 11)).foregroundStyle(.secondary)
                 if !model.checks.isEmpty { diagnostics }
-            }
-            Divider()
+            }.panelSurface()
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 10) {
                     if let test = model.selectedSelfTest {
@@ -499,18 +550,16 @@ struct PanelView: View {
                 if model.selectedSelfTestRunning || model.selectedSelfTestStartUnconfirmed && model.busy {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: model.selectedSelfTest?.state == "passed" && !model.selectedSelfTestStartUnconfirmed ? "checkmark.circle.fill" : model.selectedSelfTest == nil && !model.selectedSelfTestStartUnconfirmed ? "circle.dashed" : "exclamationmark.circle")
-                        .foregroundStyle(model.selfTestColor)
+                    Image(systemName: model.selectedInstallation.flatMap { model.rowTestSymbol($0) } ?? "circle.dashed")
+                        .foregroundStyle(model.selectedInstallation.map { model.rowTestColor($0) } ?? .secondary)
                 }
-                Text(model.selfTestTitle).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary)
+                Text(model.selectedInstallation.map { model.rowTestLabel($0) } ?? model.selfTestTitle).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary)
             }
             if model.selectedSelfTest?.state != "passed" || model.selfTestIsHistorical || model.refreshError != nil || model.selectedSelfTestStartUnconfirmed {
                 Text(model.selfTestDetail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if let date = model.selfTestCheckedAt { Text("最近测试：\(date)").font(.system(size: 11)).foregroundStyle(.secondary) }
-        }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-            .background(PanelTheme.surface).clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+            if let date = model.selfTestCheckedAt { Text("上次测试：\(date)").font(.system(size: 11)).foregroundStyle(.secondary) }
+        }.padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading)
     }
     private var diagnostics: some View {
         VStack(alignment: .leading, spacing: 10) {

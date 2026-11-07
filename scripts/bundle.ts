@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { execaSync } from 'execa';
 import { chmod, copyFile, lstat, mkdir, readdir, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -9,7 +10,7 @@ import { writeBundleNotices } from './bundle-notices.ts';
 const root = resolve(process.argv[2] ?? '.local/bundle');
 await mkdir(root, { recursive: true, mode: 0o700 });
 for (const [name, target] of [['@harness-dock/daemon', 'daemon'], ['@harness-dock/client', 'controller'], ['@harness-dock/server', 'server']]) {
-  execFileSync('pnpm', ['--filter', name!, 'deploy', '--prod', '--config.node-linker=hoisted', join(root, target!)], { stdio: 'inherit' });
+  execaSync('pnpm', ['--filter', name!, 'deploy', '--prod', '--config.node-linker=hoisted', join(root, target!)], { stdio: 'inherit' });
 }
 // Workspace packages may be hard-linked by pnpm deploy. Detach them so later builds cannot mutate an installed release.
 async function detach(path: string): Promise<void> {
@@ -52,7 +53,7 @@ await copyFile(resolve('deploy/server.Dockerfile'), join(root, 'server/Dockerfil
 await copyFile(resolve('deploy/compose.yaml'), join(root, 'server/compose.yaml'));
 await copyFile(resolve('deploy/server-docker.sh'), join(root, 'server/docker.sh'));
 await chmod(join(root, 'server/docker.sh'), 0o755);
-const [archive] = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], { cwd: join(root, 'controller'), encoding: 'utf8' }));
+const [archive] = JSON.parse(execaSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], { cwd: join(root, 'controller'), encoding: 'utf8' }).stdout);
 await rename(join(root, archive.filename), join(root, 'controller.tgz'));
 let revision: string | undefined;
 try {

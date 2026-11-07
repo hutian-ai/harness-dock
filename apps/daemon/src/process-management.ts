@@ -1,11 +1,10 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { DeviceConfig } from './config.ts';
 import { control, type LocalStatus } from './local-control.ts';
+import { readStoredActivity } from './device-store.ts';
 
 export async function waitForDaemon(config: DeviceConfig, entrypoint?: string, runtime?: string, check?: () => void): Promise<LocalStatus> {
   for (let i = 0; i < 100; i++) {
@@ -22,14 +21,8 @@ export async function waitForDaemon(config: DeviceConfig, entrypoint?: string, r
 
 export async function stopIdleDaemon(config: DeviceConfig): Promise<boolean> {
   if (!await control(config, 'status')) {
-    const path = join(config.stateDir, 'runs.sqlite');
-    if (existsSync(path)) {
-      const database = new DatabaseSync(path, { readOnly: true });
-      try {
-        if (database.prepare('SELECT id FROM node').get()?.id !== config.nodeId) throw new Error('state_node_mismatch');
-        if (database.prepare("SELECT 1 FROM device_executions WHERE json_extract(value,'$.state') IN ('running','unknown') LIMIT 1").get()) throw new Error('unresolved_execution');
-      } finally { database.close(); }
-    }
+    const stored = await readStoredActivity(config.nodeId, config.stateDir);
+    if (stored && stored.unresolved > 0) throw new Error('unresolved_execution');
     return false;
   }
   // The live owner checks busy/unknown and closes admission in the same operation.
@@ -46,7 +39,7 @@ export async function startBackground(config: DeviceConfig, path: string, entryp
   if (existing) return { ...existing, alreadyRunning: true } as LocalStatus;
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   // The launcher can be a temporary checkout; background commands need a lasting cwd.
-  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { cwd: dirname(entrypoint), detached: true, stdio: 'ignore' });
+  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { cwd: dirname(entrypoint), detached: true, windowsHide: true, stdio: 'ignore' });
   let error: Error | undefined;
   child.on('error', value => { error = value; });
   child.unref();

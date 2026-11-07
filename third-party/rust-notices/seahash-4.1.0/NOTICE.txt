@@ -1,0 +1,4 @@
+The published seahash 4.1.0 package declares MIT but omits standalone license text.
+Its original Cargo manifest and available README are retained, together with the MIT license text.
+Upstream authors: ticki <ticki@users.noreply.github.com>, Tom Almeida <tom@tommoa.me>
+Source archive: https://crates.io/api/v1/crates/seahash/4.1.0/download

@@ -31,6 +31,8 @@ export interface CodexExecutionConfig {
 }
 export interface CodexModel { id: string; efforts: string[]; serviceTiers: string[] }
 export interface CodexInspection {
+  /** Native probe-session options, never written back to the user configuration. */
+  configOptions?: unknown;
   desktopHostState?: 'connected' | 'disabled' | 'unavailable';
   nativeEnvironment?: { id: string; kind: 'native'; contextScope: 'device_user'; discovery: 'harness'; desktopHost: string };
   models: CodexModel[];
@@ -167,7 +169,7 @@ export class CodexExecutor {
         serviceTiers: Array.isArray(model.additionalSpeedTiers) && model.additionalSpeedTiers.includes('fast') ? ['priority'] : [],
       }));
       const status = await runtime.getStatus({ handle, signal });
-      return { models, desktopHostState, ...nativePermissionModes(status.details?.configOptions), config: { sandbox: config.sandbox, approvalPolicy: config.approvalPolicy, nativeMemoryDisabled: config.nativeMemoryDisabled === true } };
+      return { models, desktopHostState, configOptions: status.details?.configOptions, ...nativePermissionModes(status.details?.configOptions), config: { sandbox: config.sandbox, approvalPolicy: config.approvalPolicy, nativeMemoryDisabled: config.nativeMemoryDisabled === true } };
     } finally { await runtime.shutdown(); }
   }
   private desktopState(result: Record<string, unknown>): 'connected' | 'disabled' | 'unavailable' {

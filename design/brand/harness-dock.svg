@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Harness Dock</title>
+  <desc id="desc">Two balanced docking brackets are joined by a central bridge, forming an H within a square silhouette with 45-degree cut corners.</desc>
+  <g fill="#00C89B">
+    <path d="M224 80H144L80 144V368L144 432H224V368H176L144 336V288H368V336L336 368H288V432H368L432 368V144L368 80H288V144H336L368 176V224H144V176L176 144H224V80Z"/>
+  </g>
+</svg>

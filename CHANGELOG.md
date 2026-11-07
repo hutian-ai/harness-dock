@@ -1,26 +1,31 @@
 # Changelog
 
-## Unreleased
+## Unreleased SDK source
 
-以下为当前源码尚未通过新 Release 分发的变更。已有 [v0.1.1 Developer Alpha 客户端](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.1)支持 Codex；该公开下载尚未更新为包含 dsh 的新包。workspace package 保持 private，不发布 npm 包。
+以下 SDK 源码能力尚未通过新的独立 SDK Release 分发；当前 SDK 下载仍为 `sdk-v0.1.2`：
 
-### Added
+- `onReceipt / progress / signal` 观察入口，以及按原 receipt 显式 `collect / release`。中断观察不取消任务，缺少终态证据不自动收存或释放。
+- Windows 11 x64 原生 CLI/Daemon 仍为待实机验收的源码路径，不含桌面、自启或发行归档。
 
-- macOS arm64 上 dsh 的具名 ACP SDK 实验适配，复用本机安装、原生 home、登录与配置；首个适配版本为 `@deepseek-ai/dsh 0.1.2-rc.1`。
-- dsh 原生模型与 effort 选择、会话续接、审批 options 转发、MCP 与叠加的调用方命名 skills root。
-- 新构建候选的面板收敛为设备持有人的轻量接入、状态和维护入口：首页显示连接、后台、执行数量与需要处理事项；环境列表、固定回显及诊断移入“检查本机环境”，自启和版本操作集中在“设置与维护”。首次引导先连接这台 Mac，环境核验不阻挡邀请接入。
-- 本机环境检查按后台发现结果展示条目（当前支持 Codex/dsh），分别保留固定测试历史；测试运行或启动收据待确认时禁止切换环境和维护后台。
-- `pnpm accept:dsh` 本机 SDK / Server / DeviceHost fixture，覆盖 MCP 成功/错误、调用方与原生项目 skills 共存、审批允许/拒绝/取消后旧决定失效，以及一次性授权作用域。
+## v0.1.3 — 界舟 GPUI 桌面客户端（2026-11-07）
 
-### Fixed
+- 新客户端使用固定 GPUI Kit 0.9.0，保留概览、Harness 详情与设置侧栏，统一按钮、列表、状态与亮暗外观。macOS 最低要求提高到 15，设备架构为 arm64；旧 Swift v0.1.2 下载保留。
+- 概览按独立执行编号区分并发，展示近 24 小时开始及尚未结束的执行、最多 50 条快照，以及各 Harness 已上报的 Token 用量。未知结果不会被当作完成，未上报用量不会被当作零。
+- 原生会话配置与模型目录只读展示，默认值包含已选环境的本机覆盖。dsh 模型名称和供应方与不透明执行标识分离；接口未提供权限模式时明确显示原生管理，不猜测权限。
+- 邀请链接与管理员配对文件进入同一核对流程；本机 config.json 返回明确类型错误。移除可选的旧连接查找/导入入口，保留未完成接入的原身份核对与必要恢复。
+- 停止连接与移除服务器分别确认；维护通过受保护的本地拥有者，检查空闲与未确认结果后执行。登录自启偏好和当前服务操作分开，退出界面不会停止独立后台。
+- 连接诊断先呈现结论与可执行的下一步，明细按需展开；独立健康探测未提供不否认已有连接。日志直接在 Finder 定位。
+- 原任务未知时的恢复检查点与旧操作锁分别管理；核验主机重启证据，不删除旧身份、历史或未知结果，不自动重派或沿用旧审批。
+- 文档按产品价值与读者任务重排：设备用户、应用开发者与服务管理员分别进入；旧版操作和源码验证移入参考，不再混在首次接入步骤中。
+- App 构建与来源元数据切换到 GPUI，最低系统、版本与下载名一致，保留 Node/Rust 依赖许可与摘要读回。独立 SDK 发行保持 sdk-v0.1.2，workspace 包不发布 npm。
 
-- 忘记会话时一并清理对应 dsh 派生目录，保留其他会话与原生用户目录。
-- GUI helper 与 LaunchAgent 保留 dsh 的本机发现选择器；使用 Daemon 自带 Node 启动选定的 dsh JavaScript 入口，避免依赖 GUI 的 Node PATH。
+## v0.1.2 — App 与独立 SDK
 
-### Scope
-
-- dsh 暂无精确最终答案识别与只读结果查回，缺少完成证据保持 unknown，不自动重派。MCP 错误在原生投影为 failed 时，送达状态保守保持 unknown。
-- Codex 面板测试使用原生确认的只读模式；dsh 面板测试为实验固定回显，沿用原生权限配置，不提供只读保证，工具与应用授权分别验收。现有公开 v0.1.1 下载仍只提供“测试 Codex”；源码与新构建候选的功能不表示独立 Daemon 进程、独立设备或发行包已完成 dsh 验收。
+- 公开 macOS arm64 App 提供 Codex 支持和 dsh 实验适配；SDK `sdk-v0.1.2` 分别提供连接 SDK、Server 与独立设备 Daemon/CLI。
+- dsh 复用本机安装、home、登录与配置，首个适配版本为原生 `@deepseek-ai/dsh 0.1.2-rc.1`；支持原生模型、effort、会话续接、审批 options、MCP 和叠加命名 skills root。
+- App 首页展示 Harness 数量、安装列表与独立服务连接，按条目查看安装、固定回显、各自历史及诊断；维护区收纳日志、自启和显式后台版本切换。邀请接入不以模型回显为门槛。
+- Codex 固定回显使用原生确认的只读模式；dsh 实验回显沿用原生权限配置，不提供只读保证。dsh 无精确最终答案识别与只读结果查回，缺少完成证据保持 unknown。
+- 本机 dsh 验收入口为 `pnpm accept:dsh`；合成 SDK / Server / DeviceHost fixture 不替代独立 Daemon 进程、设备或发行包验收。App 仅有 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证。
 
 ## v0.1.1 — App 图标更新
 
@@ -38,7 +43,7 @@
 - 持久执行身份、会话隔离、有界并行、结果查询与连接恢复不重派。
 - Codex 原生环境复用，经固定 ACPX / Codex ACP 执行、续接和只读查回。
 - 独立运行目录、离线 SDK、带来源和摘要的候选归档及 Linux server 镜像构建。
-- 既有公开版本的设备支持范围为 macOS arm64 + Codex。
+- 早期公开版本的设备支持范围为 macOS arm64 + Codex；当前发行和实验适配状态以支持范围页为准。
 
 ### 历史调整
 

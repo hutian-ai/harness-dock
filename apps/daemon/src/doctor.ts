@@ -10,10 +10,10 @@ export async function deviceDiagnostics(path: string): Promise<DeviceDiagnosticC
   const checks: DeviceDiagnosticCheck[] = [];
   try {
     const config = await readConfig(path), file = await stat(path);
-    checks.push({ check: 'configuration', state: process.platform !== 'win32' && (file.mode & 0o077) ? 'fail' : 'pass', detail: 'Device configuration parsed; it must be readable by its owner only.', next: 'Use chmod 600 on this private config; never paste its contents into support reports.' });
+    checks.push({ check: 'configuration', state: process.platform !== 'win32' && (file.mode & 0o077) ? 'fail' : 'pass', detail: 'Device configuration parsed; it must be readable by its owner only.', next: process.platform === 'win32' ? 'Keep the config and state under the Dock-created private NTFS directory; never paste config contents into support reports.' : 'Use chmod 600 on this private config; never paste its contents into support reports.' });
     const [major, minor] = process.versions.node.split('.').map(Number);
     checks.push({ check: 'runtime', state: major! > 22 || major === 22 && minor! >= 19 ? 'pass' : 'fail', detail: `Node ${process.versions.node}; requires 22.19+.` });
-    checks.push({ check: 'supported_device', state: process.platform === 'darwin' && process.arch === 'arm64' ? 'pass' : 'fail', detail: `${process.platform}/${process.arch}; device execution supports macOS arm64 (Codex; experimental dsh).` });
+    checks.push({ check: 'supported_device', state: process.platform === 'darwin' && process.arch === 'arm64' ? 'pass' : process.platform === 'win32' && process.arch === 'x64' ? 'unknown' : 'fail', detail: `${process.platform}/${process.arch}; macOS arm64 is supported; Windows x64 CLI/Codex/dsh is an experimental source candidate requiring native acceptance.` });
     checks.push({ check: 'workdir', state: (await stat(config.cwd)).isDirectory() ? 'pass' : 'fail', detail: 'Configured work directory exists.' });
     const status = await control(config, 'status');
     checks.push({ check: 'daemon', state: status ? 'pass' : 'fail', detail: status ? 'Owning daemon answered through its authenticated local socket.' : 'No owning daemon answered.', next: 'Start the installed entrypoint; status/start never imply model execution.' });

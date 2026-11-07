@@ -30,7 +30,7 @@ export async function installedVersion(path: string, packageName = '@openai/code
   } catch { /* Missing metadata does not imply a missing installation. */ }
   try {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-      ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SYSTEMROOT'].includes(key.toUpperCase())));
+      ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SYSTEMROOT', 'COMSPEC', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PATHEXT', 'WINDIR'].includes(key.toUpperCase())));
     const result = await runBoundedCommand(path, ['--version'], { env, signal, timeoutMs: 5_000, maxOutputCharacters: 4_096 });
     return result.exitCode === 0 ? result.stdout.trim().replace(packageName === '@openai/codex' ? /^codex-cli\s+/u : /^dsh\s+/u, '') : null;
   } catch { signal?.throwIfAborted(); /* Installation discovery is not protocol readiness. */ }
@@ -39,10 +39,10 @@ export async function installedVersion(path: string, packageName = '@openai/code
 
 export async function pathCandidates(command: string, environment: NodeJS.ProcessEnv, signal?: AbortSignal, loginShell = true): Promise<Candidate[]> {
   const names = process.platform === 'win32'
-    ? [command, ...(environment.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').map(extension => `${command}${extension.toLowerCase()}`)]
+    ? [...(environment.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean).map(extension => `${command}${extension.toLowerCase()}`), command]
     : [command];
   const found: Candidate[] = [];
-  for (const directory of (environment.PATH ?? '').split(delimiter).filter(Boolean)) {
+  for (const directory of (environment.PATH ?? environment.Path ?? '').split(delimiter).filter(Boolean)) {
     for (const name of names) {
       const path = resolve(directory, name);
       if (await usableFile(path)) found.push({ path, source: 'path' });

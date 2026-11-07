@@ -1,3 +1,4 @@
+import { protectWindowsDirectory, protectWindowsPipe } from './windows-security.ts';
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
@@ -71,6 +72,7 @@ export async function createMcpBridge<TDelivery = unknown>(
   input.signal.throwIfAborted();
   const directory = await mkdtemp(join(tmpdir(), "harness-dock-mcp-"));
   await chmod(directory, 0o700);
+  await protectWindowsDirectory(directory);
   const endpoint =
     process.platform === "win32"
       ? `\\\\.\\pipe\\harness-dock-${randomUUID()}`
@@ -103,7 +105,9 @@ export async function createMcpBridge<TDelivery = unknown>(
   const readyPromise = new Promise<void>((resolve) => {
     resolveReady = resolve;
   });
+  let ipcReady = false;
   const server = createServer((socket) => {
+    if (!ipcReady) { socket.destroy(); return; }
     if (input.signal.aborted || sockets.size >= 4) {
       socket.destroy();
       return;
@@ -236,7 +240,9 @@ export async function createMcpBridge<TDelivery = unknown>(
       server.once("error", reject);
       server.listen(endpoint, resolve);
     });
-    if (process.platform !== "win32") await chmod(endpoint, 0o600);
+    if (process.platform === "win32") await protectWindowsPipe(endpoint);
+    else await chmod(endpoint, 0o600);
+    ipcReady = true;
   } catch (error) {
     input.signal.removeEventListener("abort", abort);
     server.close();

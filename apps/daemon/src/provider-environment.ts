@@ -1,7 +1,7 @@
 import type { ProviderOverride } from '@harness-dock/drivers';
 import { resolveProviderProxy, type ProxyDefaults } from './provider-proxy.ts';
 
-const baseVariables = new Set(['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT']);
+const baseVariables = new Set(['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT', 'COMSPEC', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PATHEXT', 'WINDIR', 'PROGRAMFILES', 'PROGRAMFILES(X86)']);
 const discoveryVariables = new Set(['CODEX_HOME', 'CODEX_CLI_PATH', 'DSH_HOME', 'NVM_DIR']);
 
 /** Proxy defaults are selected separately; other dependencies remain explicit local choices. */
