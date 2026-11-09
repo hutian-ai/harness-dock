@@ -1,11 +1,14 @@
 import { join, toNamespacedPath } from 'node:path';
 import { execa, ExecaError } from 'execa';
 
-// Paths travel over stdin, never as PowerShell source or interpolated command arguments.
+// Pass the request as data in the helper's environment, never as PowerShell
+// source. This also works for background processes without console input.
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
-[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
-$inputData = [Console]::In.ReadLine() | ConvertFrom-Json
+[Console]::Error.WriteLine('windows_security_phase:script')
+$inputData = $env:HARNESS_DOCK_WINDOWS_SECURITY_REQUEST | ConvertFrom-Json
+$env:HARNESS_DOCK_WINDOWS_SECURITY_REQUEST = $null
+[Console]::Error.WriteLine('windows_security_phase:identity')
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $identity.User
 if ($inputData.operation -eq 'pipe') {
@@ -23,6 +26,7 @@ public static class DockPipeAcl {
   $result = [DockPipeAcl]::Set($inputData.path, 1, [uint32]2147483652, [IntPtr]::Zero, [IntPtr]::Zero, $bytes, [IntPtr]::Zero)
   if ($result -ne 0) { throw 'windows_pipe_acl_failed' }
 } else {
+  [Console]::Error.WriteLine('windows_security_phase:path')
   $item = Get-Item -LiteralPath $inputData.path -Force
   if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'windows_private_path_is_link' }
   if ($inputData.operation -eq 'protect') {
@@ -69,12 +73,15 @@ async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): P
   try {
     await execa(join(shell, 'powershell.exe'),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { input: JSON.stringify({ operation, path: operation === 'pipe' ? path : toNamespacedPath(path) }) + '\n',
-        cwd: systemRoot, env: { PSModulePath: join(shell, 'Modules') }, timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
+      { stdin: 'ignore', cwd: systemRoot, env: {
+        PSModulePath: join(shell, 'Modules'),
+        HARNESS_DOCK_WINDOWS_SECURITY_REQUEST: JSON.stringify({ operation, path: operation === 'pipe' ? path : toNamespacedPath(path) }),
+      }, timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
   } catch (error) {
     // Retain a category for startup logs, never raw PowerShell output.
     const stderr = error instanceof ExecaError && typeof error.stderr === 'string' ? error.stderr : '';
-    const category = error instanceof ExecaError && error.timedOut ? 'timeout'
+    const phase = [...stderr.matchAll(/^windows_security_phase:(script|identity|path)$/gmu)].at(-1)?.[1] ?? 'launch';
+    const category = error instanceof ExecaError && error.timedOut ? `timeout_${phase}`
       : stderr.match(/\bwindows_(?:private_path_(?:is_link|owner_mismatch|permissions)|private_directory_required|pipe_acl_failed)\b/u)?.[0]
         ?? stderr.match(/FullyQualifiedErrorId\s*:\s*([\w.,+]{1,100})/u)?.[1] ?? 'unknown';
     throw new Error(`windows_${operation === 'pipe' ? 'pipe_acl' : 'private_path'}_unavailable`,
