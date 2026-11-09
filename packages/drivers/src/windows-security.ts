@@ -6,7 +6,8 @@ const script = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
 $inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$sid = $identity.User
 if ($inputData.operation -eq 'pipe') {
   Add-Type -TypeDefinition @'
 using System;
@@ -29,8 +30,8 @@ public static class DockPipeAcl {
     $acl = New-Object System.Security.AccessControl.DirectorySecurity
     $acl.SetOwner($sid)
     $acl.SetAccessRuleProtection($true, $false)
-    foreach ($identity in @($sid.Value, 'S-1-5-18')) {
-      $principal = New-Object System.Security.Principal.SecurityIdentifier($identity)
+    foreach ($allowedSid in @($sid.Value, 'S-1-5-18')) {
+      $principal = New-Object System.Security.Principal.SecurityIdentifier($allowedSid)
       $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
       $acl.AddAccessRule($rule)
     }
@@ -39,7 +40,16 @@ public static class DockPipeAcl {
   # Use .NET directly: a daemon launched from PowerShell 7 can inherit a
   # PSModulePath that prevents Windows PowerShell from loading Get/Set-Acl.
   $actual = if ($item.PSIsContainer) { [IO.Directory]::GetAccessControl($inputData.path) } else { [IO.File]::GetAccessControl($inputData.path) }
-  if ($actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'windows_private_path_owner_mismatch' }
+  $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+  if ($owner -ne $sid.Value) {
+    # Elevated tokens may create child files with Administrators as owner.
+    # That group is already trusted by the DACL check below. Require the
+    # current token to hold the group, and still require its user SID's ACE.
+    $currentPrincipal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+    if ($owner -ne 'S-1-5-32-544' -or -not $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+      throw 'windows_private_path_owner_mismatch'
+    }
+  }
   $ownerAllowed = $false
   foreach ($rule in $actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
     if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -eq $sid.Value) { $ownerAllowed = $true }

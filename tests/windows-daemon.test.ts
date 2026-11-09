@@ -29,7 +29,7 @@ for await (const line of createInterface({input:process.stdin})) {
   process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');
 }`);
   for (const agent of ['codex', 'dsh'] as const) {
-    const stateDir = join(root, 'nested-device-state'.repeat(5), 'session-identity'.repeat(5), agent);
+    const stateDir = join(root, 'nested-device-state'.repeat(8), 'session-identity'.repeat(8), agent);
     assert.ok(stateDir.length > 260);
     const factory = () => agent === 'codex'
       ? createCodexRuntime({ cwd: root, codexHome: root, stateDir }, [process.execPath, fixture])
@@ -48,7 +48,7 @@ for await (const line of createInterface({input:process.stdin})) {
 test('Windows managed bundled runtime starts beyond MAX_PATH and preserves identity through upgrade and rollback', { skip: !windows, timeout: 240_000 }, async t => {
   await mkdir('.local', { recursive: true });
   const root = await mkdtemp(resolve('.local/windows-install-'));
-  const { configPath } = await initializeDevice({ home: join(root, 'device-with-a-long-installation-path'.repeat(2)), cwd: root });
+  const { configPath } = await initializeDevice({ home: join(root, 'device-with-a-long-installation-path'.repeat(4)), cwd: root });
   const config = await readConfig(configPath), install = installationRoot(configPath);
   t.after(async () => {
     await control(config, 'stop');
