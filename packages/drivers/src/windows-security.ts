@@ -6,12 +6,12 @@ import { execa, ExecaError } from 'execa';
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::Error.WriteLine('windows_security_phase:script')
-$inputData = $env:HARNESS_DOCK_WINDOWS_SECURITY_REQUEST | ConvertFrom-Json
-$env:HARNESS_DOCK_WINDOWS_SECURITY_REQUEST = $null
+$operation = [Environment]::GetEnvironmentVariable('HARNESS_DOCK_WINDOWS_SECURITY_OPERATION')
+$path = [Environment]::GetEnvironmentVariable('HARNESS_DOCK_WINDOWS_SECURITY_PATH')
 [Console]::Error.WriteLine('windows_security_phase:identity')
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $identity.User
-if ($inputData.operation -eq 'pipe') {
+if ($operation -eq 'pipe') {
   Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -20,36 +20,37 @@ public static class DockPipeAcl {
   public static extern uint Set(string name, int kind, uint information, IntPtr owner, IntPtr group, byte[] dacl, IntPtr sacl);
 }
 '@
-  $descriptor = New-Object System.Security.AccessControl.RawSecurityDescriptor("D:P(D;;GA;;;NU)(A;;GA;;;$($sid.Value))(A;;GA;;;SY)")
-  $bytes = New-Object byte[] $descriptor.DiscretionaryAcl.BinaryLength
+  $descriptor = [System.Security.AccessControl.RawSecurityDescriptor]::new("D:P(D;;GA;;;NU)(A;;GA;;;$($sid.Value))(A;;GA;;;SY)")
+  $bytes = [byte[]]::new($descriptor.DiscretionaryAcl.BinaryLength)
   $descriptor.DiscretionaryAcl.GetBinaryForm($bytes, 0)
-  $result = [DockPipeAcl]::Set($inputData.path, 1, [uint32]2147483652, [IntPtr]::Zero, [IntPtr]::Zero, $bytes, [IntPtr]::Zero)
+  $result = [DockPipeAcl]::Set($path, 1, [uint32]2147483652, [IntPtr]::Zero, [IntPtr]::Zero, $bytes, [IntPtr]::Zero)
   if ($result -ne 0) { throw 'windows_pipe_acl_failed' }
 } else {
   [Console]::Error.WriteLine('windows_security_phase:path')
-  $item = Get-Item -LiteralPath $inputData.path -Force
-  if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'windows_private_path_is_link' }
-  if ($inputData.operation -eq 'protect') {
-    if (-not $item.PSIsContainer) { throw 'windows_private_directory_required' }
-    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+  $attributes = [IO.File]::GetAttributes($path)
+  if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'windows_private_path_is_link' }
+  $isDirectory = $attributes -band [IO.FileAttributes]::Directory
+  if ($operation -eq 'protect') {
+    if (-not $isDirectory) { throw 'windows_private_directory_required' }
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
     $acl.SetOwner($sid)
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($allowedSid in @($sid.Value, 'S-1-5-18')) {
-      $principal = New-Object System.Security.Principal.SecurityIdentifier($allowedSid)
-      $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+      $principal = [System.Security.Principal.SecurityIdentifier]::new($allowedSid)
+      $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
       $acl.AddAccessRule($rule)
     }
-    [IO.Directory]::SetAccessControl($inputData.path, $acl)
+    [IO.Directory]::SetAccessControl($path, $acl)
   }
   # Use .NET directly: a daemon launched from PowerShell 7 can inherit a
   # PSModulePath that prevents Windows PowerShell from loading Get/Set-Acl.
-  $actual = if ($item.PSIsContainer) { [IO.Directory]::GetAccessControl($inputData.path) } else { [IO.File]::GetAccessControl($inputData.path) }
+  $actual = if ($isDirectory) { [IO.Directory]::GetAccessControl($path) } else { [IO.File]::GetAccessControl($path) }
   $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
   if ($owner -ne $sid.Value) {
     # Elevated tokens may create child files with Administrators as owner.
     # That group is already trusted by the DACL check below. Require the
     # current token to hold the group, and still require its user SID's ACE.
-    $currentPrincipal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+    $currentPrincipal = [System.Security.Principal.WindowsPrincipal]::new($identity)
     if ($owner -ne 'S-1-5-32-544' -or -not $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
       throw 'windows_private_path_owner_mismatch'
     }
@@ -75,7 +76,8 @@ async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): P
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
       { stdin: 'ignore', cwd: systemRoot, env: {
         PSModulePath: join(shell, 'Modules'),
-        HARNESS_DOCK_WINDOWS_SECURITY_REQUEST: JSON.stringify({ operation, path: operation === 'pipe' ? path : toNamespacedPath(path) }),
+        HARNESS_DOCK_WINDOWS_SECURITY_OPERATION: operation,
+        HARNESS_DOCK_WINDOWS_SECURITY_PATH: operation === 'pipe' ? path : toNamespacedPath(path),
       }, timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
   } catch (error) {
     // Retain a category for startup logs, never raw PowerShell output.
