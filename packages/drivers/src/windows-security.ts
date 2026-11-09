@@ -12,18 +12,22 @@ $path = [Environment]::GetEnvironmentVariable('HARNESS_DOCK_WINDOWS_SECURITY_PAT
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $identity.User
 if ($operation -eq 'pipe') {
-  Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class DockPipeAcl {
-  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, EntryPoint = "SetNamedSecurityInfoW")]
-  public static extern uint Set(string name, int kind, uint information, IntPtr owner, IntPtr group, byte[] dacl, IntPtr sacl);
-}
-'@
+  [Console]::Error.WriteLine('windows_security_phase:pipe')
+  # Bind the Windows API in memory so detached daemons need neither PowerShell
+  # module loading nor the C# compiler used by Add-Type on Windows PowerShell.
+  $assemblyName = [Reflection.AssemblyName]::new('DockPipeAcl')
+  $assembly = [AppDomain]::CurrentDomain.DefineDynamicAssembly($assemblyName, [Reflection.Emit.AssemblyBuilderAccess]::Run)
+  $module = $assembly.DefineDynamicModule('DockPipeAcl')
+  $type = $module.DefineType('DockPipeAcl', [Reflection.TypeAttributes]::Public)
+  $attributes = [Reflection.MethodAttributes]'Public,Static,PinvokeImpl'
+  $parameters = [type[]]@([string], [int], [uint32], [IntPtr], [IntPtr], [byte[]], [IntPtr])
+  $method = $type.DefinePInvokeMethod('SetNamedSecurityInfoW', 'advapi32.dll', $attributes, [Reflection.CallingConventions]::Standard, [uint32], $parameters, [Runtime.InteropServices.CallingConvention]::Winapi, [Runtime.InteropServices.CharSet]::Unicode)
+  $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+  $native = $type.CreateType()
   $descriptor = [System.Security.AccessControl.RawSecurityDescriptor]::new("D:P(D;;GA;;;NU)(A;;GA;;;$($sid.Value))(A;;GA;;;SY)")
   $bytes = [byte[]]::new($descriptor.DiscretionaryAcl.BinaryLength)
   $descriptor.DiscretionaryAcl.GetBinaryForm($bytes, 0)
-  $result = [DockPipeAcl]::Set($path, 1, [uint32]2147483652, [IntPtr]::Zero, [IntPtr]::Zero, $bytes, [IntPtr]::Zero)
+  $result = $native::SetNamedSecurityInfoW($path, 1, [uint32]2147483652, [IntPtr]::Zero, [IntPtr]::Zero, $bytes, [IntPtr]::Zero)
   if ($result -ne 0) { throw 'windows_pipe_acl_failed' }
 } else {
   [Console]::Error.WriteLine('windows_security_phase:path')
@@ -82,7 +86,7 @@ async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): P
   } catch (error) {
     // Retain a category for startup logs, never raw PowerShell output.
     const stderr = error instanceof ExecaError && typeof error.stderr === 'string' ? error.stderr : '';
-    const phase = [...stderr.matchAll(/^windows_security_phase:(script|identity|path)$/gmu)].at(-1)?.[1] ?? 'launch';
+    const phase = [...stderr.matchAll(/^windows_security_phase:(script|identity|path|pipe)$/gmu)].at(-1)?.[1] ?? 'launch';
     const category = error instanceof ExecaError && error.timedOut ? `timeout_${phase}`
       : stderr.match(/\bwindows_(?:private_path_(?:is_link|owner_mismatch|permissions)|private_directory_required|pipe_acl_failed)\b/u)?.[0]
         ?? stderr.match(/FullyQualifiedErrorId\s*:\s*([\w.,+]{1,100})/u)?.[1] ?? 'unknown';
