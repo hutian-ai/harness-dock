@@ -96,5 +96,8 @@ try {
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
+  if (process.argv.includes('--background-log') && error instanceof Error && error.cause instanceof Error
+      && /^windows_security_detail:(?:assert|protect|pipe):[\w.,+]{1,100}$/u.test(error.cause.message))
+    console.error(error.cause.message);
   process.exitCode = 1;
 }

@@ -1,5 +1,5 @@
 import { join, toNamespacedPath } from 'node:path';
-import { execa } from 'execa';
+import { execa, ExecaError } from 'execa';
 
 // Paths travel over stdin, never as PowerShell source or interpolated command arguments.
 const script = String.raw`
@@ -64,14 +64,21 @@ public static class DockPipeAcl {
 
 async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): Promise<void> {
   if (process.platform !== 'win32') return;
+  const systemRoot = process.env.SYSTEMROOT ?? 'C:\\Windows';
+  const shell = join(systemRoot, 'System32/WindowsPowerShell/v1.0');
   try {
-    await execa(join(process.env.SYSTEMROOT ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+    await execa(join(shell, 'powershell.exe'),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
       { input: JSON.stringify({ operation, path: operation === 'pipe' ? path : toNamespacedPath(path) }),
-        cwd: process.env.SYSTEMROOT ?? 'C:\\Windows', timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
-  } catch {
-    // Do not expose raw PowerShell output, local paths or user SIDs in diagnostics.
-    throw new Error(`windows_${operation === 'pipe' ? 'pipe_acl' : 'private_path'}_unavailable`);
+        cwd: systemRoot, env: { PSModulePath: join(shell, 'Modules') }, timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
+  } catch (error) {
+    // Retain a category for startup logs, never raw PowerShell output.
+    const stderr = error instanceof ExecaError && typeof error.stderr === 'string' ? error.stderr : '';
+    const category = error instanceof ExecaError && error.timedOut ? 'timeout'
+      : stderr.match(/\bwindows_(?:private_path_(?:is_link|owner_mismatch|permissions)|private_directory_required|pipe_acl_failed)\b/u)?.[0]
+        ?? stderr.match(/FullyQualifiedErrorId\s*:\s*([\w.,+]{1,100})/u)?.[1] ?? 'unknown';
+    throw new Error(`windows_${operation === 'pipe' ? 'pipe_acl' : 'private_path'}_unavailable`,
+      { cause: new Error(`windows_security_detail:${operation}:${category}`) });
   }
 }
 
