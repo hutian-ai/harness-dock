@@ -17,5 +17,7 @@ swift scripts/render-brand.swift design/brand/jiezhou.svg apps/device-panel/Reso
 ```
 
 `scripts/panel-icon.ts` packages `AppIcon.png` into standard macOS icon sizes.
+`apps/gpui-panel/build.rs` embeds the same artwork at standard Windows ICO sizes
+into the Windows executable, including the taskbar and window-class icon.
 Both client frontends use the same transparent mark and tray template; neither
 removes a background at runtime. The SVG is also used by the documentation site.

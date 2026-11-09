@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { connect } from "node:net";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import test from "node:test";
 import { Client, ProtocolError } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -27,6 +27,7 @@ test(
   async () => {
     const controller = new AbortController();
     const calls: McpToolCall[] = [];
+    const invocations = new EventEmitter();
     let release: ((value: McpToolResult) => void) | undefined;
     const bridge = await createMcpBridge({
       tools: MCP_TEST_TOOLS,
@@ -36,6 +37,7 @@ test(
       signal: controller.signal,
       onToolCall: async (call) => {
         calls.push(call);
+        invocations.emit("call");
         return new Promise((resolve) => {
           release = resolve;
         });
@@ -53,21 +55,24 @@ test(
       env: Object.fromEntries(descriptor.env.map((entry) => [entry.name, entry.value])),
       stderr: "pipe",
     });
-    transport.stderr?.on("data", () => undefined);
+    let stderr = "";
+    transport.stderr?.on("data", chunk => { stderr = (stderr + String(chunk)).slice(-8192); });
     const client = new Client({ name: "harness-dock-integration-test", version: "1.0.0" });
     try {
-      await client.connect(transport);
+      await client.connect(transport).catch(error => { throw new Error(`MCP stdio startup failed: ${stderr}`, { cause: error }); });
       const listed = await client.listTools();
       assert.deepEqual(
         listed.tools.map((tool) => tool.name),
         ["synthetic_search"],
       );
       await bridge.ready;
+      const firstCalled = once(invocations, "call");
       const result = client.callTool({
         name: "synthetic_search",
         arguments: { query: "synthetic" },
       });
       await client.ping();
+      await firstCalled;
       assert.equal(calls.length, 1);
       assert.deepEqual(calls[0]!.arguments, { query: "synthetic" });
       release?.({ content: { found: "synthetic-only" } });
@@ -80,11 +85,14 @@ test(
       await assert.rejects(client.callTool({ name: "shell", arguments: {} }), ProtocolError);
       assert.equal(calls.length, 1);
       // Reuse the same negotiated MCP connection, but never the old invocation callback.
+      const secondCalled = once(invocations, "call");
       const late = assert.rejects(
         client.callTool({ name: "synthetic_search", arguments: { query: "late" } }),
         ProtocolError,
       );
       await client.ping();
+      // Ping is independent of tool dispatch and is not a callback-order barrier.
+      await secondCalled;
       assert.equal(calls.length, 2);
       const detached = bridge.unbind();
       assert.throws(
@@ -131,6 +139,8 @@ test(
       });
       controller.abort();
       await closed;
+    } catch (error) {
+      throw new Error(`MCP stdio test failed: ${stderr}`, { cause: error });
     } finally {
       await client.close();
       await bridge.close();

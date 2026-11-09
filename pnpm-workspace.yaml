@@ -8,4 +8,5 @@ allowBuilds:
   esbuild: true
 patchedDependencies:
   '@agentclientprotocol/codex-acp@2.3.0': patches/@agentclientprotocol__codex-acp@2.3.0.patch
+  '@openclaw/fs-safe@0.26.13': patches/@openclaw__fs-safe@0.26.13.patch
   acpx@0.21.1: patches/acpx@0.21.1.patch

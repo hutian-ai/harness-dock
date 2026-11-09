@@ -17,7 +17,7 @@ test('background command execution survives removal of the launching directory',
   await mkdir(launcher); await mkdir(release);
   const { configPath } = await initializeDevice({ home: join(root, 'device'), cwd: root });
   const config = await readConfig(configPath);
-  t.after(async () => { await control(config, 'stop'); await rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await control(config, 'stop'); await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); });
   const entrypoint = join(release, 'daemon.mjs');
   // Exercise the actual authenticated background boundary with a fixed subprocess,
   // without discovering a native Harness or sending a model request.

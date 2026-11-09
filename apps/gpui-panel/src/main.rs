@@ -3,6 +3,8 @@ mod app_assets;
 mod bridge;
 mod panel;
 mod theme;
+#[cfg(target_os = "windows")]
+mod window_visibility;
 
 #[cfg(not(target_os = "macos"))]
 use gpui_kit::component::TitleBar;
@@ -35,6 +37,15 @@ enum Open {
     Connection,
     #[cfg(target_os = "macos")]
     Attention,
+}
+
+fn activate_main_window(window: &mut Window, cx: &mut App) {
+    #[cfg(target_os = "windows")]
+    if window_visibility::show(window).is_err() {
+        eprintln!("window_show_failed");
+    }
+    window.activate_window();
+    cx.activate(true);
 }
 
 fn main() {
@@ -75,25 +86,18 @@ fn main() {
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    if cfg!(target_os = "macos") {
-                        size(px(1100.), px(740.))
-                    } else {
-                        size(px(620.), px(460.))
-                    },
+                    size(px(1100.), px(740.)),
                     cx,
                 ))),
-                #[cfg(target_os = "macos")]
                 window_min_size: Some(size(px(536. + theme::metrics::SIDEBAR_WIDTH), px(400.))),
-                #[cfg(not(target_os = "macos"))]
-                window_min_size: Some(size(px(500.), px(400.))),
                 ..frame
             },
             cx,
             move |window, cx| {
                 let view = cx.new(|cx| Panel::new(bridge, config, window, cx));
                 let closing = view.clone();
-                window.on_window_should_close(cx, move |_, cx| {
-                    closing.update(cx, |view, cx| view.hide(cx));
+                window.on_window_should_close(cx, move |window, cx| {
+                    closing.update(cx, |view, cx| view.hide(window, cx));
                     false
                 });
                 let observing = view.clone();
@@ -112,7 +116,14 @@ fn main() {
         let quitting = view.clone();
         cx.on_action(move |_: &QuitPanel, cx| quitting.update(cx, |view, cx| view.quit(cx)));
         let hiding = view.clone();
-        cx.on_action(move |_: &HidePanel, cx| hiding.update(cx, |view, cx| view.hide(cx)));
+        cx.on_action(move |_: &HidePanel, cx| {
+            let hiding = hiding.clone();
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, cx| {
+                    hiding.update(cx, |view, cx| view.hide(window, cx));
+                });
+            });
+        });
         let refreshing = view.clone();
         cx.on_action(move |_: &RefreshPanel, cx| {
             refreshing.update(cx, |view, cx| view.refresh(cx))
@@ -244,11 +255,10 @@ fn main() {
             ((36 - mark.height()) / 2).into(),
         );
         let icon = tray_icon::Icon::from_rgba(canvas.into_raw(), 36, 36).expect("tray icon");
-        let builder = if cfg!(target_os = "macos") {
-            TrayIconBuilder::new().with_icon_templated(icon)
-        } else {
-            TrayIconBuilder::new().with_icon(icon)
-        };
+        #[cfg(target_os = "macos")]
+        let builder = TrayIconBuilder::new().with_icon_templated(icon);
+        #[cfg(not(target_os = "macos"))]
+        let builder = TrayIconBuilder::new().with_icon(icon);
         let tray = builder
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(cfg!(target_os = "macos"))
@@ -258,6 +268,7 @@ fn main() {
         if tray.is_err() {
             eprintln!("tray_unavailable");
         }
+        view.update(cx, |view, _| view.tray_available = tray.is_ok());
         cx.activate(true);
         cx.spawn(async move |cx| {
             let tray = tray;
@@ -271,6 +282,23 @@ fn main() {
                     .await;
                 #[cfg(target_os = "macos")]
                 let mut menu_opened = false;
+                #[cfg(not(target_os = "macos"))]
+                if popup.is_some()
+                    && (view.read_with(cx, |view, _| !view.tray_visible)
+                        || events
+                            .borrow()
+                            .front()
+                            .is_some_and(|event| !matches!(event, Open::Tray)))
+                {
+                    if let Some(open) = popup.take() {
+                        let _ = open.update(cx, |_, window, _| window.remove_window());
+                    }
+                    let _ = view.update(cx, |view, cx| {
+                        view.tray_visible = false;
+                        cx.notify();
+                    });
+                    dismissed.set(Some(Instant::now()));
+                }
                 while let Ok(event) = TrayIconEvent::receiver().try_recv() {
                     #[cfg(target_os = "macos")]
                     if matches!(
@@ -352,7 +380,9 @@ fn main() {
                             let _ = view.update(cx, |view, cx| view.refresh(cx));
                         }
                         Some(2) => {
-                            let _ = view.update(cx, |view, cx| view.hide(cx));
+                            let _ = handle.update(cx, |_, window, cx| {
+                                view.update(cx, |view, cx| view.hide(window, cx));
+                            });
                         }
                         Some(3) => {
                             let _ = view.update(cx, |view, cx| view.quit(cx));
@@ -398,8 +428,7 @@ fn main() {
                             let _ = view.update(cx, |view, _| view.tray_visible = false);
                         }
                         let _ = handle.update(cx, |_, window, cx| {
-                            window.activate_window();
-                            cx.activate(true);
+                            activate_main_window(window, cx);
                         });
                         let _ = view.update(cx, |view, cx| {
                             view.visible = true;

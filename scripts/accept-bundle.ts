@@ -35,7 +35,7 @@ async function checkNotices(root: string): Promise<void> {
 }
 for (const target of ['daemon', 'controller', 'server']) await checkNotices(join(directory, target));
 const driverRequire = createRequire(join(directory, 'daemon/node_modules/@harness-dock/drivers/package.json'));
-for (const [dependency, patch] of [['acpx', 'acpx@0.21.1.patch'], ['@agentclientprotocol/codex-acp', '@agentclientprotocol__codex-acp@2.3.0.patch']]) {
+for (const [dependency, patch] of [['acpx', 'acpx@0.21.1.patch'], ['@agentclientprotocol/codex-acp', '@agentclientprotocol__codex-acp@2.3.0.patch'], ['@openclaw/fs-safe', '@openclaw__fs-safe@0.26.13.patch']]) {
   const packageDirectory = dirname(driverRequire.resolve(`${dependency}/package.json`));
   execFileSync('git', ['apply', '--reverse', '--check', join(directory, 'daemon/patches', patch!)], { cwd: packageDirectory, stdio: 'inherit' });
 }

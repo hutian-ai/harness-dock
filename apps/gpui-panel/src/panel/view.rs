@@ -1,5 +1,3 @@
-#[cfg(not(target_os = "macos"))]
-use super::ui::list_group;
 use super::ui::{button, page_title, section_title};
 use super::*;
 use crate::theme::{Appearance, metrics};
@@ -19,8 +17,7 @@ use gpui_kit::component::{
     v_flex,
 };
 #[cfg(not(target_os = "macos"))]
-use gpui_kit::component::{TitleBar, toolbar::Toolbar};
-#[cfg(target_os = "macos")]
+use gpui_kit::component::TitleBar;
 use gpui_kit::component::{
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     sidebar::{Sidebar, SidebarItem, SidebarMenu, SidebarMenuItem},
@@ -32,7 +29,6 @@ mod connect;
 mod dashboard;
 mod diagnostics;
 pub(super) mod home;
-#[cfg(target_os = "macos")]
 mod navigation;
 mod provider;
 mod settings;
@@ -126,7 +122,6 @@ impl Panel {
         } else {
             page
         };
-        #[cfg(target_os = "macos")]
         if page != self.page && !matches!(page, Page::Home | Page::Settings) {
             self.detail_scroll.set_offset(Point::default());
         }
@@ -320,7 +315,6 @@ impl Panel {
                 }
             }))
     }
-    #[cfg(target_os = "macos")]
     fn navigation_sidebar(
         &self,
         window: &mut Window,
@@ -415,7 +409,6 @@ impl Panel {
                     .child(settings.render("settings-navigation", window, cx)),
             )
     }
-    #[cfg(target_os = "macos")]
     fn dashboard_header(&self, cx: &mut Context<Self>) -> Div {
         let trail = Breadcrumb::new();
         let trail = match self.page {
@@ -445,51 +438,6 @@ impl Panel {
             .border_color(cx.theme().border)
             .child(trail.font_weight(FontWeight::MEDIUM))
             .children((self.page == Page::Home).then(|| self.overview_refresh(cx).small()))
-    }
-    #[cfg(not(target_os = "macos"))]
-    fn window_toolbar(&self, cx: &mut Context<Self>) -> TitleBar {
-        let toolbar = Toolbar::new("main-toolbar")
-            .with_size(gpui_kit::component::Size::Medium)
-            .w_full()
-            .pr_3();
-        let toolbar = if self.page == Page::Home {
-            toolbar
-                .content(
-                    h_flex()
-                        .gap_2()
-                        .child(img(brand()).size(px(20.)).flex_shrink_0())
-                        .child(section_title("界舟")),
-                )
-                .content(div().flex_1())
-                .child(self.overview_refresh(cx))
-                .child(
-                    Button::new("open-settings")
-                        .ghost()
-                        .icon(IconName::Settings2)
-                        .tooltip("设置")
-                        .accessibility_label("设置")
-                        .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx))),
-                )
-        } else if self.page == Page::Settings {
-            toolbar
-                .child(
-                    Button::new("back-home")
-                        .ghost()
-                        .icon(IconName::ChevronLeft)
-                        .tooltip("返回本机概览")
-                        .accessibility_label("返回本机概览")
-                        .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Home, cx))),
-                )
-                .content(section_title("设置"))
-        } else {
-            toolbar.child(
-                button("back-home", "本机概览")
-                    .ghost()
-                    .icon(IconName::ChevronLeft)
-                    .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Home, cx))),
-            )
-        };
-        TitleBar::new().child(toolbar)
     }
     fn technical_value(&self, id: &str, label: &str, value: String, cx: &App) -> AnyElement {
         if value.is_empty() {
@@ -535,14 +483,13 @@ impl Render for Panel {
             .text_color(p.foreground)
             .text_sm();
         #[cfg(not(target_os = "macos"))]
-        let root = root.child(self.window_toolbar(cx));
+        let root = root.child(TitleBar::new().child(Label::new("界舟 · Harness Dock")));
         let body = div()
             .flex_1()
             .min_h_0()
             .px(px(metrics::PAGE_PADDING))
             .py(px(metrics::PAGE_PADDING))
             .child(div().w_full().max_w(px(metrics::CONTENT_WIDTH)).child(body));
-        #[cfg(target_os = "macos")]
         let root = {
             let scroll = match self.page {
                 Page::Home => &self.overview_scroll,
@@ -576,8 +523,6 @@ impl Render for Panel {
                 )
                 .child(self.dashboard_footer(cx))
         };
-        #[cfg(not(target_os = "macos"))]
-        let root = root.child(body.overflow_y_scrollbar().id(content_id));
         root
     }
 }

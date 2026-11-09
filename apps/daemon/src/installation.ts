@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, cp, lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep, toNamespacedPath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { assertWindowsPrivatePath, protectWindowsDirectory } from '@harness-dock/drivers';
@@ -114,7 +114,11 @@ async function stage(root: string, bundle: string, runtime: string): Promise<Rel
   const { id } = await verifyRelease(source);
   const selectedRuntime = await realpath(runtime), target = join(root, 'releases', id);
   // A packaged runtime moves into the immutable release with the daemon, independent of the app's location.
-  const release = { id, runtime: within(source, selectedRuntime) ? join(target, relative(source, selectedRuntime)) : selectedRuntime };
+  const installedRuntime = within(source, selectedRuntime) ? join(target, relative(source, selectedRuntime)) : selectedRuntime;
+  // CreateProcess cannot resolve a long unprefixed executable path. Keep this
+  // exact spelling in the owner record because Node also reports it as execPath.
+  const release = { id, runtime: process.platform === 'win32' && installedRuntime.length >= 248
+    ? toNamespacedPath(installedRuntime) : installedRuntime };
   await mkdir(join(root, 'releases'), { recursive: true, mode: 0o700 });
   try { await lstat(target); }
   catch (error) {

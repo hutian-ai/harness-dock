@@ -1,2 +1,2 @@
 # Preserve upstream notice bytes, including their original end-of-file spacing.
-third-party/rust-notices/** -whitespace
+third-party/** -text -whitespace

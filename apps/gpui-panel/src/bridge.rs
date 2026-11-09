@@ -226,7 +226,13 @@ pub fn message(code: &str) -> &'static str {
         "invalid_device_pairing" | "pairing_required" => {
             "无法识别此配对文件。请重新获取服务器管理员导出的配对文件或邀请链接。"
         }
-        "helper_unavailable" => "应用运行文件不完整，请使用完整的 Harness Dock.app。",
+        "helper_unavailable" => {
+            if cfg!(windows) {
+                "应用运行文件不完整，请将 HarnessDock.exe 与完整的 resources 目录放在一起。"
+            } else {
+                "应用运行文件不完整，请使用完整的 Harness Dock.app。"
+            }
+        }
         "helper_timeout" => "读取状态超时，请刷新确认；不会自动重试写操作。",
         "self_test_unsupported" => "当前连接服务不支持此测试。请先运行连接诊断。",
         "self_test_storage_unavailable" | "invalid_panel_preferences" => {

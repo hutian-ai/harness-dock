@@ -150,16 +150,9 @@ export class DshHost<TDelivery = unknown> {
       const handle = await runtime.ensureSession({ sessionKey: 'capability-probe', agent: 'dsh', mode: 'persistent', cwd: environment.cwd });
       signal.throwIfAborted();
       const status = await runtime.getStatus({ handle, signal });
-      const discovered = inspection(status.details?.configOptions, initialization);
-      for (const model of discovered.models) {
-        signal.throwIfAborted();
-        if (model.id === discovered.currentModelId) continue;
-        const selected = await runtime.setConfigOption({ handle, key: 'model', value: model.id, signal });
-        const configured = inspection(selected.configOptions, initialization);
-        model.efforts = configured.models.find(candidate => candidate.id === model.id)?.efforts ?? [];
-      }
-      if (discovered.models.length > 1) await runtime.setConfigOption({ handle, key: 'model', value: discovered.currentModelId!, signal });
-      return discovered;
+      // Model selection is a native write, not a discovery operation. Only
+      // the selected model advertises its effort choices in this response.
+      return inspection(status.details?.configOptions, initialization);
     } finally { signal.removeEventListener('abort', abort); await runtime.shutdown(); }
   }
   #observe(direction: string, value: unknown): void {

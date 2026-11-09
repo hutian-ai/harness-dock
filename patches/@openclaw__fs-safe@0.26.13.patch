@@ -1,0 +1,35 @@
+diff --git a/dist/temp-target.js b/dist/temp-target.js
+index 3bc4953066a5d7b127358b1db66fd1e94ebf730f..db0ee67ffbbf50df1b9f7a1e5338bfb4834ee1d0 100644
+--- a/dist/temp-target.js
++++ b/dist/temp-target.js
+@@ -9,6 +9,12 @@ import { resolveSecureTempRoot } from "./secure-temp-dir.js";
+ import { hasNodeErrorCode } from "./path.js";
+ import { registerTempPathForExit } from "./temp-cleanup.js";
+ import { assertNoWindowsPathAlias, resolvePathPreservingWindowsRoot, } from "./windows-path-alias.js";
++// Only the OS call receives an extended Windows path. Return the original
++// namespace so the existing alias, ancestry and cleanup identity checks still run.
++async function makeTempDirectory(prefix) {
++    const created = await fs.mkdtemp(path.toNamespacedPath(prefix));
++    return path.join(path.dirname(prefix), path.basename(created));
++}
+ const HYPHEN_CHAR_CODE = 0x2d;
+ const DOT_CHAR_CODE = 0x2e;
+ const NUMBER_ZERO_CHAR_CODE = 0x30;
+@@ -136,7 +142,7 @@ export async function createOwnedTempFile(params) {
+         let unregisterTempDir;
+         try {
+             capability.prepareChildCreation();
+-            dir = await fs.mkdtemp(childPrefix);
++            dir = await makeTempDirectory(childPrefix);
+             assertNoWindowsPathAlias(dir, "filesystem", "temp directory uses a Windows filesystem namespace alias");
+             initialPath = path.join(dir, initialFileName);
+             assertNoWindowsPathAlias(initialPath, "filesystem", "temp file path uses a Windows filesystem namespace alias");
+@@ -192,7 +198,7 @@ export async function createOwnedTempFile(params) {
+             identity,
+         };
+     }
+-    const dir = await fs.mkdtemp(path.join(rootDir, prefix));
++    const dir = await makeTempDirectory(path.join(rootDir, prefix));
+     assertNoWindowsPathAlias(dir, "filesystem", "temp directory uses a Windows filesystem namespace alias");
+     // Windows file indexes can exceed Number.MAX_SAFE_INTEGER. Cleanup receipts
+     // must retain the exact identity or adjacent directories can compare equal.

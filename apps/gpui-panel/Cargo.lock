@@ -2683,11 +2683,14 @@ name = "harness-dock-panel"
 version = "0.1.3"
 dependencies = [
  "chrono",
+ "embed-resource",
  "gpui-kit",
  "image",
+ "raw-window-handle",
  "serde_json",
  "tray-icon",
  "uuid",
+ "windows 0.62.2",
 ]
 
 [[package]]
