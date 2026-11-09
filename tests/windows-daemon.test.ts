@@ -64,7 +64,7 @@ test('Windows managed bundled runtime starts beyond MAX_PATH and preserves ident
   // dependencies through the checkout's pnpm junctions.
   const bundle = join(root, 'bundle');
   await execa('pnpm', ['--filter', '@harness-dock/daemon', 'deploy', '--prod', '--prefer-offline',
-    '--no-optional', '--config.node-linker=hoisted', bundle]);
+    '--no-optional', '--config.node-linker=hoisted', bundle], { timeout: 60_000 });
   await mkdir(join(bundle, 'runtime'));
   const runtime = join(bundle, 'runtime/node.exe');
   await copyFile(process.execPath, runtime);

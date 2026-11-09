@@ -88,6 +88,7 @@ jobs:
       - run: npm install --global pnpm@12.15.0
       - run: pnpm install --frozen-lockfile
       - name: Verify ACLs, named pipes, background lifecycle and SDK connection
+        timeout-minutes: 8
         run: pnpm check:windows
       - name: Use the stable Windows Rust toolchain
         run: rustup update stable --no-self-update

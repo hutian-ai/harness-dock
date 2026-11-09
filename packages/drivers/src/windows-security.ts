@@ -5,7 +5,7 @@ import { execa, ExecaError } from 'execa';
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
-$inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$inputData = [Console]::In.ReadLine() | ConvertFrom-Json
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $identity.User
 if ($inputData.operation -eq 'pipe') {
@@ -69,7 +69,7 @@ async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): P
   try {
     await execa(join(shell, 'powershell.exe'),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { input: JSON.stringify({ operation, path: operation === 'pipe' ? path : toNamespacedPath(path) }),
+      { input: JSON.stringify({ operation, path: operation === 'pipe' ? path : toNamespacedPath(path) }) + '\n',
         cwd: systemRoot, env: { PSModulePath: join(shell, 'Modules') }, timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
   } catch (error) {
     // Retain a category for startup logs, never raw PowerShell output.
