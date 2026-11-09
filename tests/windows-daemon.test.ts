@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, toNamespacedPath } from 'node:path';
 import { test } from 'node:test';
-import { pathToFileURL } from 'node:url';
 import { execa } from 'execa';
 import { assertWindowsPrivatePath, protectWindowsDirectory } from '../packages/drivers/src/windows-security.ts';
 import { pathCandidates } from '../packages/drivers/src/installation-lookup.ts';
@@ -46,7 +45,7 @@ for await (const line of createInterface({input:process.stdin})) {
   }
 });
 
-test('Windows managed bundled runtime starts beyond MAX_PATH and preserves identity through upgrade and rollback', { skip: !windows, timeout: 120_000 }, async t => {
+test('Windows managed bundled runtime starts beyond MAX_PATH and preserves identity through upgrade and rollback', { skip: !windows, timeout: 240_000 }, async t => {
   await mkdir('.local', { recursive: true });
   const root = await mkdtemp(resolve('.local/windows-install-'));
   const { configPath } = await initializeDevice({ home: join(root, 'device-with-a-long-installation-path'.repeat(2)), cwd: root });
@@ -55,34 +54,29 @@ test('Windows managed bundled runtime starts beyond MAX_PATH and preserves ident
     await control(config, 'stop');
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
-  async function bundle(version: string) {
-    const directory = join(root, version);
-    await mkdir(join(directory, 'dist'), { recursive: true });
-    await mkdir(join(directory, 'runtime'));
-    await copyFile(process.execPath, join(directory, 'runtime/node.exe'));
-    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: '@harness-dock/daemon', version, type: 'module' }));
-    await writeFile(join(directory, 'dist/device-main.js'), 'export const synthetic = true;');
-    await writeFile(join(directory, 'dist/cli.js'), `
-import {readFile} from 'node:fs/promises';
-import {randomUUID} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
-import {serveControl} from ${JSON.stringify(pathToFileURL(resolve('apps/daemon/dist/local-control.js')).href)};
-if (process.argv[2] === 'run') {
-  const config = JSON.parse(await readFile(process.argv[3], 'utf8'));
-  const status = {nodeId:config.nodeId,daemonId:randomUUID(),pid:process.pid,connected:false,endpoint:config.endpoint,
-    entrypoint:fileURLToPath(import.meta.url),runtime:process.execPath};
-  await serveControl(config, () => status, async () => {}, async () => {});
-}`);
-    await writeReleaseManifest(directory);
-    return directory;
-  }
-  const first = await bundle('0.0.1'), second = await bundle('0.0.2');
-  await manageInstallation('install', { config: configPath, bundle: first, runtime: join(first, 'runtime/node.exe') });
+  // Use a standalone deployment so the relocated runtime never resolves
+  // dependencies through the checkout's pnpm junctions.
+  const bundle = join(root, 'bundle');
+  await execa('pnpm', ['--filter', '@harness-dock/daemon', 'deploy', '--prod', '--offline',
+    '--no-optional', '--config.node-linker=hoisted', bundle]);
+  await mkdir(join(bundle, 'runtime'));
+  const runtime = join(bundle, 'runtime/node.exe');
+  await copyFile(process.execPath, runtime);
+  await writeReleaseManifest(bundle);
+  const options = { config: configPath, bundle, runtime };
+  await manageInstallation('install', options);
   await startInstalled(configPath, install);
   const before = (await control(config, 'status'))!;
   const original = (await readInstallation(install, configPath))!.current;
   assert.ok(original.runtime.length > 260 && original.runtime.startsWith('\\\\?\\'));
-  await manageInstallation('upgrade', { config: configPath, bundle: second, runtime: join(second, 'runtime/node.exe') });
+  const packageFile = join(bundle, 'package.json');
+  const manifest = JSON.parse(await readFile(packageFile, 'utf8'));
+  // Replace the file rather than modifying the package manager's hard link.
+  await rm(packageFile);
+  await writeFile(packageFile, JSON.stringify({ ...manifest, version: '0.0.2' }));
+  await rm(join(bundle, 'dock-release.json'));
+  await writeReleaseManifest(bundle);
+  await manageInstallation('upgrade', options);
   assert.notEqual((await readInstallation(install, configPath))!.current.id, original.id);
   assert.notEqual((await control(config, 'status'))!.daemonId, before.daemonId);
   await manageInstallation('rollback', { config: configPath });
