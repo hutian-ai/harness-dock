@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { readConfig } from '../apps/daemon/src/config.ts';
 import { control } from '../apps/daemon/src/local-control.ts';
 import { assertWindowsPrivatePath, protectWindowsDirectory } from '../packages/drivers/src/windows-security.ts';
+import { withStartupEvidence } from './fixtures/daemon-startup.ts';
 
 const exec = promisify(execFile);
 test('local CLI preserves node identity, authenticates stop and ignores stale PID metadata', async (t) => {
@@ -33,7 +34,7 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
     assert.equal((await stat(paths.configPath)).mode & 0o777, 0o600);
     assert.equal((await stat(home)).mode & 0o777, 0o700);
   }
-  const first = JSON.parse(await cli('start', paths.configPath));
+  const first = JSON.parse(await withStartupEvidence(config.stateDir, () => cli('start', paths.configPath)));
   assert.equal(first.connected, false);
   const duplicate = JSON.parse(await cli('start', paths.configPath));
   assert.equal(duplicate.alreadyRunning, true);
@@ -52,7 +53,7 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   for (let i = 0; i < 20 && await control(config, 'status'); i++) await delay(50);
   assert.equal(await control(config, 'status'), null);
   await mkdir(cwd);
-  const restarted = JSON.parse(await cli('start', paths.configPath));
+  const restarted = JSON.parse(await withStartupEvidence(config.stateDir, () => cli('start', paths.configPath)));
   assert.notEqual(restarted.daemonId, first.daemonId);
   assert.equal(restarted.nodeId, first.nodeId);
   assert.equal(JSON.parse(await cli('stop', paths.configPath)).stopped, true);
@@ -70,6 +71,6 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   assert.ok(!('codexHome' in deviceConfig));
   const pairing = JSON.parse(await readFile(device.controllerPath, 'utf8'));
   assert.equal(pairing.nodes[0].nodeId, deviceConfig.nodeId);
-  assert.equal(JSON.parse(await cli('start', device.configPath)).connected, false);
+  assert.equal(JSON.parse(await withStartupEvidence(deviceConfig.stateDir, () => cli('start', device.configPath))).connected, false);
   assert.equal(JSON.parse(await cli('stop', device.configPath)).stopped, true);
 });

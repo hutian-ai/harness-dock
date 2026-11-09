@@ -12,6 +12,7 @@ import { control } from '../apps/daemon/src/local-control.ts';
 import { writeReleaseManifest } from '../apps/daemon/src/release-manifest.ts';
 import { createCodexRuntime } from '../packages/drivers/src/codex.ts';
 import { createDshRuntime } from '../packages/drivers/src/dsh.ts';
+import { withStartupEvidence } from './fixtures/daemon-startup.ts';
 
 const windows = process.platform === 'win32';
 test('Windows Codex and dsh persist ACP sessions beyond MAX_PATH without dispatching a prompt', { skip: !windows, timeout: 20_000 }, async t => {
@@ -70,7 +71,7 @@ test('Windows managed bundled runtime starts beyond MAX_PATH and preserves ident
   await writeReleaseManifest(bundle);
   const options = { config: configPath, bundle, runtime };
   await manageInstallation('install', options);
-  await startInstalled(configPath, install);
+  await withStartupEvidence(config.stateDir, () => startInstalled(configPath, install));
   const before = (await control(config, 'status'))!;
   const original = (await readInstallation(install, configPath))!.current;
   assert.ok(original.runtime.length > 260 && original.runtime.startsWith('\\\\?\\'));
