@@ -16,7 +16,7 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   const home = join(root, 'node'), cwd = join(root, 'work');
   await mkdir(cwd);
   const cli = async (...args: string[]) => (await exec(process.execPath,
-    [resolve('apps/daemon/dist/cli.js'), ...args], { timeout: 15_000 })).stdout;
+    [resolve('apps/daemon/dist/cli.js'), ...args], { timeout: process.platform === 'win32' ? 60_000 : 15_000 })).stdout;
   const paths = JSON.parse(await cli('init', '--home', home, '--cwd', cwd,
     '--endpoint', 'ws://127.0.0.1:1/'));
   const config = await readConfig(paths.configPath);

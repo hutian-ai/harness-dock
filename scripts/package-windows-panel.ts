@@ -25,7 +25,7 @@ const license = resolve(values['node-license'] ?? join(dirname(runtime), 'LICENS
 if (!(await lstat(license)).isFile()) throw new Error('node_license_required');
 
 execaSync('pnpm', ['--filter', '@harness-dock/daemon', 'deploy', '--prod', '--config.node-linker=hoisted',
-  ...(values.debug ? ['--offline', '--no-optional'] : []), daemon], { stdio: 'inherit' });
+  ...(values.debug ? ['--prefer-offline', '--no-optional'] : []), daemon], { stdio: 'inherit' });
 async function detach(directory: string): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const file = join(directory, entry.name);

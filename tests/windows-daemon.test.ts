@@ -62,7 +62,7 @@ test('Windows managed bundled runtime starts beyond MAX_PATH and preserves ident
   // Use a standalone deployment so the relocated runtime never resolves
   // dependencies through the checkout's pnpm junctions.
   const bundle = join(root, 'bundle');
-  await execa('pnpm', ['--filter', '@harness-dock/daemon', 'deploy', '--prod', '--offline',
+  await execa('pnpm', ['--filter', '@harness-dock/daemon', 'deploy', '--prod', '--prefer-offline',
     '--no-optional', '--config.node-linker=hoisted', bundle]);
   await mkdir(join(bundle, 'runtime'));
   const runtime = join(bundle, 'runtime/node.exe');

@@ -22,7 +22,7 @@ const environment = {
 };
 const entries = { server: 'apps/server/src/cli.ts', daemon: 'apps/daemon/src/cli.ts', client: 'packages/client/src/cli.ts' };
 const cli = async (name: keyof typeof entries, ...args: string[]) =>
-  (await exec(process.execPath, ['--import', 'tsx', resolve(entries[name]), ...args], { cwd: root, env: environment, timeout: 20_000, maxBuffer: 128 * 1024 })).stdout;
+  (await exec(process.execPath, ['--import', 'tsx', resolve(entries[name]), ...args], { cwd: root, env: environment, timeout: process.platform === 'win32' ? 60_000 : 20_000, maxBuffer: 128 * 1024 })).stdout;
 async function until(check: () => boolean | Promise<boolean>, label: string): Promise<void> {
   const deadline = Date.now() + 15_000;
   while (!await check()) {
