@@ -48,15 +48,16 @@ impl TrayPanel {
     }
 
     fn open(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
+        // Remove the transient surface before navigating or focusing the main
+        // window, including when discovery starts a new asynchronous read.
+        self.dismiss(window, cx);
         self.panel.update(cx, |panel, cx| {
             panel.visible = true;
             panel.navigate(page, cx);
         });
         let _ = self.main.update(cx, |_, window, cx| {
-            window.activate_window();
-            cx.activate(true);
+            crate::activate_main_window(window, cx);
         });
-        self.dismiss(window, cx);
     }
 }
 
@@ -115,6 +116,7 @@ pub fn open(
         },
         cx,
         |window, cx| {
+            window.set_window_title("界舟 · 设备速览");
             cx.new(|cx| {
                 cx.observe(&panel, |_, _, cx| cx.notify()).detach();
                 cx.observe_window_activation(window, |this: &mut TrayPanel, window, cx| {
@@ -142,6 +144,10 @@ pub fn open(
             })
         },
     )?;
+    // A status-item click belongs to Explorer on Windows. Showing a topmost
+    // tool window alone does not make it foreground, so it would never receive
+    // the deactivation event used to dismiss it on an outside click.
+    handle.update(cx, |_, window, _| window.activate_window())?;
     panel.update(cx, |panel, cx| {
         panel.tray_visible = true;
         // User-opened overview reads current state and installation discovery; never starts a model test.

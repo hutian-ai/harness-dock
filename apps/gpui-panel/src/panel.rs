@@ -76,17 +76,15 @@ pub struct Panel {
     pub mutating: bool,
     pub visible: bool,
     pub tray_visible: bool,
+    pub tray_available: bool,
     pub pending: Option<Pending>,
     pub refreshed: Instant,
     pub stale: bool,
     page: Page,
     execution_filter: usize,
     execution_limit: usize,
-    #[cfg(target_os = "macos")]
     overview_scroll: ScrollHandle,
-    #[cfg(target_os = "macos")]
     settings_scroll: ScrollHandle,
-    #[cfg(target_os = "macos")]
     detail_scroll: ScrollHandle,
     provider: String,
     notice: Option<String>,
@@ -138,6 +136,16 @@ impl Panel {
     ) -> Self {
         #[cfg(not(target_os = "macos"))]
         window.set_window_title("界舟 · Harness Dock");
+        #[cfg(not(target_os = "macos"))]
+        cx.observe_window_activation(window, |view: &mut Self, window, cx| {
+            if window.is_window_active() && view.tray_visible {
+                // Also cover taskbar/OS activation, without waiting for an
+                // idle provider read or a queued navigation action.
+                view.tray_visible = false;
+                cx.notify();
+            }
+        })
+        .detach();
         let persist = config.is_none();
         let mut bridge = bridge;
         bridge.single_server = persist;
@@ -180,17 +188,15 @@ impl Panel {
             mutating: false,
             visible: true,
             tray_visible: false,
+            tray_available: false,
             pending: None,
             refreshed: Instant::now(),
             stale: true,
             page: Page::Home,
             execution_filter: 0,
             execution_limit: 10,
-            #[cfg(target_os = "macos")]
             overview_scroll: ScrollHandle::new(),
-            #[cfg(target_os = "macos")]
             settings_scroll: ScrollHandle::new(),
-            #[cfg(target_os = "macos")]
             detail_scroll: ScrollHandle::new(),
             provider: String::new(),
             notice: None,
@@ -1207,8 +1213,20 @@ impl Panel {
             cx.quit();
         }
     }
-    pub fn hide(&mut self, cx: &mut Context<Self>) {
+    pub fn hide(&mut self, _window: &Window, cx: &mut Context<Self>) {
+        // A hidden client without a tray would have no reachable restore action.
+        if !self.tray_available {
+            self.quit(cx);
+            return;
+        }
+        #[cfg(target_os = "windows")]
+        if crate::window_visibility::hide(_window).is_err() {
+            self.error = Some("无法收起窗口，请重试；也可通过托盘菜单退出界面。".into());
+            cx.notify();
+            return;
+        }
         self.visible = false;
+        #[cfg(not(target_os = "windows"))]
         cx.hide();
     }
     fn test_label(&self, provider: &str) -> String {

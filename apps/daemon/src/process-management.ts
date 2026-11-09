@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { toNamespacedPath } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { DeviceConfig } from './config.ts';
 import { control, type LocalStatus } from './local-control.ts';
@@ -38,8 +38,8 @@ export async function startBackground(config: DeviceConfig, path: string, entryp
   const existing = await control(config, 'status');
   if (existing) return { ...existing, alreadyRunning: true } as LocalStatus;
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
-  // The launcher can be a temporary checkout; background commands need a lasting cwd.
-  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { cwd: dirname(entrypoint), detached: true, windowsHide: true, stdio: 'ignore' });
+  // Dock state outlives temporary launchers and avoids inheriting a deeply nested release cwd.
+  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { cwd: toNamespacedPath(config.stateDir), detached: true, windowsHide: true, stdio: 'ignore' });
   let error: Error | undefined;
   child.on('error', value => { error = value; });
   child.unref();

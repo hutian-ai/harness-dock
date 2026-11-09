@@ -17,6 +17,7 @@ scan or a claim that a package's declared license covers every possible use.
 | --- | --- | --- | --- |
 | acpx | 0.21.1 | MIT | [Patch and upgrade boundaries](patches/README.md) |
 | @agentclientprotocol/codex-acp | 2.3.0 | Apache-2.0 | [Patch and upgrade boundaries](patches/README.md) |
+| @openclaw/fs-safe | 0.26.13 | MIT | [Windows long-path fix](patches/README.md#windows-长路径) |
 
 The daemon distribution includes the original patch files in `patches/` and a
 copy of their explanation. The patches identify modified upstream files. Preserve

@@ -69,6 +69,42 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  windows-daemon:
+    name: Windows daemon and desktop
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: .local/gpui-build
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm install --global pnpm@12.15.0
+      - run: pnpm install --frozen-lockfile
+      - name: Verify ACLs, named pipes, background lifecycle and SDK connection
+        run: pnpm check:windows
+      - name: Use the stable Windows Rust toolchain
+        run: rustup update stable --no-self-update
+      - name: Build and test the native Windows client
+        run: cargo test --locked --manifest-path apps/gpui-panel/Cargo.toml
+      - name: Prepare a portable Windows candidate
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_artifacts
+        run: pnpm panel:windows:build --debug --output .local/windows-panel
+      - name: Retain Windows client candidate
+        if: github.event_name == 'workflow_dispatch' && inputs.prepare_artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-windows-client-${{ github.sha }}
+          path: .local/windows-panel/
+          retention-days: 14
+          if-no-files-found: error
+
   audit:
     name: Privacy, secrets and dependency advisories
     runs-on: ubuntu-24.04

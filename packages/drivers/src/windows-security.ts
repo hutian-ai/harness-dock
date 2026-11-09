@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, toNamespacedPath } from 'node:path';
 import { execa } from 'execa';
 
 // Paths travel over stdin, never as PowerShell source or interpolated command arguments.
@@ -34,9 +34,11 @@ public static class DockPipeAcl {
       $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
       $acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $inputData.path -AclObject $acl
+    [IO.Directory]::SetAccessControl($inputData.path, $acl)
   }
-  $actual = Get-Acl -LiteralPath $inputData.path
+  # Use .NET directly: a daemon launched from PowerShell 7 can inherit a
+  # PSModulePath that prevents Windows PowerShell from loading Get/Set-Acl.
+  $actual = if ($item.PSIsContainer) { [IO.Directory]::GetAccessControl($inputData.path) } else { [IO.File]::GetAccessControl($inputData.path) }
   if ($actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'windows_private_path_owner_mismatch' }
   $ownerAllowed = $false
   foreach ($rule in $actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
@@ -55,7 +57,8 @@ async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): P
   try {
     await execa(join(process.env.SYSTEMROOT ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { input: JSON.stringify({ operation, path }), timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
+      { input: JSON.stringify({ operation, path: operation === 'pipe' ? path : toNamespacedPath(path) }),
+        cwd: process.env.SYSTEMROOT ?? 'C:\\Windows', timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
   } catch {
     // Do not expose raw PowerShell output, local paths or user SIDs in diagnostics.
     throw new Error(`windows_${operation === 'pipe' ? 'pipe_acl' : 'private_path'}_unavailable`);

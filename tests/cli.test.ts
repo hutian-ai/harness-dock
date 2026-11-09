@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readConfig } from '../apps/daemon/src/config.ts';
 import { control } from '../apps/daemon/src/local-control.ts';
+import { assertWindowsPrivatePath, protectWindowsDirectory } from '../packages/drivers/src/windows-security.ts';
 
 const exec = promisify(execFile);
 test('local CLI preserves node identity, authenticates stop and ignores stale PID metadata', async (t) => {
@@ -21,19 +22,24 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   const config = await readConfig(paths.configPath);
   config.providers = Object.fromEntries(['codex', 'dsh'].map(key => [key, { disabled: true }]));
   await writeFile(paths.configPath, JSON.stringify(config));
-  t.after(async () => { await control(config, 'stop'); await rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await control(config, 'stop'); await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); });
   const original = await readFile(paths.configPath, 'utf8');
   await assert.rejects(cli('init', '--home', home, '--cwd', cwd), /EEXIST/);
   assert.equal(await readFile(paths.configPath, 'utf8'), original);
-  assert.equal((await stat(paths.configPath)).mode & 0o777, 0o600);
-  assert.equal((await stat(home)).mode & 0o777, 0o700);
+  if (process.platform === 'win32') {
+    await assertWindowsPrivatePath(paths.configPath);
+    await assertWindowsPrivatePath(home);
+  } else {
+    assert.equal((await stat(paths.configPath)).mode & 0o777, 0o600);
+    assert.equal((await stat(home)).mode & 0o777, 0o700);
+  }
   const first = JSON.parse(await cli('start', paths.configPath));
   assert.equal(first.connected, false);
   const duplicate = JSON.parse(await cli('start', paths.configPath));
   assert.equal(duplicate.alreadyRunning, true);
   assert.equal(duplicate.daemonId, first.daemonId);
   await assert.rejects(cli('run', paths.configPath), /locked/);
-  const wrong = join(root, 'wrong.json');
+  const wrong = join(home, 'wrong.json');
   await writeFile(wrong, JSON.stringify({ ...config, token: 'wrong'.repeat(10) }));
   await assert.rejects(cli('stop', wrong), /local_control_rejected:403/);
   assert.equal((await control(config, 'status'))?.daemonId, first.daemonId);
@@ -52,6 +58,8 @@ test('local CLI preserves node identity, authenticates stop and ignores stale PI
   assert.equal(JSON.parse(await cli('stop', paths.configPath)).stopped, true);
   const { initializeServer } = await import('../apps/server/src/setup.ts');
   const serverFiles = await initializeServer({ home: join(root, 'server') });
+  // Model a pairing file transferred into an owner-only directory on Windows.
+  await protectWindowsDirectory(join(root, 'server'));
   const serverPairing = JSON.parse(await readFile(serverFiles.devicePairingPath, 'utf8'));
   const device = JSON.parse(await cli('init', '--mode', 'device', '--home', join(root, 'device-node'), '--cwd', cwd, '--pairing', serverFiles.devicePairingPath));
   const deviceConfig = await readConfig(device.configPath);

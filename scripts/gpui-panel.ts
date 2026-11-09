@@ -4,16 +4,25 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-export async function buildGpuiPanel(binary: string, resources: string): Promise<void> {
-  const localCargo = join(homedir(), '.cargo/bin/cargo');
+export async function buildGpuiPanel(binary: string, resources: string, options: { debug?: boolean } = {}): Promise<void> {
+  const localCargo = join(homedir(), '.cargo/bin', process.platform === 'win32' ? 'cargo.exe' : 'cargo');
   const cargo = process.env.CARGO ?? await access(localCargo).then(() => localCargo, () => 'cargo');
   const manifest = resolve('apps/gpui-panel/Cargo.toml');
   const target = resolve(process.env.CARGO_TARGET_DIR ?? '.local/gpui-build');
-  const env = { ...process.env, CARGO_TARGET_DIR: target, MACOSX_DEPLOYMENT_TARGET: '15.0' };
-  execFileSync(cargo, ['build', '--locked', '--release', '--manifest-path', manifest], { env, stdio: 'inherit' });
-  await copyFile(join(target, 'release/harness-dock-panel'), binary);
+  const env = { ...process.env, CARGO_TARGET_DIR: target, ...(process.platform === 'darwin' ? { MACOSX_DEPLOYMENT_TARGET: '15.0' } : {}) };
+  execFileSync(cargo, ['build', '--locked', ...(options.debug ? [] : ['--release']), '--manifest-path', manifest], { env, stdio: 'inherit' });
+  await copyFile(join(target, options.debug ? 'debug' : 'release', process.platform === 'win32' ? 'harness-dock-panel.exe' : 'harness-dock-panel'), binary);
   await cp(resolve('apps/gpui-panel/Resources'), join(resources, 'harness-artwork'), { recursive: true });
-  const metadata = JSON.parse(execFileSync(cargo, ['metadata', '--locked', '--format-version', '1', '--filter-platform', 'aarch64-apple-darwin', '--manifest-path', manifest], { env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })) as {
+  await writeGpuiNotices(resources);
+}
+
+export async function writeGpuiNotices(resources: string): Promise<void> {
+  const localCargo = join(homedir(), '.cargo/bin', process.platform === 'win32' ? 'cargo.exe' : 'cargo');
+  const cargo = process.env.CARGO ?? await access(localCargo).then(() => localCargo, () => 'cargo');
+  const manifest = resolve('apps/gpui-panel/Cargo.toml');
+  const env = { ...process.env, CARGO_TARGET_DIR: resolve(process.env.CARGO_TARGET_DIR ?? '.local/gpui-build') };
+  const platform = process.platform === 'win32' ? 'x86_64-pc-windows-msvc' : 'aarch64-apple-darwin';
+  const metadata = JSON.parse(execFileSync(cargo, ['metadata', '--locked', '--format-version', '1', '--filter-platform', platform, '--manifest-path', manifest], { env, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })) as {
     packages: { id: string; name: string; version: string; license: string | null; manifest_path: string; license_file: string | null }[];
     resolve: { root: string; nodes: { id: string; dependencies: string[] }[] };
   };
@@ -22,7 +31,7 @@ export async function buildGpuiPanel(binary: string, resources: string): Promise
   function visit(id: string): void { if (used.has(id)) return; used.add(id); for (const dep of nodes.get(id) ?? []) visit(dep); }
   visit(metadata.resolve.root);
   const notices = join(resources, 'rust-licenses');
-  await mkdir(notices);
+  await mkdir(notices, { recursive: true });
   const supplementRoot = resolve('third-party/rust-notices');
   const supplements = JSON.parse(await readFile(join(supplementRoot, 'sources.json'), 'utf8')) as {
     name: string; version: string; notices: { path: string; url: string; sha256: string }[];
@@ -30,7 +39,7 @@ export async function buildGpuiPanel(binary: string, resources: string): Promise
   const inventory: { name: string; version: string; license: string | null; source: string; notices: string[] }[] = [];
   for (const pkg of metadata.packages.filter(pkg => used.has(pkg.id) && pkg.id !== metadata.resolve.root).sort((a, b) => a.name.localeCompare(b.name))) {
     const root = dirname(pkg.manifest_path), destination = join(notices, `${pkg.name}-${pkg.version}`);
-    await mkdir(destination);
+    await mkdir(destination, { recursive: true });
     const files = (await readdir(root)).filter(name => /^(licen[cs]e|copying|notice)([._-]|$)/iu.test(name));
     if (pkg.license_file && !files.includes(pkg.license_file)) files.push(pkg.license_file);
     const copied: string[] = [];

@@ -45,7 +45,9 @@ Dock 提供设备接入与执行管理。产品负责业务界面、业务授权
 
 App 自带运行时与设备后台，无需 Git、pnpm 或自行构建。原生 Codex/dsh 仍需在执行电脑上安装并登录。App 采用 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证；首次打开限制见[常见问题](https://hutian-ai.github.io/harness-dock/troubleshooting/)。
 
-Windows 11 x64 仅有实验性的原生 CLI/Daemon 源码路径，尚待实机验收；没有 Windows 桌面、自启或发行包。macOS Intel 与 Linux 执行设备未支持。Linux 可部署 Server。[完整支持范围](https://hutian-ai.github.io/harness-dock/support/)。
+Windows 11 x64 提供实验性的 CLI/Daemon 和 GPUI 桌面源码候选，已通过控制链路、Codex/dsh 真实执行验收及本地窗口验证。桌面可用 `pnpm panel:windows:build` 构建，在窗口中粘贴设备邀请或选择配对文件；登录自启、链接协议注册与正式发行包尚未提供。macOS Intel 与 Linux 执行设备未支持。Linux 可部署 Server。[完整支持范围](https://hutian-ai.github.io/harness-dock/support/)。
+
+Windows daemon 源码可在 Node.js 22.19+、pnpm 12.15.0 下构建。运行 `pnpm install --frozen-lockfile` 后执行 `pnpm check:windows`，检查 NTFS 权限、命名管道鉴权、后台启停、升级回滚、长路径会话存储和 SDK 连通性。此检查不调用模型；真实执行另跑 `pnpm accept:codex` / `pnpm accept:dsh`。已验收环境使用 Node.js 24.22.1；dsh 0.2.2-rc.1 要求 Node.js 24.9+。PowerShell 使用步骤见[Windows daemon 源码](https://hutian-ai.github.io/harness-dock/installation/#windows-daemon)。
 
 ## App v0.1.3 有什么
 

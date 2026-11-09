@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { DeviceExecuteInput } from '../apps/daemon/src/device-host.ts';
+import { protectWindowsDirectory } from '../packages/drivers/src/windows-security.ts';
 
 interface Result { provider: string; result: { state: string; threadId?: string; sessionId?: string; turnId?: string; exactFinalAnswer?: boolean; messages?: { phase: string | null; text: string }[] } }
 interface Inventory { providers: { key: string; status: string; models: string[]; error?: string;
@@ -33,6 +34,8 @@ export async function acceptDevice(paths = {
   const root = resolve('.local/device-acceptance', `${provider}-${new Date().toISOString().replaceAll(':', '-')}`);
   const work = join(root, 'work'), stateDir = join(root, 'state');
   await mkdir(work, { recursive: true });
+  await protectWindowsDirectory(root);
+  await mkdir(stateDir, { mode: 0o700 });
   await writeFile(join(work, 'user-owned.txt'), 'synthetic user file');
   const { DockServer } = await import(pathToFileURL(paths.server).href) as typeof import('../apps/server/src/index.ts');
   const { ServerClient } = await import(pathToFileURL(paths.client).href) as typeof import('../packages/client/src/index.ts');
