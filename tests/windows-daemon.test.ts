@@ -48,7 +48,12 @@ for await (const line of createInterface({input:process.stdin})) {
 test('Windows managed bundled runtime starts beyond MAX_PATH and preserves identity through upgrade and rollback', { skip: !windows, timeout: 240_000 }, async t => {
   await mkdir('.local', { recursive: true });
   const root = await mkdtemp(resolve('.local/windows-install-'));
-  const { configPath } = await initializeDevice({ home: join(root, 'device-with-a-long-installation-path'.repeat(4)), cwd: root });
+  // Make the installed executable long on both short CI and deep local
+  // checkouts without making the SQLite operation lock itself exceed MAX_PATH.
+  const runtimeSuffix = join('installation', 'releases', '0'.repeat(64), 'runtime', 'node.exe');
+  const homeLength = 272 - runtimeSuffix.length - 1;
+  const home = join(root, 'd'.repeat(Math.max(1, homeLength - root.length - 1)));
+  const { configPath } = await initializeDevice({ home, cwd: root });
   const config = await readConfig(configPath), install = installationRoot(configPath);
   t.after(async () => {
     await control(config, 'stop');
