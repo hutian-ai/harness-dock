@@ -67,23 +67,21 @@
 /* ACP stays inside the device; the native environment is selected on that device. */
 .map-protocol{stroke:var(--accent);stroke-width:1.5}.map-protocol-mask{fill:var(--surface);stroke:var(--line-strong)}.map-protocol-label{fill:var(--accent);font-size:12px;font-weight:500}.map-harness-title{fill:var(--accent);font-size:13px;font-weight:500}
 
-/* Hero actions: semantic leading icons and two clipped background layers.
-   The focusable link itself stays unclipped so its focus ring remains visible. */
-.home-hero .hero-actions{align-items:center;gap:12px}
-.home-hero .hero-actions>.button{--action-edge:var(--text);--action-fill:var(--bg);position:relative;isolation:isolate;min-width:170px;min-height:50px;gap:10px;padding:14px 20px;border:0;border-radius:0;background:transparent;color:var(--text);font-size:14px;font-weight:550;line-height:1.2;white-space:nowrap;box-shadow:none;transition:color .15s}
-.home-hero .hero-actions>.button::before,.home-hero .hero-actions>.button::after{content:"";position:absolute;pointer-events:none;transition:background-color .15s}
-.home-hero .hero-actions>.button::before{inset:0;z-index:-2;background:var(--action-edge);clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
-.home-hero .hero-actions>.button::after{inset:1.5px;z-index:-1;background:var(--action-fill);clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,9px 100%,0 calc(100% - 9px))}
+/* One device entry, alongside SDK access; platform alternatives remain secondary. */
+.home-hero .hero-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:12px;max-width:470px}
+.home-hero .hero-actions>.button{min-width:0;min-height:46px;gap:9px;padding:12px 14px;border:1px solid var(--line-strong);border-radius:6px;font-size:14px;font-weight:550;line-height:1.4;white-space:nowrap}
+.home-hero .hero-actions>.primary{border-color:#00824d;background:#00824d;color:#fff}
+:root[data-theme=dark] .home-hero .hero-actions>.primary{border-color:var(--accent);background:var(--accent);color:#06281a}
+.home-hero .hero-actions>.secondary{background:var(--bg);color:var(--text)}
+.home-hero .hero-actions>.secondary:hover{background:var(--surface);border-color:var(--muted)}
 .home-hero .action-icon{display:block;flex:0 0 18px;width:18px;height:18px}
-.home-hero .hero-actions>.primary{--action-edge:#00824d;--action-fill:#00824d;background:transparent;color:#fff;font-weight:600}
-.home-hero .hero-actions>.primary:hover{--action-edge:#006f42;--action-fill:#006f42;background:transparent;filter:none;color:#fff}
-:root[data-theme=dark] .home-hero .hero-actions>.primary{--action-edge:var(--accent);--action-fill:var(--accent);color:#06281a}
-:root[data-theme=dark] .home-hero .hero-actions>.primary:hover{--action-edge:#23e696;--action-fill:#23e696;color:#06281a}
-.home-hero .hero-actions>.secondary:hover{--action-edge:var(--accent);--action-fill:color-mix(in srgb,var(--text) 4%,var(--bg));background:transparent;color:var(--text)}
-.home-hero .hero-actions>.button:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
-@media(min-width:761px) and (max-width:960px){.home-hero .hero-actions>.button{flex:1;min-width:0;gap:8px;padding:13px 14px;font-size:12px}.home-hero .action-icon{flex-basis:16px;width:16px;height:16px}}
-@media(max-width:500px){.home-hero .hero-actions>.button{flex:1;min-width:0}}
-@media(max-width:420px){.home-hero .hero-actions{display:grid;grid-template-columns:1fr;gap:10px}.home-hero .hero-actions>.button{width:100%}}
+.hero-platform-links{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 14px;margin-top:12px;max-width:470px;font-size:11px;line-height:1.8;color:var(--muted)}
+.hero-platform-links>a{white-space:nowrap;color:var(--muted);text-decoration:underline;text-underline-offset:3px}
+.hero-platform-links>a:hover{color:var(--accent)}
+.home-hero .hero-caption{margin-top:9px;font-size:10px;line-height:1.8}
+@media(min-width:761px) and (max-width:960px){.home-hero .hero-actions{gap:9px}.home-hero .hero-actions>.button{font-size:12px;padding:11px 9px;gap:7px}}
+@media(max-width:760px){.home-hero .hero-actions{width:100%;max-width:560px}.home-hero .hero-platform-links{order:6;margin-top:-9px}.home-hero .hero-caption{order:7;margin-top:-10px}.home-hero .connection-map{order:8}}
+@media(max-width:420px){.home-hero .hero-actions{grid-template-columns:1fr}.home-hero .hero-actions>.button{width:100%}}
 
 /* Jiezhou identity; navigation remains compact on narrow screens. */
 .brand>img{flex:none;width:34px;height:34px}.brand>span{display:flex;align-items:baseline;gap:9px}.brand-subtitle{font-size:12px;font-weight:500;letter-spacing:0;color:var(--muted)}@media(max-width:600px){.brand-subtitle{display:none}}

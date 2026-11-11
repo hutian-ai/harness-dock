@@ -1,6 +1,27 @@
 (function () {
   'use strict';
   var root=document.documentElement, base=document.body.dataset.base || './';
+  // This selects a helpful entry only; browser platform data cannot establish CPU or OS compatibility.
+  var deviceEntry=document.querySelector('[data-device-entry]');
+  if(deviceEntry){
+    var platform=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||'';
+    var agent=navigator.userAgent||'';
+    var kind=/Win/i.test(platform)?'windows':/Mac/i.test(platform)&&!(navigator.maxTouchPoints>1)?'macos':/Linux/i.test(platform)&&!/Android/i.test(agent)?'linux':'other';
+    var deviceLabel=document.querySelector('[data-device-label]'), deviceNote=document.querySelector('[data-device-note]');
+    deviceEntry.dataset.platform=kind;
+    if(kind==='macos'){
+      deviceLabel.textContent='下载 macOS 版';
+      deviceEntry.href='https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3/harness-dock-panel-gpui-0.1.3-darwin-arm64.zip';
+      deviceNote.textContent='macOS 15+ · Apple 芯片 · Alpha 尚未完成 Apple 公证';
+    }else if(kind==='windows'){
+      deviceLabel.textContent='Windows 安装指南';
+      deviceEntry.href=base+'installation/#windows-desktop-candidate';
+      deviceNote.textContent='Windows 11 x64 · 源码构建 · 暂无公开安装包';
+    }else if(kind==='linux'){
+      deviceLabel.textContent='查看支持平台';
+      deviceNote.textContent='Linux 暂不支持作为执行设备；可部署 Server';
+    }
+  }
   var menu=document.querySelector('.menu-toggle'), scrim=document.querySelector('.sidebar-scrim'), sidebar=document.querySelector('.sidebar'), mobile=matchMedia('(max-width:760px)');
   function syncSidebar(){sidebar.inert=mobile.matches&&!root.classList.contains('menu-open');}
   mobile.addEventListener('change',syncSidebar);syncSidebar();
