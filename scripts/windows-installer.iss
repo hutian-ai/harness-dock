@@ -77,7 +77,8 @@ begin
       if not VarIsNull(Process.ExecutablePath) then begin
         ExecutablePath := Process.ExecutablePath;
         ExecutablePath := Lowercase(ExecutablePath);
-        if Pos(Directory, ExecutablePath) = 1 then Exit;
+        if (Pos(Directory, ExecutablePath) = 1) and
+           not (IsUninstaller and (ExecutablePath = Lowercase(ExpandConstant('{uninstallexe}')))) then Exit;
       end;
     end;
     Result := True;
@@ -97,5 +98,5 @@ function InitializeUninstall(): Boolean;
 begin
   Result := DirectoryIdle(ExpandConstant('{app}'));
   if not Result then
-    MsgBox('Close Harness Dock first. If a background service is running from this folder, stop it from Overview only when no tasks are active or awaiting confirmation. Device settings and history will be preserved.', mbError, MB_OK);
+    SuppressibleMsgBox('Close Harness Dock first. If a background service is running from this folder, stop it from Overview only when no tasks are active or awaiting confirmation. Device settings and history will be preserved.', mbError, MB_OK, IDOK);
 end;
