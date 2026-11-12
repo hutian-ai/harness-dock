@@ -1,0 +1,190 @@
+name: Release Windows client
+
+on:
+  push:
+    tags: ['v*-windows.*']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-release.yml'
+      - 'scripts/package-windows*.ts'
+      - 'scripts/windows-installer.iss'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      CARGO_TARGET_DIR: .local/gpui-build
+      CARGO_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Select package identity and installed compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "v$($pkg.version)-windows.1" }
+          if ($tag -notmatch ('^v' + [regex]::Escape($pkg.version) + '-windows\.[1-9]\d*$')) { throw 'Invalid Windows release tag' }
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            git merge-base --is-ancestor HEAD origin/main
+            if ($LASTEXITCODE -ne 0) { throw 'Release commit must be on main' }
+          }
+          $compiler = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 7\ISCC.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (!$compiler) { throw 'The Windows runner must include Inno Setup' }
+          "WINDOWS_RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "ISCC=$compiler" >> $env:GITHUB_ENV
+      - name: Compile installer script before the full desktop build
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $payload = Join-Path $env:RUNNER_TEMP 'installer-syntax-payload'
+          New-Item -ItemType Directory -Path "$payload/resources" -Force | Out-Null
+          foreach ($name in @('HarnessDock.exe', 'README.txt', 'release.json')) { Set-Content -LiteralPath (Join-Path $payload $name) -Value 'Syntax check only, never distributed' }
+          Copy-Item LICENSE "$payload/resources/LICENSE"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          & $env:ISCC "/DPayloadDir=$payload" "/DPackageVersion=$version" "/DOutputDir=$env:RUNNER_TEMP" '/DArtifactName=installer-syntax-check' scripts/windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer script compilation failed' }
+          $install = Join-Path $env:RUNNER_TEMP 'installer-preflight-install'
+          Write-Output 'Checking silent installation'
+          $p = Start-Process -FilePath "$env:RUNNER_TEMP/installer-syntax-check.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=`"$env:RUNNER_TEMP/preflight-install.log`" /DIR=`"$install`"" -WindowStyle Hidden -Wait -PassThru
+          Get-Content "$env:RUNNER_TEMP/preflight-install.log" -Tail 10
+          if ($p.ExitCode -ne 0) { throw "Installer preflight failed: $($p.ExitCode)" }
+          Write-Output 'Checking silent uninstallation'
+          $p = Start-Process -FilePath "$install/unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=`"$env:RUNNER_TEMP/preflight-uninstall.log`"" -WindowStyle Hidden -Wait -PassThru
+          Get-Content "$env:RUNNER_TEMP/preflight-uninstall.log" -Tail 10
+          if ($p.ExitCode -ne 0) { throw "Uninstaller preflight failed: $($p.ExitCode)" }
+      - name: Install pinned dependencies and toolchain
+        run: |
+          npm install --global pnpm@12.15.0
+          pnpm install --frozen-lockfile
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+      - name: Check Windows source and desktop logic
+        run: |
+          pnpm check:windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --release --manifest-path apps/gpui-panel/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node apps/docs-site/build.mjs
+          node apps/docs-site/check.mjs
+      - name: Build release client, installer and portable archive
+        run: |
+          pnpm panel:windows:build --output .local/windows-panel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --import tsx scripts/package-windows-release.ts --panel .local/windows-panel --output .local/windows-release --tag $env:WINDOWS_RELEASE_TAG --iscc $env:ISCC
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify install, packaged runtime, archive and uninstall
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Resolve-Path .local/windows-release
+          $setup = Get-ChildItem $release -Filter '*-setup.exe'
+          if (@($setup).Count -ne 1) { throw 'Expected exactly one installer' }
+          $install = Join-Path $env:RUNNER_TEMP 'HarnessDock-install'
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$install`"" -WindowStyle Hidden -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Install failed: $($p.ExitCode)" }
+          foreach ($file in Get-ChildItem "$release/payload" -Recurse -File) {
+            $relative = [IO.Path]::GetRelativePath("$release/payload", $file.FullName)
+            if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash (Join-Path $install $relative)).Hash) { throw "Installed payload differs: $relative" }
+          }
+          & "$install/resources/daemon/runtime/node.exe" "$install/resources/daemon/dist/cli.js" --help
+          if ($LASTEXITCODE -ne 0) { throw 'Installed runtime failed' }
+          $busy = Start-Process -FilePath "$install/resources/daemon/runtime/node.exe" -ArgumentList '-e "setInterval(()=>{},1000)"' -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 1
+            if ($busy.HasExited) { throw 'Busy-installation probe did not start' }
+            $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$install`"" -WindowStyle Hidden -Wait -PassThru
+            if ($p.ExitCode -eq 0 -or $busy.HasExited) { throw 'Installer failed to preserve a running installation' }
+            $p = Start-Process -FilePath "$install/unins000.exe" -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -WindowStyle Hidden -Wait -PassThru
+            if ($p.ExitCode -eq 0 -or $busy.HasExited -or !(Test-Path "$install/HarnessDock.exe")) { throw 'Uninstaller failed to preserve a running installation' }
+          } finally { if (!$busy.HasExited) { $busy.Kill(); $busy.WaitForExit() } }
+          $archive = Get-ChildItem $release -Filter '*.zip'
+          $unpacked = Join-Path $env:RUNNER_TEMP 'HarnessDock-portable'
+          New-Item -ItemType Directory -Path $unpacked | Out-Null
+          tar.exe -xf $archive.FullName -C $unpacked
+          if ($LASTEXITCODE -ne 0) { throw 'Archive extraction failed' }
+          foreach ($file in Get-ChildItem "$release/payload" -Recurse -File) {
+            $relative = [IO.Path]::GetRelativePath("$release/payload", $file.FullName)
+            if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash (Join-Path $unpacked $relative)).Hash) { throw "Portable payload differs: $relative" }
+          }
+          $p = Start-Process -FilePath "$install/unins000.exe" -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -WindowStyle Hidden -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Uninstall failed' }
+          if (Test-Path "$install/HarnessDock.exe") { throw 'Application was not uninstalled' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release-${{ github.sha }}
+          path: |
+            .local/windows-release/*-setup.exe
+            .local/windows-release/*.zip
+            .local/windows-release/SHA256SUMS
+            .local/windows-release/README.txt
+            .local/windows-release/release.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: github.event_name == 'push'
+    needs: windows
+    runs-on: windows-2025
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: windows-release-${{ github.sha }}
+          path: .local/windows-release
+      - name: Upload, read back and publish Windows assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $notes = ".github/release-notes/$tag.md"
+          if (!(Test-Path $notes)) { throw 'Release notes missing' }
+          $state = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (!(($state | ConvertFrom-Json).isDraft)) { throw 'Refusing to replace a published release' }
+          } else {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --draft --prerelease --title "$tag — Windows Developer Alpha" --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot create draft release' }
+          }
+          $assets = @(Get-ChildItem .local/windows-release -File | Sort-Object Name)
+          if ($assets.Count -ne 5) { throw 'Unexpected release assets' }
+          $existing = @(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name')
+          foreach ($asset in $assets) {
+            if ($asset.Name -notin $existing) {
+              gh release upload $tag $asset.FullName --repo $env:GITHUB_REPOSITORY
+              if ($LASTEXITCODE -ne 0) { throw 'Upload failed' }
+            }
+          }
+          $remote = @(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name')
+          if (Compare-Object @($assets.Name) $remote) { throw 'Unexpected remote assets' }
+          $readback = Join-Path $env:RUNNER_TEMP 'release-readback'
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --dir $readback
+          if ($LASTEXITCODE -ne 0) { throw 'Readback failed' }
+          foreach ($asset in $assets) {
+            if ((Get-FileHash $asset.FullName).Hash -ne (Get-FileHash (Join-Path $readback $asset.Name)).Hash) { throw 'Published asset differs' }
+          }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing failed' }
