@@ -32,7 +32,7 @@ await writeFile(helpPath, (await readFile(helpPath, 'utf8')).replace('Windows �
 const readme = (await readFile(join(payload, 'README.txt'), 'utf8'))
   .replace('Windows x64 本地候选', 'Windows 11 x64 · Developer Alpha')
   .replace('本地候选未经代码签名，不自动安装或发布。', '本版尚未进行 Windows 代码签名。请按组织的软件安装政策处理系统提示。');
-await writeFile(join(payload, 'README.txt'), readme + '\n安装程序按当前用户安装，添加开始菜单入口并提供卸载；ZIP 解压后可直接使用。\n运行库：https://aka.ms/vs/17/release/vc_redist.x64.exe\n更新或卸载前先退出界面；若后台直接运行于应用目录，只能在没有活动或待核对任务时从概览停止。不会强制结束进程，卸载保留外部设备配置、身份与历史。\n');
+await writeFile(join(payload, 'README.txt'), readme + '\n安装程序按当前用户安装，添加开始菜单入口并提供卸载；ZIP 解压后可直接使用。\n运行库：https://aka.ms/vc14/vc_redist.x64.exe\n更新或卸载前先退出界面；若后台直接运行于应用目录，只能在没有活动或待核对任务时从概览停止。不会强制结束进程，卸载保留外部设备配置、身份与历史。\n');
 const metadata = { version: pkg.version, tag: values.tag, revision, frontend: 'gpui', platform: 'win32', arch: 'x64',
   minimumWindows: '11', signature: 'unsigned',
   source: `https://github.com/hutian-ai/harness-dock/tree/${revision}`,
