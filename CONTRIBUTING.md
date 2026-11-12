@@ -1,6 +1,6 @@
 # 贡献指南
 
-harness-dock 把原生 Harness 接入产品，让任务在调用方所选设备上执行。它作为 AI Infra 提供跨设备接入、连接与执行管理；业务交互、业务授权与结果验收归调用方应用，内部工具与原生权限归 Harness。先阅读 [架构](apps/docs-site/README.md#architecture)、[支持范围](apps/docs-site/README.md#support) 和 [构建与分发](apps/docs-site/README.md#distribution)。已发布设备执行仅限 macOS arm64。App `v0.1.3` 使用 GPUI Kit，要求 macOS 15+ arm64；旧 Swift App `v0.1.2` 保留 macOS 13+ 下载。独立 SDK 仍为 `sdk-v0.1.2`。Windows 原生 CLI/Daemon 与新增 SDK API 仍是未独立发行的源码路径，不由构建成功推导目标设备验收完成。
+harness-dock 把原生 Harness 接入产品，让任务在调用方所选设备上执行。它作为 AI Infra 提供跨设备接入、连接与执行管理；业务交互、业务授权与结果验收归调用方应用，内部工具与原生权限归 Harness。先阅读 [架构](apps/docs-site/README.md#architecture)、[支持范围](apps/docs-site/README.md#support) 和 [构建与分发](apps/docs-site/README.md#distribution)。设备发行包含 macOS arm64 和独立的 Windows 11 x64 Developer Alpha。App `v0.1.3` 使用 GPUI Kit，要求 macOS 15+ arm64；旧 Swift App `v0.1.2` 保留 macOS 13+ 下载。独立 SDK 仍为 `sdk-v0.1.2`。Windows 客户端与附带后台由 v0.1.3-windows.1 单独发行；新增 SDK API 仍是源码能力，不由构建成功推导目标设备验收完成。
 
 ## 开发环境
 

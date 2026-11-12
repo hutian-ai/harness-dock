@@ -14,9 +14,9 @@
       deviceEntry.href='https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3/harness-dock-panel-gpui-0.1.3-darwin-arm64.zip';
       deviceNote.textContent='macOS 15+ · Apple 芯片 · Alpha 尚未完成 Apple 公证';
     }else if(kind==='windows'){
-      deviceLabel.textContent='Windows 安装指南';
-      deviceEntry.href=base+'installation/#windows-desktop-candidate';
-      deviceNote.textContent='Windows 11 x64 · 源码构建 · 暂无公开安装包';
+      deviceLabel.textContent='下载 Windows 版';
+      deviceEntry.href='https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3-windows.1/harness-dock-panel-gpui-0.1.3-windows.1-windows-x64-setup.exe';
+      deviceNote.textContent='Windows 11 · Intel/AMD x64 · Developer Alpha · 未签名';
     }else if(kind==='linux'){
       deviceLabel.textContent='查看支持平台';
       deviceNote.textContent='Linux 暂不支持作为执行设备；可部署 Server';

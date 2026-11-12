@@ -6,7 +6,7 @@
 
 产品通过 SDK 选择设备并发起任务；所选电脑上的原生 Harness 执行任务，进度、原生审批和结果回到产品。用户已有的安装、登录、模型配置与工具留在执行电脑上。
 
-[产品文档](https://hutian-ai.github.io/harness-dock/) · [下载 macOS App v0.1.3](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3/harness-dock-panel-gpui-0.1.3-darwin-arm64.zip) · [Windows 桌面源码](https://hutian-ai.github.io/harness-dock/installation/#windows-desktop-candidate) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.3)
+[产品文档](https://hutian-ai.github.io/harness-dock/) · [下载 macOS App v0.1.3](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3/harness-dock-panel-gpui-0.1.3-darwin-arm64.zip) · [Windows 安装程序](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3-windows.1/harness-dock-panel-gpui-0.1.3-windows.1-windows-x64-setup.exe) · [Windows 便携 ZIP](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3-windows.1/harness-dock-panel-gpui-0.1.3-windows.1-windows-x64.zip)
 
 <a href="https://hutian-ai.github.io/harness-dock/app/"><img src="apps/docs-site/public/screenshots/app-overview.png" width="1100" alt="界舟 macOS App 概览：连接状态、Codex 与 dsh 执行记录、并发数和 Token 用量"></a>
 
@@ -18,7 +18,7 @@
 | --- | --- |
 | 给应用、Agent 或自动化流程接入原生执行 | [SDK：完成第一个任务](https://hutian-ai.github.io/harness-dock/sdk/#quick-connect) |
 | 把 Mac 连接给远端产品使用 | [App：安装与连接](https://hutian-ai.github.io/harness-dock/quickstart/) |
-| 把 Windows 11 x64 连接给远端产品使用 | [Windows 桌面源码构建](https://hutian-ai.github.io/harness-dock/installation/#windows-desktop-candidate) · [CLI/Daemon](https://hutian-ai.github.io/harness-dock/installation/#windows-daemon) |
+| 把 Windows 11 x64 连接给远端产品使用 | [Windows 安装与连接](https://hutian-ai.github.io/harness-dock/installation/#windows-install) |
 | 为应用和电脑准备共同的连接服务 | [管理员：部署 Server](https://hutian-ai.github.io/harness-dock/server/) |
 
 例如，在产品里加入“生成报告”：产品选择一台获授权的电脑，提交任务，由那里的 Harness 使用已有工具处理资料，再接回报告并验收。具体工具能力取决于执行电脑上的原生环境与权限。
@@ -42,18 +42,18 @@ Dock 提供设备接入与执行管理。产品负责业务界面、业务授权
 
 ## 下载与当前版本
 
-**macOS 可直接下载；Windows 暂无公开安装包。** Windows GPUI 桌面目前需要在 Windows 上从源码构建，入口见下表；它不包含在 macOS ZIP 或旧 SDK 归档中。
+**macOS 与 Windows 11 x64 均可直接下载。** Windows 安装程序按当前用户安装，提供开始菜单入口与卸载，也可选择便携 ZIP。Windows 和 macOS、SDK 分别发行。
 
 | 发行 | 用途与支持范围 |
 | --- | --- |
 | **App v0.1.3 · Developer Alpha** | GPUI 桌面客户端，macOS **15+、Apple 芯片**；Codex 已支持，dsh 实验适配。 |
-| Windows 11 x64 · 源码候选 | CLI/Daemon 与 GPUI 桌面；[准备环境并构建](https://hutian-ai.github.io/harness-dock/installation/#windows-desktop-candidate)，尚无公开下载包。 |
+| [Windows v0.1.3-windows.1 · Developer Alpha](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.3-windows.1) | Windows 11、Intel/AMD x64；安装程序和便携 ZIP，自带 Node.js 与独立后台。 |
 | [旧 App v0.1.2](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.2) | Swift 菜单栏客户端，macOS 13+、Apple 芯片。 |
 | [SDK sdk-v0.1.2](https://github.com/hutian-ai/harness-dock/releases/tag/sdk-v0.1.2) | 独立的 Node.js 连接 SDK、Server 与 macOS arm64 设备 CLI；需要 Node.js 22.19+。 |
 
 App 自带运行时与设备后台，无需 Git、pnpm 或自行构建。原生 Codex/dsh 仍需在执行电脑上安装并登录。App 采用 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证；首次打开限制见[常见问题](https://hutian-ai.github.io/harness-dock/troubleshooting/)。
 
-Windows 11 x64 提供实验性的 CLI/Daemon 和 GPUI 桌面源码候选，已通过控制链路、Codex/dsh 真实执行验收及本地窗口验证。桌面可用 `pnpm panel:windows:build` 构建，在窗口中粘贴设备邀请或选择配对文件；登录自启、链接协议注册与正式发行包尚未提供。macOS Intel 与 Linux 执行设备未支持。Linux 可部署 Server。[完整支持范围](https://hutian-ai.github.io/harness-dock/support/)。
+Windows 11 x64 提供 Developer Alpha 安装程序和便携 ZIP，可在窗口中粘贴设备邀请或选择配对文件；控制链路、Codex/dsh 真实执行和本地窗口已有分别验收记录。Windows 程序尚未代码签名，需 Microsoft Visual C++ x64 运行库；登录自启、链接协议注册和单实例激活尚未提供。macOS Intel 与 Linux 执行设备未支持。Linux 可部署 Server。[完整支持范围](https://hutian-ai.github.io/harness-dock/support/)。
 
 Windows daemon 源码可在 Node.js 22.19+、pnpm 12.15.0 下构建。运行 `pnpm install --frozen-lockfile` 后执行 `pnpm check:windows`，检查 NTFS 权限、命名管道鉴权、后台启停、升级回滚、长路径会话存储和 SDK 连通性。此检查不调用模型；真实执行另跑 `pnpm accept:codex` / `pnpm accept:dsh`。已验收环境使用 Node.js 24.22.1；dsh 0.2.2-rc.1 要求 Node.js 24.9+。PowerShell 使用步骤见[Windows daemon 源码](https://hutian-ai.github.io/harness-dock/installation/#windows-daemon)。
 
