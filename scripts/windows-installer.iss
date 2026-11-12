@@ -75,7 +75,8 @@ begin
     for I := 0 to Processes.Count - 1 do begin
       Process := Processes.ItemIndex(I);
       if not VarIsNull(Process.ExecutablePath) then begin
-        ExecutablePath := Lowercase(Process.ExecutablePath);
+        ExecutablePath := Process.ExecutablePath;
+        ExecutablePath := Lowercase(ExecutablePath);
         if Pos(Directory, ExecutablePath) = 1 then Exit;
       end;
     end;

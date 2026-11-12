@@ -27,6 +27,8 @@ await mkdir(output); // Never overlay an existing release or active application.
 const payload = join(output, 'payload');
 await mkdir(payload);
 for (const name of ['HarnessDock.exe', 'resources', 'README.txt']) await cp(join(panel, name), join(payload, name), { recursive: true });
+const helpPath = join(payload, 'resources/ConnectionHelp.html');
+await writeFile(helpPath, (await readFile(helpPath, 'utf8')).replace('Windows 本地候选', 'Windows Developer Alpha'));
 const readme = (await readFile(join(payload, 'README.txt'), 'utf8'))
   .replace('Windows x64 本地候选', 'Windows 11 x64 · Developer Alpha')
   .replace('本地候选未经代码签名，不自动安装或发布。', '本版尚未进行 Windows 代码签名。请按组织的软件安装政策处理系统提示。');

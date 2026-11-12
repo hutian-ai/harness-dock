@@ -48,6 +48,17 @@ jobs:
           if (!$compiler) { throw 'The Windows runner must include Inno Setup' }
           "WINDOWS_RELEASE_TAG=$tag" >> $env:GITHUB_ENV
           "ISCC=$compiler" >> $env:GITHUB_ENV
+      - name: Compile installer script before the full desktop build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $payload = Join-Path $env:RUNNER_TEMP 'installer-syntax-payload'
+          New-Item -ItemType Directory -Path "$payload/resources" -Force | Out-Null
+          foreach ($name in @('HarnessDock.exe', 'README.txt', 'release.json')) { Set-Content -LiteralPath (Join-Path $payload $name) -Value 'Syntax check only, never distributed' }
+          Copy-Item LICENSE "$payload/resources/LICENSE"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          & $env:ISCC "/DPayloadDir=$payload" "/DPackageVersion=$version" "/DOutputDir=$env:RUNNER_TEMP" '/DArtifactName=installer-syntax-check' scripts/windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer script compilation failed' }
       - name: Install pinned dependencies and toolchain
         run: |
           npm install --global pnpm@12.15.0
