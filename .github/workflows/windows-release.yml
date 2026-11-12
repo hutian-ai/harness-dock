@@ -59,6 +59,11 @@ jobs:
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           & $env:ISCC "/DPayloadDir=$payload" "/DPackageVersion=$version" "/DOutputDir=$env:RUNNER_TEMP" '/DArtifactName=installer-syntax-check' scripts/windows-installer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer script compilation failed' }
+          $install = Join-Path $env:RUNNER_TEMP 'installer-preflight-install'
+          $p = Start-Process -FilePath "$env:RUNNER_TEMP/installer-syntax-check.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$install`"" -WindowStyle Hidden -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer preflight failed: $($p.ExitCode)" }
+          $p = Start-Process -FilePath "$install/unins000.exe" -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -WindowStyle Hidden -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Uninstaller preflight failed: $($p.ExitCode)" }
       - name: Install pinned dependencies and toolchain
         run: |
           npm install --global pnpm@12.15.0
