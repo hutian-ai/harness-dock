@@ -11,6 +11,7 @@ import { macAutostart, nativePathVariables, type Autostart } from './autostart.t
 import { readConfig } from './config.ts';
 import { control, type LocalStatus } from './local-control.ts';
 import { startBackground, stopIdleDaemon, waitForDaemon } from './process-management.ts';
+import { installationEnvironment } from './installation-environment.ts';
 import { verifyRelease } from './release-manifest.ts';
 import { legacyOperationRecovery, withOperationOwner } from './operation-owner.ts';
 
@@ -252,7 +253,7 @@ export async function manageInstallation(command: InstallationCommand, options: 
       } catch (error) {
         await stopIdleDaemon(config);
         await service!.disable(previous.current.runtime);
-        if (wasRunning) await startBackground(config, configPath, entrypoint(root, previous.current), previous.current.runtime);
+        if (wasRunning) await startBackground(config, configPath, entrypoint(root, previous.current), previous.current.runtime, [], installationEnvironment(previous, previous.current.runtime));
         throw error;
       }
     }
@@ -273,7 +274,7 @@ export async function manageInstallation(command: InstallationCommand, options: 
           await service.enable(next.runtime); await service.start();
           status = await waitForDaemon(config, entrypoint(root, next), next.runtime);
         } else {
-          status = await startBackground(config, configPath, entrypoint(root, next), next.runtime);
+          status = await startBackground(config, configPath, entrypoint(root, next), next.runtime, [], installationEnvironment(record, next.runtime));
         }
       }
       return { root, current: next, previous: previous.current, autostart: previous.autostart, ...(status ? { status } : { running: false }) };
@@ -288,7 +289,7 @@ export async function manageInstallation(command: InstallationCommand, options: 
             await service.enable(previous.current.runtime); await service.start();
             await waitForDaemon(config, entrypoint(root, previous.current), previous.current.runtime);
           } else {
-            await startBackground(config, configPath, entrypoint(root, previous.current), previous.current.runtime);
+            await startBackground(config, configPath, entrypoint(root, previous.current), previous.current.runtime, [], installationEnvironment(previous, previous.current.runtime));
           }
         }
       } catch (recovery) {
@@ -321,6 +322,6 @@ export async function startInstalled(configPath: string, root: string) {
       await service.start();
       return waitForDaemon(config, entrypoint(root, record.current), record.current.runtime);
     }
-    return startBackground(config, configPath, entrypoint(root, record.current), record.current.runtime);
+    return startBackground(config, configPath, entrypoint(root, record.current), record.current.runtime, [], installationEnvironment(record, record.current.runtime));
   });
 }

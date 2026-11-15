@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -23,12 +23,13 @@ test('background command execution survives removal of the launching directory',
   // without discovering a native Harness or sending a model request.
   await writeFile(entrypoint, `
 import {randomUUID} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {serveControl} from ${JSON.stringify(pathToFileURL(resolve('apps/daemon/dist/local-control.js')).href)};
 import {DeviceSelfTest} from ${JSON.stringify(pathToFileURL(resolve('apps/daemon/dist/device-self-test.js')).href)};
 import {runBoundedCommand} from ${JSON.stringify(pathToFileURL(resolve('packages/drivers/dist/process-command.js')).href)};
 const config=JSON.parse(await readFile(process.argv[3],'utf8'));
+await writeFile(config.stateDir+'/selected-environment.json',JSON.stringify({home:process.env.DSH_HOME}));
 const daemonId=randomUUID();
 const test=new DeviceSelfTest(config.stateDir,daemonId,async()=>{
   const result=await runBoundedCommand(process.execPath,['-e',"process.stdout.write('synthetic-command-complete')"]);
@@ -43,9 +44,10 @@ await serveControl(config,status,async()=>{},undefined,id=>test.start(id));
   await promisify(execFile)(process.execPath, ['--input-type=module', '-e', `
 import {startBackground} from ${JSON.stringify(startModule)};
 import {readConfig} from ${JSON.stringify(configModule)};
-await startBackground(await readConfig(process.argv[1]),process.argv[1],process.argv[2]);
+await startBackground(await readConfig(process.argv[1]),process.argv[1],process.argv[2],process.execPath,[],{...process.env,DSH_HOME:'synthetic-selected-home'});
 `, configPath, entrypoint], { cwd: launcher, timeout: 15_000 });
   const before = (await control(config, 'status'))!;
+  assert.deepEqual(JSON.parse(await readFile(join(config.stateDir, 'selected-environment.json'), 'utf8')), { home: 'synthetic-selected-home' });
   assert.ok(before.daemonId);
   await rm(launcher, { recursive: true });
   const id = randomUUID();
