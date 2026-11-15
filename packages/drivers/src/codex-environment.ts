@@ -6,6 +6,7 @@ import type { DiscoveredProvider, ProviderOverride } from './discovery.ts';
 import type { CodexExecutionConfig } from './codex.ts';
 import { installedVersion, pathCandidates, usableFile } from './installation-lookup.ts';
 import { runBoundedCommand } from './process-command.ts';
+import { windowsCodexApplications } from './windows-codex.ts';
 
 const bundleIds = ['com.openai.codex', 'com.openai.codex.alpha', 'com.openai.codex.beta', 'com.openai.codex.nightly'];
 const vendorTeam = '2DC432GLL2';
@@ -150,6 +151,11 @@ export async function discoverCodexInstallation(options: { environment: NodeJS.P
     }
     const shell = environment.SHELL ?? (process.platform !== 'win32' && await samePath(homeDirectory, homedir()) ? userInfo().shell : undefined);
     candidates.push(...await pathCandidates('codex', { ...environment, ...(shell ? { SHELL: shell } : {}) }, signal));
+    if (!candidates.length && process.platform === 'win32' && await samePath(homeDirectory, homedir())) {
+      const applications = await windowsCodexApplications(baseEnv(), signal);
+      if (applications.length > 1) return { ...descriptor, reason: 'codex_installation_ambiguous', candidates: applications };
+      candidates.push(...applications.map(path => ({ path, source: 'app' as const })));
+    }
   }
   const available = candidates.filter((candidate, index) => candidates.findIndex(other => other.path === candidate.path) === index);
   for (const candidate of available) {

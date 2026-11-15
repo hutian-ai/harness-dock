@@ -34,12 +34,12 @@ export async function stopIdleDaemon(config: DeviceConfig): Promise<boolean> {
   throw new Error('maintenance_stop_unconfirmed');
 }
 
-export async function startBackground(config: DeviceConfig, path: string, entrypoint: string, runtime = process.execPath, execArgv: string[] = []): Promise<LocalStatus> {
+export async function startBackground(config: DeviceConfig, path: string, entrypoint: string, runtime = process.execPath, execArgv: string[] = [], environment = process.env): Promise<LocalStatus> {
   const existing = await control(config, 'status');
   if (existing) return { ...existing, alreadyRunning: true } as LocalStatus;
   await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
   // Dock state outlives temporary launchers and avoids inheriting a deeply nested release cwd.
-  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { cwd: toNamespacedPath(config.stateDir), detached: true, windowsHide: true, stdio: 'ignore' });
+  const child = spawn(runtime, [...execArgv, entrypoint, 'run', path, '--background-log'], { cwd: toNamespacedPath(config.stateDir), env: environment, detached: true, windowsHide: true, stdio: 'ignore' });
   let error: Error | undefined;
   child.on('error', value => { error = value; });
   child.unref();

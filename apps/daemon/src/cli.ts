@@ -63,6 +63,13 @@ try {
       if (command === 'install' || command === 'upgrade' || command === 'rollback' || command === 'autostart') {
         console.log(JSON.stringify(await manageInstallation(command, { config: path, root, bundle: values.bundle, runtime: values.node, disable: values.disable }), null, 2));
       } else if (command === 'run') {
+        // Older desktop launchers can start this release with only their GUI environment.
+        const installed = await readInstallation(root, path);
+        if (installed && installed.nodeId === config.nodeId
+          && resolve(fileURLToPath(import.meta.url)) === resolve(root, 'releases', installed.current.id, 'dist/cli.js')) {
+          const { installationEnvironment } = await import('./installation-environment.ts');
+          process.env = installationEnvironment(installed, process.execPath);
+        }
         if (values['background-log']) {
           await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
           (await import('./rotating-log.ts')).installBackgroundLog(config.stateDir);
