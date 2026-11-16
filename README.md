@@ -8,6 +8,10 @@
 
 [产品文档](https://hutian-ai.github.io/harness-dock/) · [下载 App v0.1.3](https://github.com/hutian-ai/harness-dock/releases/download/v0.1.3/harness-dock-panel-gpui-0.1.3-darwin-arm64.zip) · [版本说明](https://github.com/hutian-ai/harness-dock/releases/tag/v0.1.3)
 
+<a href="https://hutian-ai.github.io/harness-dock/app/"><img src="apps/docs-site/public/screenshots/app-overview.png" width="1100" alt="界舟 macOS App 概览：连接状态、Codex 与 dsh 执行记录、并发数和 Token 用量"></a>
+
+*macOS App v0.1.3 · 演示数据。查看这台电脑上的执行状态与已上报用量；任务发起、审批与结果验收在你的产品中完成。*
+
 ## 从你想做的事开始
 
 | 你想做什么 | 从哪里开始 |

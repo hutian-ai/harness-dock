@@ -91,3 +91,16 @@
 /* Current task sections and retained public anchors share the sticky-header offset. */
 article h3[id],article span[id]{scroll-margin-top:135px}
 .page-toc a[data-level="3"]{padding-left:12px}
+
+/* Product screenshots retain their native UI and open as full-size images. */
+.product-shot{margin:28px 0 32px;min-width:0}
+.product-shot>a{display:block;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.06)}
+.product-shot img{display:block;width:100%;height:auto;margin:0}
+.product-shot a:focus-visible{outline:3px solid var(--accent);outline-offset:5px}
+.product-shot figcaption{margin-top:12px;color:var(--muted);font-size:13px;line-height:1.8}
+.product-shot figcaption span{display:block;font-size:12px}
+.product-showcase>p{max-width:760px}
+.showcase-points{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px;margin:24px 0}
+.showcase-points strong{font-size:16px}.showcase-points p{font-size:14px;color:var(--muted);line-height:1.8;margin:8px 0 0}
+.product-showcase .showcase-platform{font-size:13px;color:var(--muted);max-width:none}
+@media(max-width:700px){.showcase-points{grid-template-columns:1fr;gap:18px}.product-shot{margin:20px 0 24px}.product-shot>a{border-radius:7px}}
