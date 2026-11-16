@@ -236,10 +236,17 @@ impl Panel {
         })
     }
     fn page_feedback(&self, cx: &mut Context<Self>) -> Option<Div> {
+        self.page_feedback_with_attention(true, cx)
+    }
+    fn page_feedback_with_attention(
+        &self,
+        show_attention: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         let onboarding =
             !yes(&self.state, "configured") && matches!(self.page, Page::Home | Page::Connect);
         let error = self.error.as_ref().filter(|_| !onboarding);
-        let attention = self.device_attention(cx);
+        let attention = show_attention.then(|| self.device_attention(cx)).flatten();
         let notice = self.notice.as_ref().filter(|_| !onboarding);
         if error.is_none() && attention.is_none() && notice.is_none() {
             return None;

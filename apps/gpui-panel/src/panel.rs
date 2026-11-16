@@ -64,6 +64,7 @@ pub(super) struct DeviceAttention {
     pub title: &'static str,
     pub detail: &'static str,
     pub warning: bool,
+    pub test: bool,
 }
 
 pub struct Panel {
@@ -343,8 +344,9 @@ impl Panel {
         if self.active_operation == Some("test") {
             Some(DeviceAttention {
                 title: "正在提交本机测试",
-                detail: "收到测试编号后，将在原记录中查看结果。",
+                detail: "连接服务正在接收这次测试。",
                 warning: false,
+                test: true,
             })
         } else if self.pending.is_some() {
             Some(DeviceAttention {
@@ -355,12 +357,14 @@ impl Panel {
                     "连接服务已停止。恢复后仅查询原测试，不会重复发送请求。"
                 },
                 warning: true,
+                test: true,
             })
         } else if self.state["unresolved"].as_u64().unwrap_or(0) > 0 {
             Some(DeviceAttention {
                 title: "有执行结果待核对",
                 detail: "请回原调用方核对原任务。维护暂不可用，不会自动重派任务。",
                 warning: true,
+                test: false,
             })
         } else if !self.stale
             && yes(&self.state, "configured")
@@ -374,18 +378,21 @@ impl Panel {
                     "启动原连接后可继续核对任务；不会重新发送任务。核对前暂不能移除服务器。"
                 },
                 warning: true,
+                test: false,
             })
         } else if self.test_running() {
             Some(DeviceAttention {
                 title: "本机测试进行中",
                 detail: "正在等待原测试结果，可查看其他 Harness；维护暂不可用。",
                 warning: false,
+                test: true,
             })
         } else if self.state["active"].as_u64().unwrap_or(0) > 0 {
             Some(DeviceAttention {
                 title: "设备正在执行任务",
                 detail: "进度与原生审批请在调用方查看。任务结束前暂不可测试或维护。",
                 warning: false,
+                test: false,
             })
         } else if self.state["legacyLocks"]
             .as_array()
@@ -395,6 +402,7 @@ impl Panel {
                 title: "旧版操作需要核对",
                 detail: "请在设置中核对中断操作，建立恢复检查点后再处理原操作锁。",
                 warning: true,
+                test: false,
             })
         } else {
             None

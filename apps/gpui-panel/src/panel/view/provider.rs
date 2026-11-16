@@ -3,7 +3,6 @@ use gpui_kit::component::{
     description_list::{DescriptionItem, DescriptionList},
     h_flex,
     label::Label,
-    separator::Separator,
     table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow},
     tooltip::Tooltip,
     v_flex,
@@ -40,6 +39,16 @@ impl Panel {
             .filter(|test| test["provider"].as_str().unwrap_or("codex") == key)
             .max_by_key(|test| test["startedAt"].as_u64().unwrap_or(0))
             .cloned();
+        let pending = self.pending.as_ref().filter(|test| test.provider == key);
+        let submitting = pending.is_some() && self.active_operation == Some("test");
+        // While submitting, the previous record cannot describe the current test.
+        let latest = latest.filter(|_| pending.is_none());
+        let running_test = latest
+            .as_ref()
+            .is_some_and(|test| test["state"] == "running");
+        let local_test = pending.is_some() || running_test;
+        let inline_attention = (pending.is_some() || self.pending.is_none() && running_test)
+            && self.attention().is_some_and(|attention| attention.test);
         let installed = provider["status"] == "installed";
         let name = provider_name(&provider);
         let name = if name.is_empty() {
@@ -54,7 +63,7 @@ impl Panel {
         };
         let when = latest
             .as_ref()
-            .filter(|_| !self.stale && self.pending.as_ref().is_none_or(|p| p.provider != key))
+            .filter(|_| !self.stale && !running_test)
             .and_then(|t| t["finishedAt"].as_u64().or(t["startedAt"].as_u64()))
             .map(|at| {
                 let now = std::time::SystemTime::now()
@@ -72,7 +81,16 @@ impl Panel {
                     format!("{} 天前", minutes / 1440)
                 }
             });
-        let status = Label::new(self.test_label(key)).text_sm();
+        let result_state = latest
+            .as_ref()
+            .filter(|_| !self.stale)
+            .and_then(|test| test["state"].as_str());
+        let (status, result_icon) = match result_state {
+            Some("passed") => ("测试通过".into(), Some(IconName::CircleCheck)),
+            Some("failed") => ("测试未通过".into(), Some(IconName::CircleAlert)),
+            _ => (self.test_label(key), None),
+        };
+        let status = Label::new(status).text_sm();
         let status = match when {
             Some(age) => status.secondary(format!("· {age}")),
             None => status,
@@ -102,7 +120,18 @@ impl Panel {
         let configured = yes(&self.state, "configured");
         let running = yes(&self.state, "running");
         let supported = yes(&provider, "selfTestSupported");
-        let (heading, guidance, action) = if self.stale {
+        let (heading, guidance, action) = if local_test {
+            (
+                "模型响应测试",
+                None,
+                Some(
+                    button("test", "测试响应")
+                        .icon(IconName::Play)
+                        .loading(submitting || running_test)
+                        .disabled(true),
+                ),
+            )
+        } else if self.stale {
             (
                 "状态待更新",
                 Some("刷新后可确认本机安装与连接状态。"),
@@ -183,7 +212,7 @@ impl Panel {
         } else {
             let (label, guidance): (String, Option<&str>) =
                 match latest.as_ref().and_then(|test| test["state"].as_str()) {
-                    Some("failed") => ("重新测试".into(), failure),
+                    Some("passed" | "failed") => ("重新测试".into(), None),
                     Some("unknown") => (
                         "发起新测试".into(),
                         Some("原测试结果仍待核对。新测试会使用独立编号。"),
@@ -241,11 +270,12 @@ impl Panel {
         .into_iter()
         .filter(|(_, _, value)| !value.is_empty())
         .collect();
-        let show_result = latest.is_some()
-            || self
-                .pending
-                .as_ref()
-                .is_some_and(|test| test.provider == key);
+        let show_result = latest.is_some() || pending.is_some();
+        let test_id = match pending {
+            Some(test) if !submitting => test.id.clone(),
+            Some(_) => String::new(),
+            None => latest.as_ref().map(|test| text(test, "id")).unwrap_or_default(),
+        };
         v_flex()
             .w_full()
             .max_w(px(720.))
@@ -280,7 +310,7 @@ impl Panel {
                         self.muted("任务到达时由连接服务启动，无需手动打开客户端。", cx)
                     })),
             )
-            .children(self.page_feedback(cx))
+            .children(self.page_feedback_with_attention(!inline_attention, cx))
             .children((installed && native["state"] == "reported").then(|| {
                 GroupBox::new()
                     .outline()
@@ -341,39 +371,39 @@ impl Panel {
                             .child(section_title(heading).flex_shrink_0())
                             .children(action.map(|action| action.flex_shrink_0())),
                     )
-                    .child(
+                    .children((!show_result || guidance.is_some()).then(|| {
                         v_flex()
                             .gap_2()
-                            .children((installed && !self.stale).then(|| {
+                            .children((installed && !self.stale && !show_result && guidance.is_none()).then(|| {
                                 self.muted(
-                                    "可选检查：发送一条简短请求，确认模型能否响应。会使用模型额度。",
+                                    "发送一条简短请求，确认模型能否响应。会使用模型额度。",
                                     cx,
                                 )
                             }))
-                            .children(guidance.map(|message| self.muted(message, cx))),
-                    )
+                            .children(guidance.map(|message| self.muted(message, cx)))
+                    }))
                     .children(show_result.then(|| {
                         v_flex()
-                            .gap_3()
-                            .child(Separator::horizontal().h(px(1.)))
-                            .child(status)
+                            .gap_2()
+                            .children(inline_attention.then(|| self.device_attention(cx)).flatten())
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .children(result_icon.map(|icon| glyph(icon, 14.)))
+                                    .children((!inline_attention).then_some(status))
+                                    .children((!test_id.is_empty()).then(|| {
+                                        Clipboard::new("copy-test-id")
+                                            .small()
+                                            .value(test_id)
+                                            .tooltip("复制测试编号")
+                                            .accessibility_label("复制测试编号")
+                                    })),
+                            )
                             .children(
                                 failure
                                     .filter(|message| !self.stale && Some(*message) != guidance)
                                     .map(|message| self.muted(message, cx)),
                             )
-                            .children(latest.as_ref().and_then(|test| {
-                                let id = text(test, "id");
-                                (!id.is_empty()).then(|| {
-                                    DescriptionList::horizontal()
-                                        .columns(1)
-                                        .bordered(false)
-                                        .label_width(px(120.))
-                                        .child(provider_fact("测试编号",
-                                            self.technical_value("test-id", "测试编号", id, cx),
-                                        ))
-                                })
-                            }))
                     })),
             )
             .into_any_element()
