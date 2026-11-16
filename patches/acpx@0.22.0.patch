@@ -1,0 +1,221 @@
+diff --git a/dist/queue-owner-runtime-ucHvXJ33.js b/dist/queue-owner-runtime-ucHvXJ33.js
+--- a/dist/queue-owner-runtime-ucHvXJ33.js
++++ b/dist/queue-owner-runtime-ucHvXJ33.js
+@@ -1345,9 +1345,11 @@
+ }
+ function inheritedNameFilter(policy) {
+ 	const blocked = new Set((policy?.block ?? []).map(envNameKey));
+-	const allowed = policy?.allow ? new Set([...essentialNames(), ...policy.allow].map(envNameKey)) : void 0;
++	const allowed = policy?.allow ? new Set(policy.allow.map(envNameKey)) : void 0;
+ 	return (name) => {
+ 		const key = envNameKey(name);
++		// An explicit embedder allowlist is exact, including ambient auth grants.
++		if (allowed) return !blocked.has(key) && allowed.has(key);
+ 		if (key.startsWith(AUTH_GRANT_PREFIX)) return true;
+ 		if (blocked.has(key)) return false;
+ 		return !allowed || allowed.has(key) || ESSENTIAL_PREFIXES.some((p) => key.startsWith(p));
+@@ -1905,6 +1907,7 @@
+ 			} finally {
+ 				writer.releaseLock();
+ 			}
++      options.onMessageWritten?.(message);
+ 			if (activePrompt && promptOwner) options.onPromptRequestWritten(activePrompt, promptOwner);
+ 		} })
+ 	};
+@@ -2582,6 +2585,7 @@
+ 	initResult;
+ 	loadedSessionId;
+ 	eventHandlers;
++  permissionResponseWrites = new Map();
+ 	permissionStats = {
+ 		requested: 0,
+ 		approved: 0,
+@@ -2999,8 +3003,8 @@
+ 	createConnection(stream, launch, capabilities) {
+ 		const app = client({ name: "acpx" }).onNotification(methods.client.session.update, async ({ params }) => {
+ 			await this.handleSessionUpdate(params);
+-		}).onNotification(methods.client.elicitation.complete, async () => {}).onRequest(methods.client.session.requestPermission, async ({ params, signal }) => {
+-			return await this.handlePermissionRequest(params, signal);
++		}).onNotification(methods.client.elicitation.complete, async () => {}).onRequest(methods.client.session.requestPermission, async ({ params, signal, requestId }) => {
++			return await this.handlePermissionRequest(params, signal, requestId);
+ 		}).onRequest(methods.client.elicitation.create, async ({ params, requestId, signal }) => {
+ 			return await this.handleElicitationRequest(params, requestId, signal);
+ 		});
+@@ -3069,6 +3073,10 @@
+ 			suppressReplaySessionUpdates: () => this.suppressSessionUpdates,
+ 			bindPromptOwner: (owner) => this.bindPromptOwner(owner),
+ 			assertPromptActive: (active) => this.assertPromptActive(active),
++			onMessageWritten: (message) => {
++				const id = responseId(message);
++				if (id !== void 0) this.permissionResponseWrites.get(id)?.resolve();
++			},
+ 			onPromptRequestWritten: (active, owner) => this.onPromptRequestWritten(active, owner)
+ 		});
+ 	}
+@@ -3481,6 +3489,9 @@
+ 		if (unref) try {
+ 			agent.unref();
+ 		} catch {}
++	}
++	requestExtension(method, params, authority) {
++		return this.runConnectionRequest(() => this.getConnection().agent.request(method, params), authority);
+ 	}
+ 	getConnection() {
+ 		if (!this.connection) throw new Error("ACP client not started");
+@@ -3630,8 +3641,20 @@
+ 		await connection.agent.request(methods.agent.authenticate, { methodId: selected.methodId });
+ 		this.log(`authenticated with method ${selected.methodId} (${selected.source})`);
+ 	}
+-	async handlePermissionRequest(params, requestSignal) {
++	async handlePermissionRequest(params, requestSignal, requestId) {
+ 		const owner = this.captureDelegatedRequestOwner(params.sessionId, requestSignal);
++    let rejectWrite;
++    owner.responseSent = new Promise((resolve, reject) => {
++      rejectWrite = reject;
++      this.permissionResponseWrites.set(requestId, { resolve, reject });
++    });
++    const abortWrite = () => rejectWrite(new Error("Permission response transport is no longer active"));
++    owner.signal.addEventListener("abort", abortWrite, { once: true });
++    if (owner.signal.aborted) abortWrite();
++    void owner.responseSent.finally(() => {
++      owner.signal.removeEventListener("abort", abortWrite);
++      this.permissionResponseWrites.delete(requestId);
++    }).catch(() => {});
+ 		if (!this.isDelegatedRequestActive(owner)) return cancelledPermissionResponse();
+ 		if (!this.hasPermissionOwner(params.sessionId)) return this.finishPermissionRequest(params, owner, cancelledPermissionResponse());
+ 		if (this.initResult?.agentInfo?.name === "antigravity-acp" && params.toolCall.toolCallId.startsWith("interaction_")) {
+@@ -3658,11 +3681,23 @@
+ 			active.elicitationController.signal,
+ 			active.authority?.signal
+ 		].filter((candidate) => candidate !== void 0));
++		let rejectWrite;
++		const responseSent = new Promise((resolve, reject) => {
++			rejectWrite = reject;
++			this.permissionResponseWrites.set(requestId, { resolve, reject });
++		});
++		const abortWrite = () => rejectWrite(new Error("Elicitation response transport is no longer active"));
++		signal.addEventListener("abort", abortWrite, { once: true });
++		if (signal.aborted) abortWrite();
++		void responseSent.finally(() => {
++			signal.removeEventListener("abort", abortWrite);
++			this.permissionResponseWrites.delete(requestId);
++		}).catch(() => {});
+ 		const outcome = await raceWithAbort(signal, Promise.resolve().then(async () => {
+ 			signal.throwIfAborted();
+ 			return await handler(request, {
+ 				requestId,
+-				signal
++				signal, responseSent
+ 			});
+ 		}).then((response) => ({
+ 			kind: "response",
+@@ -3733,7 +3768,7 @@
+ 				sessionId: params.sessionId,
+ 				raw: params,
+ 				inferredKind: inferToolKind(params)
+-			}, { signal }));
++			}, { signal, responseSent: owner.responseSent }));
+ 			return this.hostPermissionDecisionResponse(params, owner, decision);
+ 		} catch (error) {
+ 			return this.hostPermissionErrorResponse(owner, error);
+diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
+--- a/dist/runtime.d.ts
++++ b/dist/runtime.d.ts
+@@ -802,6 +802,17 @@
+   isHealthy(): boolean;
+   probeAvailability(): Promise<void>;
+   doctor(): Promise<AcpRuntimeDoctorReport>;
++  /** Send a namespaced extension on an owned active turn, idle session, or sessionless agent. */
++  requestExtension(input: {
++    handle?: AcpRuntimeHandle;
++    agent?: string;
++    scope: "active-turn" | "session" | "agent";
++    requestId?: string;
++    signal?: AbortSignal;
++    assertActive?: () => void;
++    method: string;
++    params: Record<string, unknown>;
++  }): Promise<unknown>;
+   private resolveSessionIdentity;
+   findSession(input: {
+     sessionKey: string;
+diff --git a/dist/runtime.js b/dist/runtime.js
+--- a/dist/runtime.js
++++ b/dist/runtime.js
+@@ -967,6 +967,35 @@
+ 		const client = this.deps.clientFactory?.(clientOptions) ?? new AcpClient(clientOptions);
+ 		this.liveClients.add(client);
+ 		return client;
++	}
++	requestExtension(input, handle) {
++		this.assertOpen();
++		if (!/^_[a-zA-Z0-9]/u.test(input.method)) throw new Error("Expected a namespaced ACP extension method");
++		return this.trackTask((async () => {
++			if (input.scope === "active-turn") {
++				const controller = handle && this.activeControllers.get(handle.acpxRecordId);
++				if (!controller) throw Object.assign(new Error("ACP turn is no longer active"), { code: "ACP_TURN_NOT_ACTIVE" });
++				return await controller.requestExtension(input);
++			}
++			if (input.scope === "session" && handle) {
++				const id = handle.acpxRecordId ?? handle.sessionKey;
++				return await this.withManagerLock(this.runtimeOperationLocks, id, async () => {
++					if (this.activeControllers.has(id)) throw new Error("Cannot run a cold extension during an active turn");
++					const record = await this.requireRecord(id);
++					return await this.withRuntimeControlSession(record, "persistent", async ({ client }) =>
++						client.requestExtension(input.method, input.params, input), void 0, input);
++				}, input);
++			}
++			if (input.scope !== "agent" || handle || !input.agent) throw new Error("Invalid ACP extension scope");
++			const command = normalizeAgentCommandInput(this.options.agentRegistry.resolve(input.agent));
++			const client = createProbeClient({ ...this.options, mcpServers: [] }, input.agent, command, {
++				clientFactory: (options) => this.createClient(options)
++			});
++			try {
++				await client.start(input);
++				return await client.requestExtension(input.method, input.params, input);
++			} finally { await this.closeClient(client); }
++		})());
+ 	}
+ 	async probe() {
+ 		let client;
+@@ -1816,6 +1845,11 @@
+ 	}
+ 	buildRuntimeTurnController(task, turn) {
+ 		return {
++			requestExtension: async (input) => {
++				if (!task.state.turnActive || input.requestId !== task.input.requestId)
++					throw Object.assign(new Error("ACP turn is no longer active"), { code: "ACP_TURN_NOT_ACTIVE" });
++				return await turn.client.requestExtension(input.method, input.params, input);
++			},
+ 			hasActivePrompt: () => turn.client.hasActivePrompt(),
+ 			requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
+ 			setSessionMode: async (modeId, authority) => {
+@@ -2758,6 +2792,10 @@
+ 			onPermissionRequest: input.onPermissionRequest
+ 		});
+ 	}
++	async requestExtension(input) {
++		const handle = input.handle ? this.resolveManagerHandle(input.handle).handle : void 0;
++		return await (await this.getManager()).requestExtension(input, handle);
++	}
+ 	async getCapabilities(input) {
+ 		if (!input?.handle) return capabilitiesFromRecord(void 0);
+ 		const { handle } = this.resolveManagerHandle(input.handle);
+diff --git a/dist/session-options-D9KL7-d8.d.ts b/dist/session-options-D9KL7-d8.d.ts
+--- a/dist/session-options-D9KL7-d8.d.ts
++++ b/dist/session-options-D9KL7-d8.d.ts
+@@ -21,11 +21,14 @@
+ };
+ type AcpPermissionHandler = (request: AcpPermissionRequest, context: {
+   signal: AbortSignal;
++  /** Resolves only after the permission response has been written to the agent transport. */
++  responseSent: Promise<void>;
+ }) => Promise<AcpPermissionDecision | undefined>;
+ declare const ACP_ELICITATION_MODES: readonly ["form", "url"];
+ type AcpElicitationMode = (typeof ACP_ELICITATION_MODES)[number];
+ type AcpElicitationRequest = CreateElicitationRequest;
+ type AcpElicitationContext = {
++  responseSent: Promise<void>;
+   /** Exact JSON-RPC id of the outer `elicitation/create` request. */
+   requestId: JsonRpcId;
+   /** Aborts with the request itself or its owning prompt turn/session. */

@@ -1,3 +1,4 @@
+import { codexControl } from '../packages/drivers/src/codex-control.ts';
 import { createProviderAdapters } from '../packages/drivers/src/provider-adapter.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -34,7 +35,7 @@ for await (const line of createInterface({input:process.stdin})) {
  const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{secretPresent:process.env.${name}!==undefined,inheritedNames:Object.keys(process.env).filter(key=>${JSON.stringify(inheritedNames)}.includes(key)),explicitGrant:process.env.ACPX_AUTH_DOCK_EXPLICIT,home:process.env.CODEX_HOME,pathPresent:typeof process.env.PATH==='string',binary:process.env.CODEX_PATH,skillRoots:JSON.parse(process.env.CODEX_ACP_SKILL_ROOTS),nativeNode:process.env.CODEX_MCP_NODE_PATH,pipePresent:process.env.CODEX_APP_TOOLS_PIPE_PATH!==undefined,proxy:process.env.HTTPS_PROXY,certificate:process.env.NODE_EXTRA_CA_CERTS};
  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');
 }`);
-    const observed = await runtime.dockControl({ command: { operation: 'inspect' }, signal: AbortSignal.timeout(5000) });
+    const observed = await codexControl(runtime, { command: { operation: 'inspect' }, signal: AbortSignal.timeout(5000) });
     assert.deepEqual(observed, { secretPresent: false, inheritedNames: [], explicitGrant: 'synthetic-explicit-grant', home: root, pathPresent: true, binary:'/synthetic/codex', skillRoots:['/synthetic/skills'],nativeNode:'/synthetic/native-node',pipePresent:false,
       proxy:'http://proxy.example.test:8080',certificate:'/synthetic/ca.pem' });
   } finally {
@@ -87,7 +88,7 @@ for await (const line of createInterface({input:process.stdin})) {
  }
  send({jsonrpc:'2.0',id:q.id,result});
 }`);
-  const executor = new CodexExecutor({ cwd: root, codexHome: root, stateDir: root }, config => createCodexRuntime(config, [process.execPath, fixture]));
+  const executor = new CodexExecutor({ cwd: root, codexHome: root, stateDir: root }, (config, _command, observers) => createCodexRuntime(config, [process.execPath, fixture], observers));
   const { readFile } = await import('node:fs/promises');
   const calls = async () => (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as {method:string;pid:number;params?:{configId?:string;value?:string}});
   let ready = 0;
@@ -316,7 +317,7 @@ for await(const line of createInterface({input:process.stdin})){
  }
  send({id:q.id,result});
 }`);
-  const executor = new CodexExecutor({ cwd:root,codexHome:root,stateDir:root }, config=>createCodexRuntime(config,[process.execPath,fixture]));
+  const executor = new CodexExecutor({ cwd:root,codexHome:root,stateDir:root }, (config, _command, observers)=>createCodexRuntime(config,[process.execPath,fixture],observers));
   const writes:Promise<void>[]=[];let calls=0;
   try {
     const result=await executor.execute({runId:'native',model:'synthetic',prompt:'synthetic',signal:AbortSignal.timeout(10000),onReady:async()=>{},onEvent:async()=>{},permission:async(request,_signal,responseSent)=>{
@@ -345,7 +346,7 @@ if(q.method==='session/prompt'){
  result={stopReason:'end_turn'};
 }
 send({jsonrpc:'2.0',id:q.id,result});}`);
-  const executor=new CodexExecutor({cwd:root,codexHome:root,stateDir:root,desktopHost:{pipePath:join(root,'host.sock'),nodePath:process.execPath}},config=>createCodexRuntime(config,[process.execPath,fixture]));
+  const executor=new CodexExecutor({cwd:root,codexHome:root,stateDir:root,desktopHost:{pipePath:join(root,'host.sock'),nodePath:process.execPath}},(config, _command, observers)=>createCodexRuntime(config,[process.execPath,fixture],observers));
   try{
     const inspection=await executor.inspect(AbortSignal.timeout(10000));
     assert.equal(inspection.desktopHostState,'unavailable');

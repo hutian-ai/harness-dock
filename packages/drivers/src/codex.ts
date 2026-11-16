@@ -9,6 +9,8 @@ import { nativeElicitationForm, nativeElicitationResponse, type HarnessExecution
 import { AnswerBudget, MAX_EVIDENCE_BYTES, readBoundedText } from './output-limits.ts';
 import { applyNativePermissionMode, nativePermissionModes, type NativePermissionMode } from './native-permission-modes.ts';
 import { decodeCodexEvents } from './codex-events.ts';
+import { AcpUpdates } from './acp-updates.ts';
+import { codexControl } from './codex-control.ts';
 import { codexAdapterEnvironment } from './codex-policy.ts';
 import { observeStartup, startStartupSpan } from './startup-trace.ts';
 import type { CodexMessage, CodexTokens } from './codex-events.ts';
@@ -92,9 +94,11 @@ export class CodexExecutor {
   private threadId?: string;
   private executing = false;
   private startupRunId?: string;
+  private readonly updates = new AcpUpdates();
   private readonly startupSpans = new Map<string, ReturnType<typeof startStartupSpan>>();
   private readonly startupObservers: Pick<AcpRuntimeOptions, 'onAcpMessage' | 'processLifecycle'> = {
     onAcpMessage: (direction, value) => {
+      this.updates.observe(direction, value);
       if (!this.startupRunId) return;
       const message = object(value), id = message.id;
       if (typeof id !== 'number' && typeof id !== 'string') return;
@@ -159,7 +163,7 @@ export class CodexExecutor {
       if (previous) await runtime.prepareFreshSession({ handle: previous });
       const handle = await runtime.ensureSession({ sessionKey: 'capability-probe', agent: 'codex', mode: 'persistent', cwd: this.config.cwd });
       const command = { operation: 'inspect' as const, hostStatus: !!this.config.desktopHost };
-      const result = object(await runtime.dockControl({ handle, command, signal }));
+      const result = object(await codexControl(runtime, { handle, command, signal }));
       const desktopHostState = this.config.desktopHost ? this.desktopState(result) : undefined;
       const config = object(result.config);
       if (!Array.isArray(result.models) || (config.sandbox !== null && typeof config.sandbox !== 'string') || (config.approvalPolicy !== null && typeof config.approvalPolicy !== 'string')) throw new Error('codex_inspection_invalid');
@@ -182,7 +186,7 @@ export class CodexExecutor {
     if (!evidence?.threadId || !evidence.turnId) return null;
     const runtime = this.runtimeFactory(this.config);
     try {
-      const result = object(await runtime.dockControl({ signal, command: { operation: 'read_turn', threadId: evidence.threadId, turnId: evidence.turnId } }));
+      const result = object(await codexControl(runtime, { signal, command: { operation: 'read_turn', threadId: evidence.threadId, turnId: evidence.turnId } }));
       const turn = object(result.turn);
       if (result.threadId !== evidence.threadId || turn.id !== evidence.turnId || !Array.isArray(turn.messages)) return null;
       if (!['completed', 'failed', 'interrupted'].includes(String(turn.status))) return null;
@@ -231,7 +235,8 @@ export class CodexExecutor {
         input.signal.throwIfAborted();
         this.finishStartup();
         active = true;
-        const turn = runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', signal, rawSessionUpdates: true,
+        this.updates.begin(threadId, error => outputAbort.abort(error));
+        const turn = runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', signal,
           onPermissionRequest: async (request, context) => {
             const canAllow = request.raw.options.some(option => option.kind === 'allow_once');
             const decision = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'Codex permission', details: request.raw.toolCall, canAllow, options: request.raw.options }, context.signal, context.responseSent);
@@ -251,11 +256,11 @@ export class CodexExecutor {
         const steer = async (text: string): Promise<'accepted' | 'rejected' | 'unknown'> => {
           if (!active || !evidence.turnId || input.signal.aborted) return 'rejected';
           try {
-            const result = object(await runtime.dockControl({ handle, requestId: input.runId, signal: input.signal, command: { operation: 'steer', threadId, turnId: evidence.turnId, text } }));
+            const result = object(await codexControl(runtime, { handle, requestId: input.runId, signal: input.signal, command: { operation: 'steer', threadId, turnId: evidence.turnId, text } }));
             return result.accepted === true && result.turnId === evidence.turnId ? 'accepted' : 'rejected';
           } catch { return 'unknown'; }
         };
-        for await (const event of decodeCodexEvents(turn.events)) {
+        for await (const event of decodeCodexEvents(this.updates.events(turn.events))) {
           try {
             if (event.type === 'text_delta' && event.stream !== 'thought') streamed.add(event.text);
             if (event.type === 'message_completed' && !evidence.messages.some(message => message.id === event.messageId)) {
@@ -294,6 +299,7 @@ export class CodexExecutor {
         completed = result.status === 'completed' && !input.signal.aborted;
         return evidence;
       } finally {
+        this.updates.end();
         active = false;
         input.onSteeringReady?.(null);
       }

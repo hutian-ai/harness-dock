@@ -1,4 +1,5 @@
-import { createAcpRuntime, createRuntimeStore, type AcpRuntimeEvent } from 'acpx/runtime';
+import { AcpUpdates, type DriverAcpEvent } from '../packages/drivers/src/acp-updates.ts';
+import { createAcpRuntime, createRuntimeStore } from 'acpx/runtime';
 import { createAgentRegistry } from 'acpx/agent-registry';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +12,9 @@ const sessionStatus = { type: 'status', text: 'session updated', tag: 'session_i
 async function fixtureTurn(rawSessionUpdates: boolean, text = 'synthetic') {
   await mkdir('.local', { recursive: true });
   const directory = await mkdtemp(resolve('.local/runtime-test-'));
+  const updates = new AcpUpdates();
   const runtime = createAcpRuntime({
+    onAcpMessage: (direction, value) => updates.observe(direction, value),
     cwd: directory,
     sessionStore: createRuntimeStore({ stateDir: directory }),
     agentRegistry: createAgentRegistry({
@@ -28,16 +31,16 @@ async function fixtureTurn(rawSessionUpdates: boolean, text = 'synthetic') {
       mode: 'persistent',
       cwd: directory,
     });
+    if (rawSessionUpdates) updates.begin(handle.backendSessionId!);
     const turn = runtime.startTurn({
       handle,
       requestId: 'fixture-run',
       mode: 'prompt',
       text,
-      rawSessionUpdates,
     });
     void turn.promptStarted.catch(() => { });
-    const events: AcpRuntimeEvent[] = [];
-    for await (const event of turn.events) events.push(event);
+    const events: DriverAcpEvent[] = [];
+    for await (const event of rawSessionUpdates ? updates.events(turn.events) : turn.events) events.push(event);
     assert.equal((await turn.result).status, 'completed');
     return events;
   } finally {
@@ -46,9 +49,9 @@ async function fixtureTurn(rawSessionUpdates: boolean, text = 'synthetic') {
   }
 }
 
-async function* iterable(events: AcpRuntimeEvent[]) { yield* events; }
+async function* iterable(events: DriverAcpEvent[]) { yield* events; }
 
-test('local Codex decoder preserves the complete ordered event contract through the installed ACPX seam', async () => {
+test('local Codex decoder preserves the complete ordered event contract through the public ACPX observer and driver join', async () => {
   const raw = await fixtureTurn(true);
   assert.equal(raw.length, 10);
   assert.ok(raw.every(event => event.type === 'session_update' && event.sessionId === 'fixture-session'));
@@ -89,7 +92,7 @@ test('default ACPX events keep upstream normalization and do not expose raw meta
   assert.ok(!JSON.stringify(events).includes('must-not-forward'));
 });
 
-function envelope(update: Record<string, unknown>, event: Exclude<AcpRuntimeEvent, { type: 'session_update' }> | null = sessionStatus): AcpRuntimeEvent {
+function envelope(update: Record<string, unknown>, event: Exclude<DriverAcpEvent, { type: 'session_update' }> | null = sessionStatus): DriverAcpEvent {
   return { type: 'session_update', sessionId: 'fixture-session', update, event };
 }
 function extension(value: Record<string, unknown>, version = 1) {

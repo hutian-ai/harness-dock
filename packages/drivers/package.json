@@ -17,7 +17,7 @@
     "@agentclientprotocol/codex-acp": "2.3.0",
     "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/server": "2.3.0",
-    "acpx": "0.21.1",
+    "acpx": "0.22.0",
     "execa": "10.0.1"
   },
   "files": [

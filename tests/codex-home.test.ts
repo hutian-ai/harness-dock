@@ -1,3 +1,4 @@
+import { codexControl } from '../packages/drivers/src/codex-control.ts';
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -102,7 +103,7 @@ test('native desktop host validates its local socket and keeps task identities o
     await prepareCodexEnvironment(environment);
     const fixture=join(directory,'agent.mjs');await writeFile(fixture,`import{createInterface}from'node:readline';for await(const line of createInterface({input:process.stdin})){const q=JSON.parse(line);if(q.id===undefined)continue;const result=q.method==='initialize'?{protocolVersion:1,agentCapabilities:{},authMethods:[]}:{pipe:process.env.CODEX_APP_TOOLS_PIPE_PATH,node:process.env.CODEX_MCP_NODE_PATH,args:JSON.parse(process.env.CODEX_ACP_APP_SERVER_ARGS),threadId:process.env.CODEX_THREAD_ID??null,interactionClient:process.env.CODEX_INTERACTION_CLIENT_ID??null};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');}`);
     const runtime=createCodexRuntime(environment,[process.execPath,fixture]);
-    try{assert.deepEqual(await runtime.dockControl({command:{operation:'inspect'},signal:AbortSignal.timeout(5000)}),{pipe:pipePath,node:process.execPath,args:process.platform==='darwin'?['-c','plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true','-c','plugins.code-review@openai-bundled.mcp_servers.code-review.enabled=true']:[],threadId:null,interactionClient:null});}finally{await runtime.shutdown();}
+    try{assert.deepEqual(await codexControl(runtime, {command:{operation:'inspect'},signal:AbortSignal.timeout(5000)}),{pipe:pipePath,node:process.execPath,args:process.platform==='darwin'?['-c','plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true','-c','plugins.code-review@openai-bundled.mcp_servers.code-review.enabled=true']:[],threadId:null,interactionClient:null});}finally{await runtime.shutdown();}
     await assert.rejects(prepareCodexEnvironment({...environment,desktopHost:{pipePath:fixture,nodePath:process.execPath}}),/codex_desktop_host_pipe_unavailable/);
   }finally{
     for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }

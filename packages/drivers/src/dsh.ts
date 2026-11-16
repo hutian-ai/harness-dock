@@ -4,6 +4,7 @@ import { extname, isAbsolute, join, relative, sep } from 'node:path';
 import { createAcpRuntime, createRuntimeStore, type AcpRuntimeOptions } from 'acpx/runtime';
 import { createAgentRegistry } from 'acpx/agent-registry';
 import { AGENT_PROCESS_ENV_ALLOW } from './agent-environment.ts';
+import { AcpUpdates } from './acp-updates.ts';
 import type { NativePermissionDecision, NativePermissionRequest } from './execution.ts';
 import { createMcpBridge, type McpBridge, type McpInvocation, type McpToolDefinition } from './mcp-bridge.ts';
 import { AnswerBudget, MAX_EVIDENCE_BYTES, MAX_OBSERVATION_BYTES } from './output-limits.ts';
@@ -162,7 +163,9 @@ export class DshHost<TDelivery = unknown> {
       return discovered;
     } finally { signal.removeEventListener('abort', abort); await runtime.shutdown(); }
   }
+  readonly #updates = new AcpUpdates();
   #observe(direction: string, value: unknown): void {
+    this.#updates.observe(direction, value);
     const turn = this.#turn;
     if (!turn) return;
     const message = object(value);
@@ -240,7 +243,8 @@ export class DshHost<TDelivery = unknown> {
       await input.onReady(handle.backendSessionId);
       signal.throwIfAborted();
       active = true;
-      const running = session.runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', rawSessionUpdates: true, timeoutMs: 0, signal,
+      this.#updates.begin(handle.backendSessionId!, error => outputAbort.abort(error));
+      const running = session.runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', timeoutMs: 0, signal,
         onPermissionRequest: async (request, context) => {
           if (!active || signal.aborted || context.signal.aborted) return { outcome: 'cancel' };
           const raw = request.raw;
@@ -253,7 +257,7 @@ export class DshHost<TDelivery = unknown> {
         },
       });
       void running.promptStarted.catch(() => {}); void running.result.catch(() => {});
-      for await (const raw of running.events) {
+      for await (const raw of this.#updates.events(running.events)) {
         if (raw.type === 'session_update') {
           if (raw.sessionId !== evidence.sessionId) throw new Error('dsh_session_identity_mismatch');
           session.bridge?.acknowledgeToolUpdate(raw.update);
@@ -288,6 +292,7 @@ export class DshHost<TDelivery = unknown> {
       return evidence;
     } finally {
       active = false;
+      this.#updates.end();
       this.#turn = undefined;
       try { await this.#session?.bridge?.unbind(); } finally {
         try { if (!retain) await this.#release(); } finally { this.#running = false; }

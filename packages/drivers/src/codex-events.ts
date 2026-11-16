@@ -1,7 +1,7 @@
-import type { AcpRuntimeEvent } from 'acpx/runtime';
+import type { DriverAcpEvent } from './acp-updates.ts';
 import { mergeCodexItem, projectCodexItem } from './codex-policy.ts';
 
-type StandardEvent = Exclude<AcpRuntimeEvent, { type: 'session_update' }>;
+type StandardEvent = Exclude<DriverAcpEvent, { type: 'session_update' }>;
 type MessagePhase = 'commentary' | 'final_answer';
 
 export type CodexTokens = { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; totalTokens: number };
@@ -59,7 +59,7 @@ function completedMessageEvent(payload: Record<string, unknown>): Extract<CodexE
 }
 
 /** Decode only the named extension; raw updates never escape into device observations. */
-export function decodeCodexEvent(event: AcpRuntimeEvent): CodexEvent | null {
+export function decodeCodexEvent(event: DriverAcpEvent): CodexEvent | null {
   if (event.type !== 'session_update') return event;
   const { update, event: standard } = event;
   if (update.sessionUpdate === 'session_info_update') {
@@ -82,7 +82,7 @@ export function decodeCodexEvent(event: AcpRuntimeEvent): CodexEvent | null {
 }
 
 /** Retain the runtime queue order and its stream-close/cancellation behavior. */
-export async function* decodeCodexEvents(events: AsyncIterable<AcpRuntimeEvent>): AsyncGenerator<CodexEvent> {
+export async function* decodeCodexEvents(events: AsyncIterable<DriverAcpEvent>): AsyncGenerator<CodexEvent> {
   // Only active native tools are retained, with display-bounded fields. A missed end cannot grow the cache forever.
   const items = new Map<string, Record<string, unknown>>();
   for await (const event of events) {

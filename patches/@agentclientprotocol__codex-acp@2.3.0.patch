@@ -138,23 +138,6 @@ diff --git a/dist/index.js b/dist/index.js
    }
    handleTokenUsageUpdated(params) {
      this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
-@@ -39954,12 +39992,14 @@
-     const instructions = await this.resolveSessionInstructions(request, previousInstructions);
-     const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-     await this.refreshSkills(request.cwd, additionalDirectories);
--    const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
-+    const [sessionConfig, modelProvider] = await Promise.all([
-+      this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []), this.getResumeModelProvider()
-+    ]);
-     const response = await this.resumeThreadWithInstructions({
-       excludeTurns: true,
-       config: sessionConfig.config,
-       cwd: request.cwd,
--      modelProvider: await this.getResumeModelProvider(),
-+      modelProvider,
-       threadId: request.sessionId,
-       ...instructions?.text !== void 0 ? { developerInstructions: instructions.developerInstructions } : {}
-     }, request, previousInstructions);
 @@ -40333,7 +40373,9 @@
      if (!cwd) {
        return;
