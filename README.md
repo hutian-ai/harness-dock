@@ -13,7 +13,8 @@
 | 你想做什么 | 从哪里开始 |
 | --- | --- |
 | 给应用、Agent 或自动化流程接入原生执行 | [SDK：完成第一个任务](https://hutian-ai.github.io/harness-dock/sdk/#quick-connect) |
-| 把这台电脑连接给远端产品使用 | [App：安装与连接](https://hutian-ai.github.io/harness-dock/quickstart/) |
+| 把 Mac 连接给远端产品使用 | [App：安装与连接](https://hutian-ai.github.io/harness-dock/quickstart/) |
+| 把 Windows 11 x64 连接给远端产品使用 | [Windows CLI：源码安装（实验）](https://hutian-ai.github.io/harness-dock/installation/#windows-native-candidate) |
 | 为应用和电脑准备共同的连接服务 | [管理员：部署 Server](https://hutian-ai.github.io/harness-dock/server/) |
 
 例如，在产品里加入“生成报告”：产品选择一台获授权的电脑，提交任务，由那里的 Harness 使用已有工具处理资料，再接回报告并验收。具体工具能力取决于执行电脑上的原生环境与权限。
@@ -45,7 +46,7 @@ Dock 提供设备接入与执行管理。产品负责业务界面、业务授权
 
 App 自带运行时与设备后台，无需 Git、pnpm 或自行构建。原生 Codex/dsh 仍需在执行电脑上安装并登录。App 采用 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证；首次打开限制见[常见问题](https://hutian-ai.github.io/harness-dock/troubleshooting/)。
 
-Windows 11 x64 仅有实验性的原生 CLI/Daemon 源码路径，尚待实机验收；没有 Windows 桌面、自启或发行包。macOS Intel 与 Linux 执行设备未支持。Linux 可部署 Server。[完整支持范围](https://hutian-ai.github.io/harness-dock/support/)。
+Windows 11 x64 仅有实验性的原生 CLI/Daemon 源码路径，可接入本机 Codex 与 dsh，提供手动启停、状态诊断和同平台安装、升级、回滚；尚待实机验收，没有 Windows 桌面、自启或发行包。[Windows 准备条件与 PowerShell 步骤](https://hutian-ai.github.io/harness-dock/installation/#windows-native-candidate)。macOS Intel 与 Linux 执行设备未支持。Linux 可部署 Server。[完整支持范围](https://hutian-ai.github.io/harness-dock/support/)。
 
 ## App v0.1.3 有什么
 
