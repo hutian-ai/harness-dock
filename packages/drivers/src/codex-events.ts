@@ -62,9 +62,20 @@ function completedMessageEvent(payload: Record<string, unknown>): Extract<CodexE
 export function decodeCodexEvent(event: AcpRuntimeEvent): CodexEvent | null {
   if (event.type !== 'session_update') return event;
   const { update, event: standard } = event;
-  if (update.sessionUpdate === 'session_info_update') return dockProviderEvent(update) ?? completedMessageEvent(update) ?? standard;
+  if (update.sessionUpdate === 'session_info_update') {
+    const meta = isRecord(update._meta) && isRecord(update._meta.codex) ? update._meta.codex : undefined;
+    const error = meta && isRecord(meta.error) ? meta.error : undefined;
+    if (error?.willRetry === true) return { type: 'status', tag: 'codex_retry', text: typeof error.message === 'string' ? error.message.slice(0, 2000) : 'Native execution is retrying' };
+    return dockProviderEvent(update) ?? completedMessageEvent(update) ?? standard;
+  }
   if (standard?.type === 'text_delta' && (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'agent_thought_chunk')) {
     const phase = messagePhase(dockMessageMeta(update)?.phase);
+    // ACP's legacy warning fallback has no native message identity. Keep transport notices
+    // out of assistant output; identified assistant messages are never classified by their text.
+    if (update.sessionUpdate === 'agent_message_chunk' && !standard.messageId && !phase
+      && /^Warning: Falling back from WebSockets to HTTPS transport\./u.test(standard.text)) {
+      return { type: 'status', tag: 'codex_transport_fallback', text: standard.text.trim().slice(0, 2000) };
+    }
     if (phase) return { ...standard, phase };
   }
   return standard;
