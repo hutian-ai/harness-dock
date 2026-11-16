@@ -116,7 +116,7 @@ diff --git a/dist/index.js b/dist/index.js
      const text = parts.filter((part) => part.length > 0).join("\n\n");
      if (text.length === 0) {
        return null;
-@@ -36462,6 +36485,21 @@
+@@ -36462,6 +36485,22 @@
        data.additionalDetails = error62.additionalDetails;
      }
      return data;
@@ -125,6 +125,7 @@ diff --git a/dist/index.js b/dist/index.js
 +  dockItemDetails(item) {
 +    if (!["commandExecution", "mcpToolCall", "dynamicToolCall", "webSearch", "fileChange", "reasoning"].includes(item.type)) return null;
 +    const result = { id: item.id, type: item.type };
++    if (item.type === "reasoning" && Array.isArray(item.summary)) result.summary = item.summary.filter(part => typeof part === "string").slice(0, 32).join("\n\n").slice(0, 16000);
 +    if (item.type !== "reasoning") {
 +      for (const key of ["status", "durationMs"]) if (item[key] !== undefined) result[key] = item[key];
 +    }
@@ -138,7 +139,25 @@ diff --git a/dist/index.js b/dist/index.js
    }
    handleTokenUsageUpdated(params) {
      this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
-@@ -40333,7 +40373,9 @@
+@@ -37242,7 +37281,16 @@
+     correlatedCallId,
+     nextStandaloneToolCallId
+   ));
+-  const toolApprovalMeta = context.isToolApproval && params.mode !== "url" ? { _meta: { is_mcp_tool_approval: true } } : {};
++  // Preserve privileged native approval facts on the request itself. The ACP tool
++  // notification can arrive later, and parallel calls cannot be correlated by server.
++  const mcpApproval = context.isToolApproval && params.mode !== "url" &&
++    typeof params.serverName === "string" && params.serverName.length > 0 && params.serverName.length <= 256 &&
++    typeof params._meta?.tool_name === "string" && params._meta.tool_name.length > 0 && params._meta.tool_name.length <= 256
++    ? { server: params.serverName, tool: params._meta.tool_name } : null;
++  const toolApprovalMeta = context.isToolApproval && params.mode !== "url" ? { _meta: {
++    is_mcp_tool_approval: true,
++    ...(mcpApproval ? { "harness-dock": { version: 1, mcpApproval } } : {})
++  } } : {};
+   return {
+     request: {
+       sessionId,
+@@ -40333,7 +40381,9 @@
      if (!cwd) {
        return;
      }
@@ -149,7 +168,7 @@ diff --git a/dist/index.js b/dist/index.js
      if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
        await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
        this.skillExtraRoots = skillExtraRoots;
-@@ -40422,7 +40464,7 @@
+@@ -40422,7 +40472,7 @@
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
        sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
@@ -158,7 +177,7 @@ diff --git a/dist/index.js b/dist/index.js
        effort,
        model: modelId.model,
        serviceTier,
-@@ -48071,6 +48113,57 @@
+@@ -48071,6 +48121,57 @@
      if (appServer) await appServer;
      return { trusted: await this.runWithProcessCheck(() => trustCodexHooks(this.codexAcpClient.appServerClient, cwd, hooks)) };
    }
@@ -216,7 +235,7 @@ diff --git a/dist/index.js b/dist/index.js
    async extMethod(method, params) {
      const methodRequest = { method, params };
      if (!isExtMethodRequest(methodRequest)) {
-@@ -52087,7 +52180,7 @@
+@@ -52087,7 +52188,7 @@
        }
      });
    };

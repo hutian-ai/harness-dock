@@ -164,7 +164,7 @@ settings:
   injectWorkspacePackages: true
 
 patchedDependencies:
-  '@agentclientprotocol/codex-acp@2.3.0': a631e081b26f23bb489bd3102c2d5c90b5ec90e212cace7bf4f1763547c871d2
+  '@agentclientprotocol/codex-acp@2.3.0': 32c36b13c38e84c751724e259cf5baaca9b1b769947c7d05de61893b5544bc60
   '@openclaw/fs-safe@0.27.2': 0fb5d6b2f7aaa2a8138eb82f5379442676c681bb4596955b4e9588c0ac997afb
   acpx@0.22.0: 124d40175c9de82863dee451486d71fb959338a049e935c85b8d00b3bad59a47
 
@@ -257,7 +257,7 @@ importers:
     dependencies:
       '@agentclientprotocol/codex-acp':
         specifier: 2.3.0
-        version: 2.3.0(patch_hash=a631e081b26f23bb489bd3102c2d5c90b5ec90e212cace7bf4f1763547c871d2)
+        version: 2.3.0(patch_hash=32c36b13c38e84c751724e259cf5baaca9b1b769947c7d05de61893b5544bc60)
       '@agentclientprotocol/sdk':
         specifier: 1.4.0
         version: 1.4.0(zod@4.6.7)
@@ -935,7 +935,7 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/codex-acp@2.3.0(patch_hash=a631e081b26f23bb489bd3102c2d5c90b5ec90e212cace7bf4f1763547c871d2)':
+  '@agentclientprotocol/codex-acp@2.3.0(patch_hash=32c36b13c38e84c751724e259cf5baaca9b1b769947c7d05de61893b5544bc60)':
     dependencies:
       '@agentclientprotocol/sdk': 2.0.2(zod@4.6.6)
       '@openai/codex': 0.164.0
@@ -1053,7 +1053,7 @@ snapshots:
 
   '@harness-dock/drivers@file:packages/drivers(zod@4.6.6)':
     dependencies:
-      '@agentclientprotocol/codex-acp': 2.3.0(patch_hash=a631e081b26f23bb489bd3102c2d5c90b5ec90e212cace7bf4f1763547c871d2)
+      '@agentclientprotocol/codex-acp': 2.3.0(patch_hash=32c36b13c38e84c751724e259cf5baaca9b1b769947c7d05de61893b5544bc60)
       '@agentclientprotocol/sdk': 1.4.0(zod@4.6.6)
       '@modelcontextprotocol/server': 2.3.0
       acpx: 0.22.0(patch_hash=124d40175c9de82863dee451486d71fb959338a049e935c85b8d00b3bad59a47)

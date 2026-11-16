@@ -123,7 +123,7 @@ export function createProviderAdapter(provider: DiscoveredProvider, options: {
   const environment = (input: Parameters<ProviderAdapter['environment']>[0]): CodexHostEnvironment => ({
     cwd: input.workdir, codexHome: provider.home!, codexBin: provider.executable!,
     stateDir: join(options.stateDir, 'providers', 'codex', digest(input.sessionKey), 'execution'),
-    sandbox: 'workspace-write', skillDirectory: input.skillDirectory,
+    skillDirectory: input.skillDirectory,
     serviceTier: typeof input.config.serviceTier === 'string' ? input.config.serviceTier : undefined,
     environment: options.environment,
   });

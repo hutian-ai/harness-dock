@@ -38,7 +38,7 @@ const textParts = (parts: unknown): string => (Array.isArray(parts) ? parts : []
   .filter(part => (part.type === 'text' || part.type === 'inputText') && typeof part.text === 'string')
   .slice(0, 32).map(part => clip(part.text)).join('\n');
 
-/** Device display policy. Native reasoning, binary results and unknown fields never enter the projection. */
+/** Device display policy. Only explicit public reasoning summaries are retained, never native reasoning content. */
 export function projectCodexItem(item: Record<string, unknown>): Record<string, unknown> | null {
   if (typeof item.id !== 'string' || typeof item.type !== 'string') return null;
   const catalog: Record<string, string[]> = {
@@ -50,6 +50,7 @@ export function projectCodexItem(item: Record<string, unknown>): Record<string, 
   const fields = Object.hasOwn(catalog, item.type) ? catalog[item.type] : undefined;
   if (!fields) return null;
   const result: Record<string, unknown> = { id: item.id, type: item.type };
+  if (item.type === 'reasoning' && typeof item.summary === 'string' && item.summary.trim()) result.summary = clip(item.summary);
   for (const key of fields) if (item[key] !== undefined) result[key] = bounded(item[key]);
   if (item.type === 'commandExecution') {
     if (item.commandActions !== undefined) result.commandActions = (Array.isArray(item.commandActions) ? item.commandActions : []).slice(0, 16).map(record).map(action =>

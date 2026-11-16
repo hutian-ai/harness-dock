@@ -490,6 +490,7 @@ export class DeviceHost {
         const observations = new ObservationWriter((kind, payload) => this.#observe(input.runId, kind, payload, call, !!local), signal);
         const reports = new Set<Promise<unknown>>();
         let pendingPermissions = 0;
+        let permissionTail = Promise.resolve();
         let started = false;
         const finishNativeStartup = startStartupSpan(input.runId, 'device_native_start');
         const ready = async (sessionId?: string) => {
@@ -510,9 +511,21 @@ export class DeviceHost {
           if (this.#active.get(input.runId) !== active || signal.aborted || nativeSignal.aborted || pendingPermissions + reports.size >= 32) return 'deny';
           observations.seal();
           pendingPermissions++;
+          // Native tools may request approvals in a parallel batch. Keep the
+          // bounded queue local instead of exhausting the transport's incoming
+          // handler budget with long-lived approval RPCs. Abort never replays one.
+          const previous = permissionTail;
+          let release!: () => void;
+          const slot = new Promise<void>(resolve => { release = resolve; });
+          permissionTail = previous.then(() => slot);
           let decision: unknown;
-          try { decision = await withSignal(call('permission', request, 30 * 60_000), AbortSignal.any([signal, nativeSignal])); } catch { /* Fail closed. */ }
-          finally { pendingPermissions--; }
+          try {
+            const approvalSignal = AbortSignal.any([signal, nativeSignal]);
+            await withSignal(previous, approvalSignal);
+            approvalSignal.throwIfAborted();
+            decision = await withSignal(call('permission', request, 30 * 60_000), approvalSignal);
+          } catch { /* Fail closed. */ }
+          finally { pendingPermissions--; release(); }
           let effective: NativePermissionDecision = request.form ? { action: 'cancel' } : 'deny';
           if (!signal.aborted && !nativeSignal.aborted && this.#active.get(input.runId) === active) {
             if (request.options && decision && typeof decision === 'object' && 'optionId' in decision

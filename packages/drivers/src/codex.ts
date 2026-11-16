@@ -74,7 +74,8 @@ export function createCodexRuntime(config: CodexExecutionConfig, command?: strin
     agentProcessEnvAllow: AGENT_PROCESS_ENV_ALLOW,
     agentProcessEnv: {
       ...codexAdapterEnvironment(config),
-      CODEX_HOME: config.codexHome, INITIAL_AGENT_MODE: config.sandbox ?? 'workspace-write',
+      CODEX_HOME: config.codexHome,
+      ...(config.sandbox ? { INITIAL_AGENT_MODE: config.sandbox } : {}),
       ...(config.codexBin ? { CODEX_PATH: config.codexBin } : {}),
       ...(config.desktopHost ? { CODEX_APP_TOOLS_PIPE_PATH: config.desktopHost.pipePath, CODEX_MCP_NODE_PATH: config.desktopHost.nodePath } : {}),
       ...(!config.desktopHost && config.nativeNode ? { CODEX_MCP_NODE_PATH: config.nativeNode } : {}),
@@ -226,7 +227,8 @@ export class CodexExecutor {
         evidence.threadId = threadId;
         await this.save(evidence);
         await observeStartup(input.runId, 'native_configuration', async () => {
-          await applyNativePermissionMode(runtime, handle, input.mode ?? this.config.sandbox ?? 'workspace-write', signal);
+          const selectedMode = input.mode ?? this.config.sandbox;
+          if (selectedMode) await applyNativePermissionMode(runtime, handle, selectedMode, signal);
           if (input.model) await runtime.setModel({ handle, model: input.model, signal });
           if (input.effort) await runtime.setConfigOption({ handle, key: 'reasoning_effort', value: input.effort, signal });
           await runtime.setConfigOption({ handle, key: 'fast-mode', value: input.serviceTier === 'priority' ? 'on' : 'off', signal });
@@ -239,7 +241,13 @@ export class CodexExecutor {
         const turn = runtime.startTurn({ handle, requestId: input.runId, text: input.prompt, mode: 'prompt', signal,
           onPermissionRequest: async (request, context) => {
             const canAllow = request.raw.options.some(option => option.kind === 'allow_once');
-            const decision = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'Codex permission', details: request.raw.toolCall, canAllow, options: request.raw.options }, context.signal, context.responseSent);
+            const meta = object(request.raw._meta), dock = object(meta['harness-dock']), approval = object(dock.mcpApproval);
+            const nativeMcpToolCall = meta.is_mcp_tool_approval === true && dock.version === 1 &&
+              typeof approval.server === 'string' && approval.server.length > 0 && approval.server.length <= 256 &&
+              typeof approval.tool === 'string' && approval.tool.length > 0 && approval.tool.length <= 256
+              ? { server: approval.server, tool: approval.tool } : undefined;
+            const details = { ...request.raw.toolCall, ...(nativeMcpToolCall ? { nativeMcpToolCall } : {}) };
+            const decision = await input.permission?.({ id: randomUUID(), title: request.raw.toolCall.title ?? 'Codex permission', details, canAllow, options: request.raw.options }, context.signal, context.responseSent);
             if (!active || context.signal.aborted || !decision || typeof decision !== 'object' || !('optionId' in decision)
               || !request.raw.options.some(option => option.optionId === decision.optionId)) return { outcome: 'cancel' };
             return { outcome: 'selected', optionId: decision.optionId };

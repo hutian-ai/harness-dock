@@ -118,7 +118,7 @@ for await (const line of createInterface({input:process.stdin})) {
     await assert.rejects(executor.execute({ ...input, runId: 'wrong', resumeThreadId: 'another-thread' }), /identity_mismatch/);
     await assert.rejects(executor.execute({ ...input, runId: 'third', resumeThreadId: first.threadId, onReady: async () => { throw new Error('fence-rejected'); } }), /fence-rejected/);
     assert.equal((await calls()).filter(call => call.method === 'session/prompt').length, 2);
-    assert.equal((await calls()).filter(call => call.method === 'session/set_config_option' && call.params?.configId === 'mode').at(-1)?.params?.value,'workspace-write');
+    assert.equal((await calls()).filter(call => call.method === 'session/set_config_option' && call.params?.configId === 'mode').at(-1)?.params?.value,'synthetic-mode');
     // Rejected admission closed the previous process; only an explicit new run resumes.
     const fourth = await executor.execute({ ...input, runId: 'fourth', resumeThreadId: first.threadId });
     assert.equal(fourth.state, 'completed');
@@ -258,6 +258,8 @@ test('device admission and approval fences survive duplicate requests, cancellat
   assert.equal(starts, 1);
   const request = { id: 'permission', title: 'synthetic', details: {}, canAllow: true };
   const pending = current.permission!(request, current.signal, Promise.resolve());
+  for (let i = 0; i < 100 && !decide; i++) await delay(5);
+  assert.equal(typeof decide, 'function');
   await host.cancel('first');
   assert.equal(host.getExecution('first')?.state, 'running'); // Requesting cancel is not terminal evidence.
   decide('allow'); assert.equal(await pending, 'deny');
