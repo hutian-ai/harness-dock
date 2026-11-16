@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   release:
+    if: ${{ !contains(github.ref_name, '-windows.') }}
     runs-on: macos-15
     timeout-minutes: 60
     permissions:

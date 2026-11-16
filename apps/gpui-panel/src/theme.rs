@@ -8,7 +8,6 @@ pub mod metrics {
     pub const TRAY_HEADER_HEIGHT: f32 = 32.;
     #[cfg(not(target_os = "macos"))]
     pub const GAP: f32 = 12.;
-    #[cfg(target_os = "macos")]
     pub const SIDEBAR_WIDTH: f32 = 208.;
     pub const CONTENT_WIDTH: f32 = 1100.;
     pub const PAGE_PADDING: f32 = 28.;

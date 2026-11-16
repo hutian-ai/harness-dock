@@ -1,6 +1,6 @@
 # 协议补丁
 
-补丁绑定 ACPX 0.22.0 和 Codex ACP 2.3.0，由 pnpm patchedDependencies 安装。分发包携带实际补丁、上游许可证及来源；依赖升级须重新核对补丁应用和原生行为。
+补丁绑定 ACPX 0.22.0、Codex ACP 2.3.0 和 fs-safe 0.27.2，由 pnpm patchedDependencies 安装。分发包携带实际补丁、上游许可证及来源；依赖升级须重新核对补丁应用和原生行为。
 
 ## Codex ACP
 
@@ -58,6 +58,10 @@ Codex ACP 的源码核对以当前 main 和发布包为准，不能用本仓库�
 原生环境选择、具名 Codex/dsh 命令、thread/turn 校验、结果接受规则、展示过滤/截断、工具增量合并、原始 reasoning 不外露策略都归具名 Driver。若策略依赖 adapter 当前丢失的来源信息，保留最小 producer 接缝，并优先请求来源标记，不能把 Dock 的完整策略推给上游。
 
 严格环境过滤目前仍保留小补丁。将 ACPX 整体移入净化环境的 worker 可以避免该补丁，但会增加进程与取消/回调管理，本轮未采用。保留本地补丁不意味着上游有义务提供替代能力；外层存在合理实现时，应结合完整运行成本选择。若将来上游接受并提供等价严格模式，再删除接缝。
+
+## Windows 长路径
+
+`@openclaw/fs-safe@0.27.2` 的临时目录创建在调用 Windows `mkdtemp` 时使用 extended-length path，随后恢复原路径命名空间，继续执行上游的路径别名、目录身份与清理校验。用于修复 ACPX 会话状态路径超过 MAX_PATH 时的 `ENAMETOOLONG`；Codex 和 dsh 共用该依赖。Windows 回归测试通过实际 ACP 会话保存、关闭和重新读取验证，不发送模型 prompt。ACPX 升级到 0.22.0 后将同一接缝迁移至 fs-safe 0.27.2；新版本仍直接调用 mkdtemp，故继续保留。上游修复后移除此补丁。
 
 ## 维护与删除条件
 

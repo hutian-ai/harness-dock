@@ -1,43 +1,64 @@
-import { join } from 'node:path';
-import { execa } from 'execa';
+import { join, toNamespacedPath } from 'node:path';
+import { execa, ExecaError } from 'execa';
 
-// Paths travel over stdin, never as PowerShell source or interpolated command arguments.
+// Pass the request as data in the helper's environment, never as PowerShell
+// source. This also works for background processes without console input.
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
-[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
-$inputData = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-if ($inputData.operation -eq 'pipe') {
-  Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class DockPipeAcl {
-  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, EntryPoint = "SetNamedSecurityInfoW")]
-  public static extern uint Set(string name, int kind, uint information, IntPtr owner, IntPtr group, byte[] dacl, IntPtr sacl);
-}
-'@
-  $descriptor = New-Object System.Security.AccessControl.RawSecurityDescriptor("D:P(D;;GA;;;NU)(A;;GA;;;$($sid.Value))(A;;GA;;;SY)")
-  $bytes = New-Object byte[] $descriptor.DiscretionaryAcl.BinaryLength
+[Console]::Error.WriteLine('windows_security_phase:script')
+$operation = [Environment]::GetEnvironmentVariable('HARNESS_DOCK_WINDOWS_SECURITY_OPERATION')
+$path = [Environment]::GetEnvironmentVariable('HARNESS_DOCK_WINDOWS_SECURITY_PATH')
+[Console]::Error.WriteLine('windows_security_phase:identity')
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$sid = $identity.User
+if ($operation -eq 'pipe') {
+  [Console]::Error.WriteLine('windows_security_phase:pipe')
+  # Bind the Windows API in memory so detached daemons need neither PowerShell
+  # module loading nor the C# compiler used by Add-Type on Windows PowerShell.
+  $assemblyName = [Reflection.AssemblyName]::new('DockPipeAcl')
+  $assembly = [AppDomain]::CurrentDomain.DefineDynamicAssembly($assemblyName, [Reflection.Emit.AssemblyBuilderAccess]::Run)
+  $module = $assembly.DefineDynamicModule('DockPipeAcl')
+  $type = $module.DefineType('DockPipeAcl', [Reflection.TypeAttributes]::Public)
+  $attributes = [Reflection.MethodAttributes]'Public,Static,PinvokeImpl'
+  $parameters = [type[]]@([string], [int], [uint32], [IntPtr], [IntPtr], [byte[]], [IntPtr])
+  $method = $type.DefinePInvokeMethod('SetNamedSecurityInfoW', 'advapi32.dll', $attributes, [Reflection.CallingConventions]::Standard, [uint32], $parameters, [Runtime.InteropServices.CallingConvention]::Winapi, [Runtime.InteropServices.CharSet]::Unicode)
+  $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+  $native = $type.CreateType()
+  $descriptor = [System.Security.AccessControl.RawSecurityDescriptor]::new("D:P(D;;GA;;;NU)(A;;GA;;;$($sid.Value))(A;;GA;;;SY)")
+  $bytes = [byte[]]::new($descriptor.DiscretionaryAcl.BinaryLength)
   $descriptor.DiscretionaryAcl.GetBinaryForm($bytes, 0)
-  $result = [DockPipeAcl]::Set($inputData.path, 1, [uint32]2147483652, [IntPtr]::Zero, [IntPtr]::Zero, $bytes, [IntPtr]::Zero)
+  $result = $native::SetNamedSecurityInfoW($path, 1, [uint32]2147483652, [IntPtr]::Zero, [IntPtr]::Zero, $bytes, [IntPtr]::Zero)
   if ($result -ne 0) { throw 'windows_pipe_acl_failed' }
 } else {
-  $item = Get-Item -LiteralPath $inputData.path -Force
-  if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'windows_private_path_is_link' }
-  if ($inputData.operation -eq 'protect') {
-    if (-not $item.PSIsContainer) { throw 'windows_private_directory_required' }
-    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+  [Console]::Error.WriteLine('windows_security_phase:path')
+  $attributes = [IO.File]::GetAttributes($path)
+  if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'windows_private_path_is_link' }
+  $isDirectory = $attributes -band [IO.FileAttributes]::Directory
+  if ($operation -eq 'protect') {
+    if (-not $isDirectory) { throw 'windows_private_directory_required' }
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
     $acl.SetOwner($sid)
     $acl.SetAccessRuleProtection($true, $false)
-    foreach ($identity in @($sid.Value, 'S-1-5-18')) {
-      $principal = New-Object System.Security.Principal.SecurityIdentifier($identity)
-      $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+    foreach ($allowedSid in @($sid.Value, 'S-1-5-18')) {
+      $principal = [System.Security.Principal.SecurityIdentifier]::new($allowedSid)
+      $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
       $acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $inputData.path -AclObject $acl
+    [IO.Directory]::SetAccessControl($path, $acl)
   }
-  $actual = Get-Acl -LiteralPath $inputData.path
-  if ($actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'windows_private_path_owner_mismatch' }
+  # Use .NET directly: a daemon launched from PowerShell 7 can inherit a
+  # PSModulePath that prevents Windows PowerShell from loading Get/Set-Acl.
+  $actual = if ($isDirectory) { [IO.Directory]::GetAccessControl($path) } else { [IO.File]::GetAccessControl($path) }
+  $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+  if ($owner -ne $sid.Value) {
+    # Elevated tokens may create child files with Administrators as owner.
+    # That group is already trusted by the DACL check below. Require the
+    # current token to hold the group, and still require its user SID's ACE.
+    $currentPrincipal = [System.Security.Principal.WindowsPrincipal]::new($identity)
+    if ($owner -ne 'S-1-5-32-544' -or -not $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+      throw 'windows_private_path_owner_mismatch'
+    }
+  }
   $ownerAllowed = $false
   foreach ($rule in $actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
     if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -eq $sid.Value) { $ownerAllowed = $true }
@@ -52,13 +73,25 @@ public static class DockPipeAcl {
 
 async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): Promise<void> {
   if (process.platform !== 'win32') return;
+  const systemRoot = process.env.SYSTEMROOT ?? 'C:\\Windows';
+  const shell = join(systemRoot, 'System32/WindowsPowerShell/v1.0');
   try {
-    await execa(join(process.env.SYSTEMROOT ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+    await execa(join(shell, 'powershell.exe'),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { input: JSON.stringify({ operation, path }), timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
-  } catch {
-    // Do not expose raw PowerShell output, local paths or user SIDs in diagnostics.
-    throw new Error(`windows_${operation === 'pipe' ? 'pipe_acl' : 'private_path'}_unavailable`);
+      { stdin: 'ignore', cwd: systemRoot, env: {
+        PSModulePath: join(shell, 'Modules'),
+        HARNESS_DOCK_WINDOWS_SECURITY_OPERATION: operation,
+        HARNESS_DOCK_WINDOWS_SECURITY_PATH: operation === 'pipe' ? path : toNamespacedPath(path),
+      }, timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
+  } catch (error) {
+    // Retain a category for startup logs, never raw PowerShell output.
+    const stderr = error instanceof ExecaError && typeof error.stderr === 'string' ? error.stderr : '';
+    const phase = [...stderr.matchAll(/^windows_security_phase:(script|identity|path|pipe)$/gmu)].at(-1)?.[1] ?? 'launch';
+    const category = error instanceof ExecaError && error.timedOut ? `timeout_${phase}`
+      : stderr.match(/\bwindows_(?:private_path_(?:is_link|owner_mismatch|permissions)|private_directory_required|pipe_acl_failed)\b/u)?.[0]
+        ?? stderr.match(/FullyQualifiedErrorId\s*:\s*([\w.,+]{1,100})/u)?.[1] ?? 'unknown';
+    throw new Error(`windows_${operation === 'pipe' ? 'pipe_acl' : 'private_path'}_unavailable`,
+      { cause: new Error(`windows_security_detail:${operation}:${category}`) });
   }
 }
 

@@ -75,12 +75,13 @@ test('DSH inspection reads opaque native models, effort and ACP capabilities wit
   const f = await fixture();
   try {
     const value = await f.host.inspect(f.environment, f.controller.signal);
-    assert.deepEqual(value.models, [{ id: model, efforts: ['high'] }, { id: otherModel, efforts: ['low'] }]);
+    assert.deepEqual(value.models, [{ id: model, efforts: ['high'] }, { id: otherModel, efforts: [] }]);
     assert.equal(value.currentModelId, model);
     assert.equal(value.sessionResume, true);
     assert.deepEqual(value.mcpCapabilities, { http: true });
     assert.equal((await f.requests()).some(request => request.method === 'session/prompt'), false);
-    assert.deepEqual((await f.requests()).filter(request => request.method === 'session/set_config_option').map(request => request.params.value), [otherModel, model]);
+    assert.deepEqual((await f.requests()).filter(request => request.method === 'session/set_config_option'), []);
+    assert.equal(await readFile(join(f.home, 'cordis.patch.yml'), 'utf8'), 'native patch must remain');
   } finally { await f.host.close(); }
 });
 

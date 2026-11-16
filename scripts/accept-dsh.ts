@@ -10,6 +10,7 @@ import { DockServer } from '../apps/server/src/index.ts';
 import { ServerClient, type ServerPeer } from '../packages/client/src/index.ts';
 import { createDshRuntime, DshHost } from '../packages/drivers/src/dsh.ts';
 import { createProviderAdapters } from '../packages/drivers/src/provider-adapter.ts';
+import { protectWindowsDirectory } from '../packages/drivers/src/windows-security.ts';
 import type { DeviceExecutionCallback, DeviceExecuteInput, DeviceExecutionResponse, DeviceFile, DevicePreparedDirectories } from '../packages/protocol/src/index.ts';
 
 const token = (prefix: string) => `${prefix}_${randomBytes(12).toString('hex')}`;
@@ -56,6 +57,7 @@ export async function acceptDsh(): Promise<void> {
   process.umask(0o077);
   await mkdir(resolve('.local'), { recursive: true, mode: 0o700 });
   const root = await mkdtemp(resolve('.local/dsh-acceptance-'));
+  await protectWindowsDirectory(root);
   const work = join(root, 'work'), stateDir = join(root, 'state');
   await mkdir(work); await mkdir(join(work, '.git'));
   const cases: Case[] = [];
@@ -112,7 +114,7 @@ export async function acceptDsh(): Promise<void> {
     evidence.inventory = inventory;
     const provider = inventory.providers.find(value => value.key === 'dsh');
     assert.equal(provider?.status, 'ready', provider?.error);
-    model = String(object(provider?.inspection).currentModelId ?? provider?.models[0]);
+    model = process.env.HARNESS_DOCK_ACCEPT_DSH_MODEL ?? String(object(provider?.inspection).currentModelId ?? provider?.models[0]);
     assert(provider?.models.includes(model));
     evidence.model = model;
     peer.onExecutionCallback(async callback => {
@@ -174,8 +176,10 @@ export async function acceptDsh(): Promise<void> {
     for (const [name, marker, base] of [[callerName, callerToken, join(skills.prepared!.skillDirectory, callerName)], [nativeName, nativeToken, nativeRoot]] as const) {
       const loaded = skillTools.find(event => object(event.rawInput).name === name && event.status === 'completed');
       assert(loaded, `skill ${name} must be discovered and activated`);
-      assert(JSON.stringify(loaded.content).includes(marker), 'skill body token must be observed in the native tool result');
-      assert(JSON.stringify(loaded.content).includes(base), 'native tool result must identify the expected skill root');
+      const output = (Array.isArray(loaded.content) ? loaded.content : [])
+        .map(part => object(object(part).content).text).filter(value => typeof value === 'string').join('\n');
+      assert(output.includes(marker), 'skill body token must be observed in the native tool result');
+      assert(output.includes(base), 'native tool result must identify the expected skill root');
       assert(text(skillsResult).includes(marker));
     }
     assert.equal(skillTools.length, 2);

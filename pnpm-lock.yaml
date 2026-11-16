@@ -165,6 +165,7 @@ settings:
 
 patchedDependencies:
   '@agentclientprotocol/codex-acp@2.3.0': a631e081b26f23bb489bd3102c2d5c90b5ec90e212cace7bf4f1763547c871d2
+  '@openclaw/fs-safe@0.27.2': 0fb5d6b2f7aaa2a8138eb82f5379442676c681bb4596955b4e9588c0ac997afb
   acpx@0.22.0: 124d40175c9de82863dee451486d71fb959338a049e935c85b8d00b3bad59a47
 
 importers:
@@ -1139,7 +1140,7 @@ snapshots:
   '@openclaw/fs-safe-win32-x64-msvc@0.27.2':
     optional: true
 
-  '@openclaw/fs-safe@0.27.2':
+  '@openclaw/fs-safe@0.27.2(patch_hash=0fb5d6b2f7aaa2a8138eb82f5379442676c681bb4596955b4e9588c0ac997afb)':
     optionalDependencies:
       '@openclaw/fs-safe-darwin-arm64': 0.27.2
       '@openclaw/fs-safe-darwin-x64': 0.27.2
@@ -1168,7 +1169,7 @@ snapshots:
   acpx@0.22.0(patch_hash=124d40175c9de82863dee451486d71fb959338a049e935c85b8d00b3bad59a47):
     dependencies:
       '@agentclientprotocol/sdk': 1.9.0(zod@4.6.7)
-      '@openclaw/fs-safe': 0.27.2
+      '@openclaw/fs-safe': 0.27.2(patch_hash=0fb5d6b2f7aaa2a8138eb82f5379442676c681bb4596955b4e9588c0ac997afb)
       commander: 15.0.0
       skillflag: 0.2.1
       tsx: 4.23.15

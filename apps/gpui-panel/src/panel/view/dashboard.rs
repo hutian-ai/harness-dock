@@ -146,7 +146,6 @@ impl Panel {
         overview
     }
 
-    #[cfg(target_os = "macos")]
     pub(super) fn dashboard_footer(&self, cx: &App) -> Div {
         let workdir = text(&self.state, "cwd");
         let subtitle = if workdir.is_empty() {
@@ -169,7 +168,11 @@ impl Panel {
                     .border_color(cx.theme().border)
                     .child(glyph(IconName::Monitor, 14.).text_color(cx.theme().muted_foreground))
                     .child(
-                        self.muted(format!("macOS · {}", std::env::consts::ARCH), cx)
+                        self.muted(format!("{} · {}", match std::env::consts::OS {
+                            "macos" => "macOS",
+                            "windows" => "Windows",
+                            other => other,
+                        }, std::env::consts::ARCH), cx)
                             .text_xs(),
                     ),
             )
