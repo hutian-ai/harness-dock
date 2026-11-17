@@ -1,5 +1,5 @@
-import { join, toNamespacedPath } from 'node:path';
-import { execa, ExecaError } from 'execa';
+import { join, toNamespacedPath } from "node:path";
+import { execa, ExecaError } from "execa";
 
 // Pass the request as data in the helper's environment, never as PowerShell
 // source. This also works for background processes without console input.
@@ -71,32 +71,68 @@ if ($operation -eq 'pipe') {
 }
 `;
 
-async function secure(operation: 'protect' | 'assert' | 'pipe', path: string): Promise<void> {
-  if (process.platform !== 'win32') return;
-  const systemRoot = process.env.SYSTEMROOT ?? 'C:\\Windows';
-  const shell = join(systemRoot, 'System32/WindowsPowerShell/v1.0');
+async function secure(
+  operation: "protect" | "assert" | "pipe",
+  path: string,
+): Promise<void> {
+  if (process.platform !== "win32") return;
+  const systemRoot = process.env.SYSTEMROOT ?? "C:\\Windows";
+  const shell = join(systemRoot, "System32/WindowsPowerShell/v1.0");
   try {
-    await execa(join(shell, 'powershell.exe'),
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { stdin: 'ignore', cwd: systemRoot, env: {
-        PSModulePath: join(shell, 'Modules'),
-        HARNESS_DOCK_WINDOWS_SECURITY_OPERATION: operation,
-        HARNESS_DOCK_WINDOWS_SECURITY_PATH: operation === 'pipe' ? path : toNamespacedPath(path),
-      }, timeout: 15_000, windowsHide: true, maxBuffer: 16_384 });
+    await execa(
+      join(shell, "powershell.exe"),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      {
+        stdin: "ignore",
+        cwd: systemRoot,
+        env: {
+          PSModulePath: join(shell, "Modules"),
+          HARNESS_DOCK_WINDOWS_SECURITY_OPERATION: operation,
+          HARNESS_DOCK_WINDOWS_SECURITY_PATH:
+            operation === "pipe" ? path : toNamespacedPath(path),
+        },
+        timeout: 15_000,
+        windowsHide: true,
+        maxBuffer: 16_384,
+      },
+    );
   } catch (error) {
     // Retain a category for startup logs, never raw PowerShell output.
-    const stderr = error instanceof ExecaError && typeof error.stderr === 'string' ? error.stderr : '';
-    const phase = [...stderr.matchAll(/^windows_security_phase:(script|identity|path|pipe)$/gmu)].at(-1)?.[1] ?? 'launch';
-    const category = error instanceof ExecaError && error.timedOut ? `timeout_${phase}`
-      : stderr.match(/\bwindows_(?:private_path_(?:is_link|owner_mismatch|permissions)|private_directory_required|pipe_acl_failed)\b/u)?.[0]
-        ?? stderr.match(/FullyQualifiedErrorId\s*:\s*([\w.,+]{1,100})/u)?.[1] ?? 'unknown';
-    throw new Error(`windows_${operation === 'pipe' ? 'pipe_acl' : 'private_path'}_unavailable`,
-      { cause: new Error(`windows_security_detail:${operation}:${category}`) });
+    const stderr =
+      error instanceof ExecaError && typeof error.stderr === "string"
+        ? error.stderr
+        : "";
+    const phase =
+      [
+        ...stderr.matchAll(
+          /^windows_security_phase:(script|identity|path|pipe)$/gmu,
+        ),
+      ].at(-1)?.[1] ?? "launch";
+    const category =
+      error instanceof ExecaError && error.timedOut
+        ? `timeout_${phase}`
+        : (stderr.match(
+            /\bwindows_(?:private_path_(?:is_link|owner_mismatch|permissions)|private_directory_required|pipe_acl_failed)\b/u,
+          )?.[0] ??
+          stderr.match(/FullyQualifiedErrorId\s*:\s*([\w.,+]{1,100})/u)?.[1] ??
+          "unknown");
+    throw new Error(
+      `windows_${operation === "pipe" ? "pipe_acl" : "private_path"}_unavailable`,
+      { cause: new Error(`windows_security_detail:${operation}:${category}`) },
+    );
   }
 }
 
 /** Only call for a new Dock-owned directory, before writing identity or runtime state. */
-export const protectWindowsDirectory = (path: string) => secure('protect', path);
-export const assertWindowsPrivatePath = (path: string) => secure('assert', path);
+export const protectWindowsDirectory = (path: string) =>
+  secure("protect", path);
+export const assertWindowsPrivatePath = (path: string) =>
+  secure("assert", path);
 /** Restrict IPC to the local owner and SYSTEM; network logons are explicitly denied. */
-export const protectWindowsPipe = (path: string) => secure('pipe', path);
+export const protectWindowsPipe = (path: string) => secure("pipe", path);

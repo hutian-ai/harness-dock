@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: "22"
           package-manager-cache: false
       - name: Install pinned package manager
         run: npm install --global pnpm@12.15.0
@@ -75,15 +75,15 @@ jobs:
     timeout-minutes: 30
     env:
       CARGO_TARGET_DIR: .local/gpui-build
-      CARGO_PROFILE_DEV_DEBUG: '0'
-      CARGO_BUILD_JOBS: '4'
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_BUILD_JOBS: "4"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: "24"
           package-manager-cache: false
       - run: npm install --global pnpm@12.15.0
       - run: pnpm install --frozen-lockfile
@@ -117,7 +117,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: "22"
           package-manager-cache: false
       - run: npm install --global pnpm@12.15.0
       - run: pnpm install --frozen-lockfile

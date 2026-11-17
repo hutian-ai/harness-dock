@@ -1,4 +1,7 @@
-import { protectWindowsDirectory, protectWindowsPipe } from './windows-security.ts';
+import {
+  protectWindowsDirectory,
+  protectWindowsPipe,
+} from "./windows-security.ts";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
@@ -61,14 +64,12 @@ const isObject = (value: unknown): value is JsonObject =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 /** The transport may outlive a turn; its authorization binding may not. */
-export async function createMcpBridge<TDelivery = unknown>(
-  input: {
-    signal: AbortSignal;
-    tools: readonly McpToolDefinition[];
-    name?: string;
-    invocation?: McpInvocation<TDelivery>;
-  },
-): Promise<McpBridge<TDelivery>> {
+export async function createMcpBridge<TDelivery = unknown>(input: {
+  signal: AbortSignal;
+  tools: readonly McpToolDefinition[];
+  name?: string;
+  invocation?: McpInvocation<TDelivery>;
+}): Promise<McpBridge<TDelivery>> {
   input.signal.throwIfAborted();
   const directory = await mkdtemp(join(tmpdir(), "harness-dock-mcp-"));
   await chmod(directory, 0o700);
@@ -82,11 +83,15 @@ export async function createMcpBridge<TDelivery = unknown>(
   const binding = (invocation: McpInvocation<TDelivery>) => ({
     invocation,
     id: randomUUID(),
-    delivery: new ToolDeliveryTracker<TDelivery>(invocation.onToolResultDelivery),
+    delivery: new ToolDeliveryTracker<TDelivery>(
+      invocation.onToolResultDelivery,
+    ),
     requests: new Set<string>(),
     pending: new Set<Promise<unknown>>(),
   });
-  let current: ReturnType<typeof binding> | null = input.invocation ? binding(input.invocation) : null;
+  let current: ReturnType<typeof binding> | null = input.invocation
+    ? binding(input.invocation)
+    : null;
   let detaching = false;
   async function unbind() {
     const previous = current;
@@ -107,7 +112,10 @@ export async function createMcpBridge<TDelivery = unknown>(
   });
   let ipcReady = false;
   const server = createServer((socket) => {
-    if (!ipcReady) { socket.destroy(); return; }
+    if (!ipcReady) {
+      socket.destroy();
+      return;
+    }
     if (input.signal.aborted || sockets.size >= 4) {
       socket.destroy();
       return;
@@ -129,18 +137,25 @@ export async function createMcpBridge<TDelivery = unknown>(
         const newline = authentication.indexOf(10);
         if (newline < 0) {
           callback(
-            authentication.length > 512 ? new Error("IPC authentication rejected") : undefined,
+            authentication.length > 512
+              ? new Error("IPC authentication rejected")
+              : undefined,
           );
           return;
         }
         try {
           if (newline > 512) throw new Error();
-          const value: unknown = JSON.parse(authentication.subarray(0, newline).toString("utf8"));
+          const value: unknown = JSON.parse(
+            authentication.subarray(0, newline).toString("utf8"),
+          );
           const presented =
             isObject(value) && typeof value.token === "string"
               ? Buffer.from(value.token)
               : Buffer.alloc(0);
-          if (presented.length !== token.length || !timingSafeEqual(presented, Buffer.from(token)))
+          if (
+            presented.length !== token.length ||
+            !timingSafeEqual(presented, Buffer.from(token))
+          )
             throw new Error();
           authenticated = true;
           const rest = authentication.subarray(newline + 1);
@@ -172,10 +187,20 @@ export async function createMcpBridge<TDelivery = unknown>(
     mcp.setRequestHandler("tools/call", async (request, context) => {
       const active = current;
       if (!active || active.invocation.signal.aborted)
-        throw new ProtocolError(INVALID_REQUEST, "Runtime invocation is not active");
+        throw new ProtocolError(
+          INVALID_REQUEST,
+          "Runtime invocation is not active",
+        );
       const key = `${connectionId}-${context.mcpReq.id}`;
-      if (inFlight >= 8 || active.requests.size >= 100 || active.requests.has(key))
-        throw new ProtocolError(INVALID_REQUEST, "Duplicate or excessive tool request");
+      if (
+        inFlight >= 8 ||
+        active.requests.size >= 100 ||
+        active.requests.has(key)
+      )
+        throw new ProtocolError(
+          INVALID_REQUEST,
+          "Duplicate or excessive tool request",
+        );
       const call: McpToolCall = {
         callId: `mcp-${active.id}-${key}`,
         name: request.params.name,
@@ -187,7 +212,10 @@ export async function createMcpBridge<TDelivery = unknown>(
         JSON.stringify(call.arguments).length > 64_000 ||
         !input.tools.some((tool) => tool.name === call.name)
       )
-        throw new ProtocolError(INVALID_PARAMS, "Unknown tool or invalid arguments");
+        throw new ProtocolError(
+          INVALID_PARAMS,
+          "Unknown tool or invalid arguments",
+        );
       active.requests.add(key);
       inFlight += 1;
       const operation = (async () => {
@@ -197,9 +225,14 @@ export async function createMcpBridge<TDelivery = unknown>(
           context.mcpReq.signal.throwIfAborted();
           const result = await active.invocation.onToolCall(call);
           const serialized = JSON.stringify(result.content);
-          if (serialized === undefined) throw new Error("Tool result must be JSON serializable");
+          if (serialized === undefined)
+            throw new Error("Tool result must be JSON serializable");
           if (result.deliveryContext !== undefined)
-            active.delivery.prepared(call.callId, serialized, result.deliveryContext);
+            active.delivery.prepared(
+              call.callId,
+              serialized,
+              result.deliveryContext,
+            );
           if (current !== active) throw new Error("Runtime invocation expired");
           active.invocation.signal.throwIfAborted();
           input.signal.throwIfAborted();
@@ -209,7 +242,10 @@ export async function createMcpBridge<TDelivery = unknown>(
             isError: result.isError ?? false,
           };
         } catch {
-          throw new ProtocolError(INTERNAL_ERROR, "Runtime tool request failed or was canceled");
+          throw new ProtocolError(
+            INTERNAL_ERROR,
+            "Runtime tool request failed or was canceled",
+          );
         } finally {
           inFlight -= 1;
         }
@@ -228,7 +264,11 @@ export async function createMcpBridge<TDelivery = unknown>(
     });
     socket.pipe(ingress);
     void mcp
-      .connect(new StdioServerTransport(ingress, socket, { maxBufferSize: MAX_MCP_BUFFER_BYTES }))
+      .connect(
+        new StdioServerTransport(ingress, socket, {
+          maxBufferSize: MAX_MCP_BUFFER_BYTES,
+        }),
+      )
       .catch(() => socket.destroy());
   });
   const abort = () => {
@@ -250,11 +290,16 @@ export async function createMcpBridge<TDelivery = unknown>(
     throw error;
   }
   const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-  const script = fileURLToPath(new URL(`./mcp-stdio.${extension}`, import.meta.url));
+  const script = fileURLToPath(
+    new URL(`./mcp-stdio.${extension}`, import.meta.url),
+  );
   const descriptor: McpServerStdio = {
     name: input.name ?? "harness_dock_tools",
     command: process.execPath,
-    args: extension === "ts" ? ["--import", import.meta.resolve("tsx"), script] : [script],
+    args:
+      extension === "ts"
+        ? ["--import", import.meta.resolve("tsx"), script]
+        : [script],
     env: [
       { name: "HARNESS_DOCK_MCP_ENDPOINT", value: endpoint },
       { name: "HARNESS_DOCK_MCP_TOKEN", value: token },
@@ -271,7 +316,8 @@ export async function createMcpBridge<TDelivery = unknown>(
       current = binding(invocation);
     },
     unbind,
-    acknowledgeToolUpdate: (update: unknown) => current?.delivery.acknowledgeAcpUpdate(update),
+    acknowledgeToolUpdate: (update: unknown) =>
+      current?.delivery.acknowledgeAcpUpdate(update),
     async close() {
       input.signal.removeEventListener("abort", abort);
       abort();

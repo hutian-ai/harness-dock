@@ -4,13 +4,18 @@ export type ToolDelivery<TContext = unknown> = {
   context: TContext;
 };
 
-type PendingDelivery<TContext> = { callId: string; context: TContext; serialized: string };
+type PendingDelivery<TContext> = {
+  callId: string;
+  context: TContext;
+  serialized: string;
+};
 
 /** Delivery is a Provider protocol acknowledgement, never a claim that the model read it. */
 export class ToolDeliveryTracker<TContext = unknown> {
   readonly #pending = new Map<string, PendingDelivery<TContext>>();
   readonly #inFlight = new Set<Promise<void>>();
-  readonly #report: ((delivery: ToolDelivery<TContext>) => Promise<void>) | undefined;
+  readonly #report:
+    ((delivery: ToolDelivery<TContext>) => Promise<void>) | undefined;
 
   constructor(report?: (delivery: ToolDelivery<TContext>) => Promise<void>) {
     this.#report = report;
@@ -30,7 +35,9 @@ export class ToolDeliveryTracker<TContext = unknown> {
     if (!update || typeof update !== "object") return;
     const value = update as Record<string, unknown>;
     if (
-      !["tool_call", "tool_call_update"].includes(String(value.sessionUpdate)) ||
+      !["tool_call", "tool_call_update"].includes(
+        String(value.sessionUpdate),
+      ) ||
       value.status !== "completed"
     )
       return;
@@ -38,7 +45,9 @@ export class ToolDeliveryTracker<TContext = unknown> {
       if (typeof candidate === "string") return candidate === expected;
       if (!candidate || typeof candidate !== "object") return false;
       if (JSON.stringify(candidate) === expected) return true;
-      return Object.values(candidate).some((nested) => contains(nested, expected));
+      return Object.values(candidate).some((nested) =>
+        contains(nested, expected),
+      );
     };
     for (const pending of this.#pending.values())
       if (
@@ -48,7 +57,10 @@ export class ToolDeliveryTracker<TContext = unknown> {
         this.#send(pending, "delivered");
   }
 
-  #send(pending: PendingDelivery<TContext>, status: ToolDelivery<TContext>["status"]): void {
+  #send(
+    pending: PendingDelivery<TContext>,
+    status: ToolDelivery<TContext>["status"],
+  ): void {
     this.#pending.delete(pending.callId);
     if (!this.#report) return;
     // Keep protocol readers free while the delivery observer is in flight.
@@ -66,7 +78,8 @@ export class ToolDeliveryTracker<TContext = unknown> {
   }
 
   async close(): Promise<void> {
-    for (const pending of this.#pending.values()) this.#send(pending, "unknown");
+    for (const pending of this.#pending.values())
+      this.#send(pending, "unknown");
     await Promise.all(this.#inFlight);
   }
 }

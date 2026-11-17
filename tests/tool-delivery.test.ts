@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ToolDeliveryTracker, type ToolDelivery } from "../packages/drivers/src/tool-delivery.ts";
+import {
+  ToolDeliveryTracker,
+  type ToolDelivery,
+} from "../packages/drivers/src/tool-delivery.ts";
 
 const result = { text: "synthetic" };
 const context = { observation: "test-only" };
@@ -25,11 +28,19 @@ test("does not claim prepared or echoed input as delivered; ACP requires complet
   tracker.acknowledgeAcpUpdate({
     sessionUpdate: "tool_call_update",
     status: "completed",
-    content: [{ type: "content", content: { type: "text", text: JSON.stringify(result) } }],
+    content: [
+      {
+        type: "content",
+        content: { type: "text", text: JSON.stringify(result) },
+      },
+    ],
   });
   tracker.prepared("second", JSON.stringify(result), context);
   await tracker.close();
-  assert.deepEqual(reports.map((delivery) => delivery.context), [context, context]);
+  assert.deepEqual(
+    reports.map((delivery) => delivery.context),
+    [context, context],
+  );
   assert.deepEqual(
     reports.map(({ callId, status }) => ({ callId, status })),
     [

@@ -1,110 +1,306 @@
 #!/usr/bin/env node
-import { mkdir, open, readFile, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
-import { assertWindowsPrivatePath } from '@harness-dock/drivers';
-import { initializeDevice, parseDevicePairing, readConfig } from './config.ts';
-import { control } from './local-control.ts';
+import { mkdir, open, readFile, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+import { assertWindowsPrivatePath } from "@harness-dock/drivers";
+import { initializeDevice, parseDevicePairing, readConfig } from "./config.ts";
+import { control } from "./local-control.ts";
 
 process.umask(0o077);
 try {
-  const { positionals: [command, argument], values } = parseArgs({ allowPositionals: true, options: {
-    home: { type: 'string' }, cwd: { type: 'string' }, endpoint: { type: 'string' },
-    mode: { type: 'string' }, pairing: { type: 'string' }, 'node-id': { type: 'string' }, token: { type: 'string' }, 'ca-file': { type: 'string' },
-    help: { type: 'boolean', short: 'h' }, 'background-log': { type: 'boolean' },
-    bundle: { type: 'string' }, 'install-dir': { type: 'string' }, node: { type: 'string' }, disable: { type: 'boolean' },
-    scope: { type: 'string' }, 'recovery-id': { type: 'string' }, version: { type: 'boolean' }, json: { type: 'boolean' }, autostart: { type: 'boolean' },
-  } });
-  if (values.version) console.log(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version);
-  else if (!command || values.help || command === 'help') {
-    console.log('harness-dock-daemon init --cwd <directory> [--home .local/device] [--endpoint wss://controller.example/] [--pairing <device-pairing.json>]\nharness-dock-daemon <run|start|status|stop|logs> [config.json]\nharness-dock-daemon <install|upgrade> [config.json] --bundle <daemon-bundle> [--node <node>] [--install-dir <directory>]\nharness-dock-daemon rollback [config.json] [--install-dir <directory>]\nharness-dock-daemon autostart [config.json] [--disable] [--install-dir <directory>]\nDefault config: .local/device/config.json. start runs in the background; run stays in the foreground.\nManaged installs keep releases separate from device state. autostart enables a macOS user LaunchAgent and starts it; --disable stops and unregisters it.');
-    console.log('harness-dock-daemon setup --cwd <directory> --home <private-directory> --pairing <device-pairing.json> --bundle <daemon-bundle> [--autostart]\nharness-dock-daemon doctor [config.json] [--json]\nharness-dock-daemon --version\nsetup installs and starts this device only; --autostart explicitly enables macOS login startup. Windows source candidates use manual start after login. doctor sends no model prompt.');
-    console.log('harness-dock-daemon prepare-admission-recovery [config.json]\nharness-dock-daemon resume-admission [config.json] --recovery-id <checkpoint UUID>\nRecovery preserves unknown outcomes. Resume requires verified host restart; it never replays or releases the original task.');
-    console.log('harness-dock-daemon prepare-legacy-lock-recovery [config.json] --scope connection|installation\nharness-dock-daemon recover-legacy-lock [config.json] --scope connection|installation --recovery-id <checkpoint UUID>\nLegacy lock recovery targets only the desktop selected binding, requires a verified host restart and archives the unchanged lock.');
-  } else if (command === 'doctor') {
-    await (await import('./doctor.ts')).deviceDoctor(resolve(argument ?? process.env.HARNESS_DOCK_INSTALLED_CONFIG ?? '.local/device/config.json'), values.json);
-  } else if (command === 'init' || command === 'setup') {
-    if (!values.cwd) throw new Error('init requires --cwd');
-    if (values.mode && values.mode !== 'device') throw new Error('unsupported_mode');
+  const {
+    positionals: [command, argument],
+    values,
+  } = parseArgs({
+    allowPositionals: true,
+    options: {
+      home: { type: "string" },
+      cwd: { type: "string" },
+      endpoint: { type: "string" },
+      mode: { type: "string" },
+      pairing: { type: "string" },
+      "node-id": { type: "string" },
+      token: { type: "string" },
+      "ca-file": { type: "string" },
+      help: { type: "boolean", short: "h" },
+      "background-log": { type: "boolean" },
+      bundle: { type: "string" },
+      "install-dir": { type: "string" },
+      node: { type: "string" },
+      disable: { type: "boolean" },
+      scope: { type: "string" },
+      "recovery-id": { type: "string" },
+      version: { type: "boolean" },
+      json: { type: "boolean" },
+      autostart: { type: "boolean" },
+    },
+  });
+  if (values.version)
+    console.log(
+      JSON.parse(
+        await readFile(new URL("../package.json", import.meta.url), "utf8"),
+      ).version,
+    );
+  else if (!command || values.help || command === "help") {
+    console.log(
+      "harness-dock-daemon init --cwd <directory> [--home .local/device] [--endpoint wss://controller.example/] [--pairing <device-pairing.json>]\nharness-dock-daemon <run|start|status|stop|logs> [config.json]\nharness-dock-daemon <install|upgrade> [config.json] --bundle <daemon-bundle> [--node <node>] [--install-dir <directory>]\nharness-dock-daemon rollback [config.json] [--install-dir <directory>]\nharness-dock-daemon autostart [config.json] [--disable] [--install-dir <directory>]\nDefault config: .local/device/config.json. start runs in the background; run stays in the foreground.\nManaged installs keep releases separate from device state. autostart enables a macOS user LaunchAgent and starts it; --disable stops and unregisters it.",
+    );
+    console.log(
+      "harness-dock-daemon setup --cwd <directory> --home <private-directory> --pairing <device-pairing.json> --bundle <daemon-bundle> [--autostart]\nharness-dock-daemon doctor [config.json] [--json]\nharness-dock-daemon --version\nsetup installs and starts this device only; --autostart explicitly enables macOS login startup. Windows source candidates use manual start after login. doctor sends no model prompt.",
+    );
+    console.log(
+      "harness-dock-daemon prepare-admission-recovery [config.json]\nharness-dock-daemon resume-admission [config.json] --recovery-id <checkpoint UUID>\nRecovery preserves unknown outcomes. Resume requires verified host restart; it never replays or releases the original task.",
+    );
+    console.log(
+      "harness-dock-daemon prepare-legacy-lock-recovery [config.json] --scope connection|installation\nharness-dock-daemon recover-legacy-lock [config.json] --scope connection|installation --recovery-id <checkpoint UUID>\nLegacy lock recovery targets only the desktop selected binding, requires a verified host restart and archives the unchanged lock.",
+    );
+  } else if (command === "doctor") {
+    await (
+      await import("./doctor.ts")
+    ).deviceDoctor(
+      resolve(
+        argument ??
+          process.env.HARNESS_DOCK_INSTALLED_CONFIG ??
+          ".local/device/config.json",
+      ),
+      values.json,
+    );
+  } else if (command === "init" || command === "setup") {
+    if (!values.cwd) throw new Error("init requires --cwd");
+    if (values.mode && values.mode !== "device")
+      throw new Error("unsupported_mode");
     {
       let pairing: { nodeId?: string; token?: string; endpoint?: string } = {};
       if (values.pairing) {
-        if (values['node-id'] || values.token || values.endpoint) throw new Error('pairing_conflicts_with_identity_flags');
+        if (values["node-id"] || values.token || values.endpoint)
+          throw new Error("pairing_conflicts_with_identity_flags");
         await assertWindowsPrivatePath(values.pairing);
         const file = await stat(values.pairing);
-        if (!file.isFile() || file.size > 16_384 || process.platform !== 'win32' && (file.mode & 0o077)) throw new Error('invalid_pairing_file_permissions');
-        pairing = parseDevicePairing(JSON.parse(await readFile(values.pairing, 'utf8')));
+        if (
+          !file.isFile() ||
+          file.size > 16_384 ||
+          (process.platform !== "win32" && file.mode & 0o077)
+        )
+          throw new Error("invalid_pairing_file_permissions");
+        pairing = parseDevicePairing(
+          JSON.parse(await readFile(values.pairing, "utf8")),
+        );
       }
-      const options = { home: values.home ?? '.local/device', cwd: values.cwd, endpoint: pairing.endpoint ?? values.endpoint, nodeId: pairing.nodeId ?? values['node-id'], token: pairing.token ?? values.token, caFile: values['ca-file'] };
-      if (command === 'init') console.log(JSON.stringify(await initializeDevice(options), null, 2));
+      const options = {
+        home: values.home ?? ".local/device",
+        cwd: values.cwd,
+        endpoint: pairing.endpoint ?? values.endpoint,
+        nodeId: pairing.nodeId ?? values["node-id"],
+        token: pairing.token ?? values.token,
+        caFile: values["ca-file"],
+      };
+      if (command === "init")
+        console.log(JSON.stringify(await initializeDevice(options), null, 2));
       else {
-        if (!values.pairing || !values.bundle) throw new Error('setup requires --pairing and --bundle');
-        const { setupDevice } = await import('./setup.ts');
-        const result = await setupDevice({ ...options, nodeId: pairing.nodeId!, token: pairing.token!, endpoint: pairing.endpoint!,
-          bundle: values.bundle, runtime: values.node, root: values['install-dir'], autostart: values.autostart });
-        console.log(JSON.stringify({ ...result, next: 'Run the installed doctor command. Connected is not model execution verification.' }, null, 2));
+        if (!values.pairing || !values.bundle)
+          throw new Error("setup requires --pairing and --bundle");
+        const { setupDevice } = await import("./setup.ts");
+        const result = await setupDevice({
+          ...options,
+          nodeId: pairing.nodeId!,
+          token: pairing.token!,
+          endpoint: pairing.endpoint!,
+          bundle: values.bundle,
+          runtime: values.node,
+          root: values["install-dir"],
+          autostart: values.autostart,
+        });
+        console.log(
+          JSON.stringify(
+            {
+              ...result,
+              next: "Run the installed doctor command. Connected is not model execution verification.",
+            },
+            null,
+            2,
+          ),
+        );
       }
     }
   } else {
-    if (!['run', 'start', 'status', 'stop', 'logs', 'install', 'upgrade', 'rollback', 'autostart', 'prepare-admission-recovery', 'resume-admission', 'prepare-legacy-lock-recovery', 'recover-legacy-lock'].includes(command)) throw new Error(`Unknown command: ${command}`);
-    const path = resolve(argument ?? process.env.HARNESS_DOCK_INSTALLED_CONFIG ?? '.local/device/config.json');
-    const { installationRoot, manageInstallation, readInstallation, startInstalled } = await import('./installation.ts');
-    const { startBackground } = await import('./process-management.ts');
-    const root = installationRoot(path, values['install-dir'] ?? process.env.HARNESS_DOCK_INSTALL_DIR);
-    if (command === 'prepare-legacy-lock-recovery' || command === 'recover-legacy-lock') {
-      if (values.scope !== 'connection' && values.scope !== 'installation') throw new Error('legacy recovery requires --scope connection|installation');
-      if (command === 'recover-legacy-lock' && !values['recovery-id']) throw new Error('recover-legacy-lock requires --recovery-id');
-      const { managePanelLegacyLock } = await import('./panel-management.ts');
-      console.log(JSON.stringify(await managePanelLegacyLock(path, values.scope, command === 'prepare-legacy-lock-recovery' ? 'prepare' : 'recover', values['recovery-id']), null, 2));
-    }
-    else {
+    if (
+      ![
+        "run",
+        "start",
+        "status",
+        "stop",
+        "logs",
+        "install",
+        "upgrade",
+        "rollback",
+        "autostart",
+        "prepare-admission-recovery",
+        "resume-admission",
+        "prepare-legacy-lock-recovery",
+        "recover-legacy-lock",
+      ].includes(command)
+    )
+      throw new Error(`Unknown command: ${command}`);
+    const path = resolve(
+      argument ??
+        process.env.HARNESS_DOCK_INSTALLED_CONFIG ??
+        ".local/device/config.json",
+    );
+    const {
+      installationRoot,
+      manageInstallation,
+      readInstallation,
+      startInstalled,
+    } = await import("./installation.ts");
+    const { startBackground } = await import("./process-management.ts");
+    const root = installationRoot(
+      path,
+      values["install-dir"] ?? process.env.HARNESS_DOCK_INSTALL_DIR,
+    );
+    if (
+      command === "prepare-legacy-lock-recovery" ||
+      command === "recover-legacy-lock"
+    ) {
+      if (values.scope !== "connection" && values.scope !== "installation")
+        throw new Error(
+          "legacy recovery requires --scope connection|installation",
+        );
+      if (command === "recover-legacy-lock" && !values["recovery-id"])
+        throw new Error("recover-legacy-lock requires --recovery-id");
+      const { managePanelLegacyLock } = await import("./panel-management.ts");
+      console.log(
+        JSON.stringify(
+          await managePanelLegacyLock(
+            path,
+            values.scope,
+            command === "prepare-legacy-lock-recovery" ? "prepare" : "recover",
+            values["recovery-id"],
+          ),
+          null,
+          2,
+        ),
+      );
+    } else {
       const config = await readConfig(path);
-      if (command === 'install' || command === 'upgrade' || command === 'rollback' || command === 'autostart') {
-        console.log(JSON.stringify(await manageInstallation(command, { config: path, root, bundle: values.bundle, runtime: values.node, disable: values.disable }), null, 2));
-      } else if (command === 'run') {
+      if (
+        command === "install" ||
+        command === "upgrade" ||
+        command === "rollback" ||
+        command === "autostart"
+      ) {
+        console.log(
+          JSON.stringify(
+            await manageInstallation(command, {
+              config: path,
+              root,
+              bundle: values.bundle,
+              runtime: values.node,
+              disable: values.disable,
+            }),
+            null,
+            2,
+          ),
+        );
+      } else if (command === "run") {
         // Older desktop launchers can start this release with only their GUI environment.
         const installed = await readInstallation(root, path);
-        if (installed && installed.nodeId === config.nodeId
-          && resolve(fileURLToPath(import.meta.url)) === resolve(root, 'releases', installed.current.id, 'dist/cli.js')) {
-          const { installationEnvironment } = await import('./installation-environment.ts');
+        if (
+          installed &&
+          installed.nodeId === config.nodeId &&
+          resolve(fileURLToPath(import.meta.url)) ===
+            resolve(root, "releases", installed.current.id, "dist/cli.js")
+        ) {
+          const { installationEnvironment } =
+            await import("./installation-environment.ts");
           process.env = installationEnvironment(installed, process.execPath);
         }
-        if (values['background-log']) {
+        if (values["background-log"]) {
           await mkdir(config.stateDir, { recursive: true, mode: 0o700 });
-          (await import('./rotating-log.ts')).installBackgroundLog(config.stateDir);
+          (await import("./rotating-log.ts")).installBackgroundLog(
+            config.stateDir,
+          );
         }
-        await (await import('./device-main.ts')).runDeviceDaemon(config);
-      }
-      else if (command === 'prepare-admission-recovery' || command === 'resume-admission') {
-        if (command === 'resume-admission' && !values['recovery-id']) throw new Error('resume-admission requires --recovery-id from the prepared checkpoint');
-        const result = await control(config, command, command === 'resume-admission' ? { id: values['recovery-id']! } : undefined);
-        if (!result) throw new Error('device_not_running');
+        await (await import("./device-main.ts")).runDeviceDaemon(config);
+      } else if (
+        command === "prepare-admission-recovery" ||
+        command === "resume-admission"
+      ) {
+        if (command === "resume-admission" && !values["recovery-id"])
+          throw new Error(
+            "resume-admission requires --recovery-id from the prepared checkpoint",
+          );
+        const result = await control(
+          config,
+          command,
+          command === "resume-admission"
+            ? { id: values["recovery-id"]! }
+            : undefined,
+        );
+        if (!result) throw new Error("device_not_running");
         console.log(JSON.stringify(result, null, 2));
-      }
-      else if (command === 'status' || command === 'stop') {
+      } else if (command === "status" || command === "stop") {
         const result = await control(config, command);
-        const installation = command === 'status' ? await readInstallation(root, path) : undefined;
-        console.log(JSON.stringify({ ...(result ?? { nodeId: config.nodeId, available: false }),
-          ...(installation ? { installation: { root, current: installation.current, previous: installation.previous, autostart: installation.autostart } } : {}) }, null, 2));
-      } else if (command === 'logs') {
-        const file = await open(join(config.stateDir, 'daemon.log'), 'r');
+        const installation =
+          command === "status" ? await readInstallation(root, path) : undefined;
+        console.log(
+          JSON.stringify(
+            {
+              ...(result ?? { nodeId: config.nodeId, available: false }),
+              ...(installation
+                ? {
+                    installation: {
+                      root,
+                      current: installation.current,
+                      previous: installation.previous,
+                      autostart: installation.autostart,
+                    },
+                  }
+                : {}),
+            },
+            null,
+            2,
+          ),
+        );
+      } else if (command === "logs") {
+        const file = await open(join(config.stateDir, "daemon.log"), "r");
         try {
           const { size } = await file.stat();
           const data = Buffer.alloc(Math.min(size, 32_768));
-          await file.read(data, 0, data.length, Math.max(0, size - data.length));
+          await file.read(
+            data,
+            0,
+            data.length,
+            Math.max(0, size - data.length),
+          );
           process.stdout.write(data);
-        } finally { await file.close(); }
+        } finally {
+          await file.close();
+        }
       } else {
-        const result = await startInstalled(path, root) ?? await startBackground(config, path, fileURLToPath(import.meta.url), process.execPath, process.execArgv);
+        const result =
+          (await startInstalled(path, root)) ??
+          (await startBackground(
+            config,
+            path,
+            fileURLToPath(import.meta.url),
+            process.execPath,
+            process.execArgv,
+          ));
         console.log(JSON.stringify(result, null, 2));
       }
     }
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  if (process.argv.includes('--background-log') && error instanceof Error && error.cause instanceof Error
-      && /^windows_security_detail:(?:assert|protect|pipe):[\w.,+]{1,100}$/u.test(error.cause.message))
+  if (
+    process.argv.includes("--background-log") &&
+    error instanceof Error &&
+    error.cause instanceof Error &&
+    /^windows_security_detail:(?:assert|protect|pipe):[\w.,+]{1,100}$/u.test(
+      error.cause.message,
+    )
+  )
     console.error(error.cause.message);
   process.exitCode = 1;
 }

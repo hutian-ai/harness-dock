@@ -1,26 +1,50 @@
-import { mkdir, lstat, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { readServerConfig } from './config.ts';
+import { mkdir, lstat, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { readServerConfig } from "./config.ts";
 
 /** Generate reviewable files in a NEW directory; never install/reload a service. */
-export async function generateDeployment(configPath: string, output: string, options: { image: string; certFile?: string; keyFile?: string }) {
-  const file = resolve(configPath), root = resolve(output), { config } = await readServerConfig(file);
-  if (!config.publicEndpoint || new URL(config.publicEndpoint).protocol !== 'wss:') throw new Error('deployment_requires_public_wss_endpoint');
-  if (config.host !== '127.0.0.1' || config.tls || !config.devicePort || !config.clientPort)
-    throw new Error('deployment_profile_requires_loopback_fixed_ports_without_internal_tls');
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9./_:@-]+$/.test(options.image)) throw new Error('invalid_image_reference');
-  const url = new URL(config.publicEndpoint), domain = url.hostname;
-  if (!/^[a-zA-Z0-9.-]+$/.test(domain)) throw new Error('deployment_profile_requires_dns_name');
-  if (/[\x00-\x1f\x7f]/.test(file)) throw new Error('invalid_deployment_config_path');
-  const proxyPort = Number(url.port || '443');
-  if (!proxyPort) throw new Error('deployment_proxy_requires_fixed_port');
-  if (proxyPort === config.devicePort || proxyPort === config.clientPort) throw new Error('deployment_proxy_port_conflict');
-  const cert = options.certFile ?? `/etc/letsencrypt/live/${domain}/fullchain.pem`;
+export async function generateDeployment(
+  configPath: string,
+  output: string,
+  options: { image: string; certFile?: string; keyFile?: string },
+) {
+  const file = resolve(configPath),
+    root = resolve(output),
+    { config } = await readServerConfig(file);
+  if (
+    !config.publicEndpoint ||
+    new URL(config.publicEndpoint).protocol !== "wss:"
+  )
+    throw new Error("deployment_requires_public_wss_endpoint");
+  if (
+    config.host !== "127.0.0.1" ||
+    config.tls ||
+    !config.devicePort ||
+    !config.clientPort
+  )
+    throw new Error(
+      "deployment_profile_requires_loopback_fixed_ports_without_internal_tls",
+    );
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9./_:@-]+$/.test(options.image))
+    throw new Error("invalid_image_reference");
+  const url = new URL(config.publicEndpoint),
+    domain = url.hostname;
+  if (!/^[a-zA-Z0-9.-]+$/.test(domain))
+    throw new Error("deployment_profile_requires_dns_name");
+  if (/[\x00-\x1f\x7f]/.test(file))
+    throw new Error("invalid_deployment_config_path");
+  const proxyPort = Number(url.port || "443");
+  if (!proxyPort) throw new Error("deployment_proxy_requires_fixed_port");
+  if (proxyPort === config.devicePort || proxyPort === config.clientPort)
+    throw new Error("deployment_proxy_port_conflict");
+  const cert =
+    options.certFile ?? `/etc/letsencrypt/live/${domain}/fullchain.pem`;
   const key = options.keyFile ?? `/etc/letsencrypt/live/${domain}/privkey.pem`;
-  if ([cert, key].some(path => !/^\/[a-zA-Z0-9_./-]+$/.test(path))) throw new Error('invalid_proxy_certificate_path');
+  if ([cert, key].some((path) => !/^\/[a-zA-Z0-9_./-]+$/.test(path)))
+    throw new Error("invalid_proxy_certificate_path");
   const info = await lstat(file);
   await mkdir(root, { mode: 0o700 });
-  await mkdir(join(root, 'invitation-state'), { mode: 0o700 });
+  await mkdir(join(root, "invitation-state"), { mode: 0o700 });
   const compose = `services:
   server:
     image: ${options.image}
@@ -82,10 +106,20 @@ server {
   }
 }
 `;
-  const envPath = JSON.stringify(file.replace(/\$/g, () => '$$'));
-  const statePath = JSON.stringify(join(root, 'invitation-state').replace(/\$/g, () => '$$'));
-  for (const [name, content] of Object.entries({ 'compose.yaml': compose, '.env': `DOCK_CONFIG_FILE=${envPath}\nDOCK_INVITATION_STATE=${statePath}\n`, 'nginx.conf': nginx,
-    'README.txt': `Generated only; nothing was started or reloaded.\nRequires Linux, Docker Compose, existing DNS and valid TLS files.\nTransfer server.json privately to the deployment host and set DOCK_CONFIG_FILE in .env to its absolute path there.\nSet DOCK_INVITATION_STATE in .env to an absolute persistent directory on that host; generated paths refer to the build machine.\nFor a new deployment, create that directory with mode 0700 before starting Compose (bind mounts never create missing host paths).\nFor an existing deployment, preserve or privately transfer the entire invitation-state directory before switching paths; never clear consumed-invitation records during a restart or upgrade.\nThe generated UID/GID must match the non-root runtime owner on that host. Keep server.json at 0600 and the state directory at 0700, both owned by that UID; update Compose user if needed, never relax permissions.\nCheck: docker compose config --quiet\nReview nginx.conf against the existing host config and certificate paths before installation.\nStart only in your chosen maintenance window: docker compose up -d\nVerify https://${url.host}/healthz and server doctor; health alone does not prove device authentication or model execution.\nNo device or application credentials are embedded in these generated files.\n` }))
-    await writeFile(join(root, name), content, { mode: 0o600, flag: 'wx' });
-  return { directory: root, generatedOnly: true, endpoint: config.publicEndpoint };
+  const envPath = JSON.stringify(file.replace(/\$/g, () => "$$"));
+  const statePath = JSON.stringify(
+    join(root, "invitation-state").replace(/\$/g, () => "$$"),
+  );
+  for (const [name, content] of Object.entries({
+    "compose.yaml": compose,
+    ".env": `DOCK_CONFIG_FILE=${envPath}\nDOCK_INVITATION_STATE=${statePath}\n`,
+    "nginx.conf": nginx,
+    "README.txt": `Generated only; nothing was started or reloaded.\nRequires Linux, Docker Compose, existing DNS and valid TLS files.\nTransfer server.json privately to the deployment host and set DOCK_CONFIG_FILE in .env to its absolute path there.\nSet DOCK_INVITATION_STATE in .env to an absolute persistent directory on that host; generated paths refer to the build machine.\nFor a new deployment, create that directory with mode 0700 before starting Compose (bind mounts never create missing host paths).\nFor an existing deployment, preserve or privately transfer the entire invitation-state directory before switching paths; never clear consumed-invitation records during a restart or upgrade.\nThe generated UID/GID must match the non-root runtime owner on that host. Keep server.json at 0600 and the state directory at 0700, both owned by that UID; update Compose user if needed, never relax permissions.\nCheck: docker compose config --quiet\nReview nginx.conf against the existing host config and certificate paths before installation.\nStart only in your chosen maintenance window: docker compose up -d\nVerify https://${url.host}/healthz and server doctor; health alone does not prove device authentication or model execution.\nNo device or application credentials are embedded in these generated files.\n`,
+  }))
+    await writeFile(join(root, name), content, { mode: 0o600, flag: "wx" });
+  return {
+    directory: root,
+    generatedOnly: true,
+    endpoint: config.publicEndpoint,
+  };
 }

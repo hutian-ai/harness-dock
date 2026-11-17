@@ -1,36 +1,102 @@
-import type { ProviderOverride } from '@harness-dock/drivers';
-import { resolveProviderProxy, type ProxyDefaults } from './provider-proxy.ts';
+import type { ProviderOverride } from "@harness-dock/drivers";
+import { resolveProviderProxy, type ProxyDefaults } from "./provider-proxy.ts";
 
-const baseVariables = new Set(['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SHELL', 'USER', 'LOGNAME', 'SYSTEMROOT', 'COMSPEC', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PATHEXT', 'WINDIR', 'PROGRAMFILES', 'PROGRAMFILES(X86)']);
-const discoveryVariables = new Set(['CODEX_HOME', 'CODEX_CLI_PATH', 'DSH_HOME', 'NVM_DIR']);
+const baseVariables = new Set([
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "SHELL",
+  "USER",
+  "LOGNAME",
+  "SYSTEMROOT",
+  "COMSPEC",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PATHEXT",
+  "WINDIR",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+]);
+const discoveryVariables = new Set([
+  "CODEX_HOME",
+  "CODEX_CLI_PATH",
+  "DSH_HOME",
+  "NVM_DIR",
+]);
 
 /** Proxy defaults are selected separately; other dependencies remain explicit local choices. */
 export const providerDependencyVariables = [
-  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-  'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
-  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "CURL_CA_BUNDLE",
 ] as const;
 const dependencyVariables = new Set<string>(providerDependencyVariables);
 
-export function isProviderEnvironment(value: unknown): value is Record<string, string> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
-    && Object.entries(value).every(([key, item]) => dependencyVariables.has(key)
-      && typeof item === 'string' && !item.includes('\0') && Buffer.byteLength(item) <= 16_384));
+export function isProviderEnvironment(
+  value: unknown,
+): value is Record<string, string> {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.entries(value).every(
+      ([key, item]) =>
+        dependencyVariables.has(key) &&
+        typeof item === "string" &&
+        !item.includes("\0") &&
+        Buffer.byteLength(item) <= 16_384,
+    ),
+  );
 }
 
 /** Keep discovery selectors inside the daemon; adapters receive only their own selected home/bin. */
-export function daemonEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(environment).filter(([key, value]) =>
-    typeof value === 'string' && (baseVariables.has(key.toUpperCase()) || discoveryVariables.has(key))));
+export function daemonEnvironment(
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(environment).filter(
+      ([key, value]) =>
+        typeof value === "string" &&
+        (baseVariables.has(key.toUpperCase()) || discoveryVariables.has(key)),
+    ),
+  );
 }
 
 /** Resolve one Provider's dependencies without inheriting controller credentials or another Provider's choices. */
-export function providerEnvironment(override?: ProviderOverride, environment: NodeJS.ProcessEnv = process.env, proxyDefaults?: ProxyDefaults): NodeJS.ProcessEnv {
-  const selected = override?.environment === undefined ? {} : override.environment;
-  if (!isProviderEnvironment(selected)) throw new Error('invalid_provider_environment');
-  const base = Object.fromEntries(Object.entries(environment).filter(([key, value]) =>
-    typeof value === 'string' && baseVariables.has(key.toUpperCase())));
-  const proxy = proxyDefaults ? resolveProviderProxy(selected, proxyDefaults) : undefined;
-  if (proxy?.status.mode === 'unavailable') throw new Error('provider_proxy_unavailable');
+export function providerEnvironment(
+  override?: ProviderOverride,
+  environment: NodeJS.ProcessEnv = process.env,
+  proxyDefaults?: ProxyDefaults,
+): NodeJS.ProcessEnv {
+  const selected =
+    override?.environment === undefined ? {} : override.environment;
+  if (!isProviderEnvironment(selected))
+    throw new Error("invalid_provider_environment");
+  const base = Object.fromEntries(
+    Object.entries(environment).filter(
+      ([key, value]) =>
+        typeof value === "string" && baseVariables.has(key.toUpperCase()),
+    ),
+  );
+  const proxy = proxyDefaults
+    ? resolveProviderProxy(selected, proxyDefaults)
+    : undefined;
+  if (proxy?.status.mode === "unavailable")
+    throw new Error("provider_proxy_unavailable");
   return { ...base, ...selected, ...proxy?.environment };
 }

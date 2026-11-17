@@ -1,2 +1,2 @@
-import { acceptDevice } from './accept-device.ts';
+import { acceptDevice } from "./accept-device.ts";
 await acceptDevice();

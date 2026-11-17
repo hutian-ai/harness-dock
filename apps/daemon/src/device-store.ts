@@ -1,58 +1,140 @@
-import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, mkdirSync } from 'node:fs';
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
-import { assertWindowsPrivatePath } from '@harness-dock/drivers';
-import type { PreparedDirectories } from './device-files.ts';
-import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
-import { readDeviceOverview, reportedUsage, type DeviceOverview, type ReportedUsage } from './device-overview.ts';
+import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { chmodSync, mkdirSync } from "node:fs";
+import { lstat } from "node:fs/promises";
+import { join } from "node:path";
+import { assertWindowsPrivatePath } from "@harness-dock/drivers";
+import type { PreparedDirectories } from "./device-files.ts";
+import {
+  resourceLimits,
+  type DeviceResourceLimits,
+} from "./device-resources.ts";
+import {
+  readDeviceOverview,
+  reportedUsage,
+  type DeviceOverview,
+  type ReportedUsage,
+} from "./device-overview.ts";
 
-export interface StoredPreparation { input: string; sessionKey: string; directories: PreparedDirectories; released?: boolean; createdAt?: number; releasedAt?: number }
-export interface StoredExecution {
-  runId: string; provider: string; input: string; state: 'running' | 'completed' | 'cancelled' | 'failed' | 'unknown';
-  bootId?: string; admissionRecovery?: { checkpointId: string; verifiedAt: string; evidence: 'host_restarted' };
-  result?: unknown; environment?: unknown; createdAt?: number; settledAt?: number; detailsExpired?: boolean; historyTruncated?: boolean;
-  model?: string; finishedAt?: number; lastObservedAt?: number; usage?: ReportedUsage;
+export interface StoredPreparation {
+  input: string;
+  sessionKey: string;
+  directories: PreparedDirectories;
+  released?: boolean;
+  createdAt?: number;
+  releasedAt?: number;
 }
-interface RecoveryCheckpoint { id: string; runs: { runId: string; input: string; bootId: string }[] }
+export interface StoredExecution {
+  runId: string;
+  provider: string;
+  input: string;
+  state: "running" | "completed" | "cancelled" | "failed" | "unknown";
+  bootId?: string;
+  admissionRecovery?: {
+    checkpointId: string;
+    verifiedAt: string;
+    evidence: "host_restarted";
+  };
+  result?: unknown;
+  environment?: unknown;
+  createdAt?: number;
+  settledAt?: number;
+  detailsExpired?: boolean;
+  historyTruncated?: boolean;
+  model?: string;
+  finishedAt?: number;
+  lastObservedAt?: number;
+  usage?: ReportedUsage;
+}
+interface RecoveryCheckpoint {
+  id: string;
+  runs: { runId: string; input: string; bootId: string }[];
+}
 export interface AdmissionRecoveryStatus {
-  unresolvedCount: number; supported: boolean; checkpointId?: string; requiresRestart: boolean; canResume: boolean;
+  unresolvedCount: number;
+  supported: boolean;
+  checkpointId?: string;
+  requiresRestart: boolean;
+  canResume: boolean;
 }
 
 /** Read existing owner evidence without creating, migrating or settling any execution. */
-export async function readStoredActivity(nodeId: string, stateDir: string, includeOverview = false): Promise<{ unresolved: number; overview?: DeviceOverview } | undefined> {
-  const path = join(stateDir, 'runs.sqlite');
+export async function readStoredActivity(
+  nodeId: string,
+  stateDir: string,
+  includeOverview = false,
+): Promise<{ unresolved: number; overview?: DeviceOverview } | undefined> {
+  const path = join(stateDir, "runs.sqlite");
   let file;
-  try { file = await lstat(path); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  try {
+    file = await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
   const directory = await lstat(stateDir);
-  if (!directory.isDirectory() || directory.isSymbolicLink() || !file.isFile() || file.isSymbolicLink()
-    || process.platform !== 'win32' && (directory.uid !== process.getuid?.() || directory.mode & 0o077
-      || file.uid !== process.getuid?.() || file.mode & 0o077)) throw new Error('invalid_state_file_permissions');
+  if (
+    !directory.isDirectory() ||
+    directory.isSymbolicLink() ||
+    !file.isFile() ||
+    file.isSymbolicLink() ||
+    (process.platform !== "win32" &&
+      (directory.uid !== process.getuid?.() ||
+        directory.mode & 0o077 ||
+        file.uid !== process.getuid?.() ||
+        file.mode & 0o077))
+  )
+    throw new Error("invalid_state_file_permissions");
   await assertWindowsPrivatePath(stateDir);
   await assertWindowsPrivatePath(path);
   const database = new DatabaseSync(path, { readOnly: true });
   try {
     // Read the identity and counts in one snapshot. A live exclusive owner makes this
     // unavailable rather than allowing a durable snapshot to masquerade as live state.
-    database.exec('BEGIN');
-    const owner = database.prepare('SELECT id FROM node').all();
-    if (owner.length !== 1 || owner[0]?.id !== nodeId) throw new Error('state_node_mismatch');
-    if (database.prepare(`SELECT 1 FROM device_executions WHERE json_type(value) IS NOT 'object'
+    database.exec("BEGIN");
+    const owner = database.prepare("SELECT id FROM node").all();
+    if (owner.length !== 1 || owner[0]?.id !== nodeId)
+      throw new Error("state_node_mismatch");
+    if (
+      database
+        .prepare(
+          `SELECT 1 FROM device_executions WHERE json_type(value) IS NOT 'object'
       OR json_type(value,'$.state') IS NOT 'text'
       OR json_extract(value,'$.state') NOT IN ('running','completed','cancelled','failed','unknown')
-      OR json_extract(value,'$.runId') IS NOT run_id LIMIT 1`).get()) throw new Error('invalid_execution_state');
-    const row = database.prepare(`SELECT count(*) AS unresolved FROM device_executions
+      OR json_extract(value,'$.runId') IS NOT run_id LIMIT 1`,
+        )
+        .get()
+    )
+      throw new Error("invalid_execution_state");
+    const row = database
+      .prepare(
+        `SELECT count(*) AS unresolved FROM device_executions
       WHERE json_extract(value,'$.state')='running'
-        OR (json_extract(value,'$.state')='unknown' AND json_extract(value,'$.admissionRecovery') IS NULL)`).get();
+        OR (json_extract(value,'$.state')='unknown' AND json_extract(value,'$.admissionRecovery') IS NULL)`,
+      )
+      .get();
     const unresolved = row?.unresolved;
-    if (typeof unresolved !== 'number' || !Number.isSafeInteger(unresolved) || unresolved < 0) throw new Error('invalid_execution_state');
-    const overview = includeOverview ? readDeviceOverview(database, 'persisted') : undefined;
+    if (
+      typeof unresolved !== "number" ||
+      !Number.isSafeInteger(unresolved) ||
+      unresolved < 0
+    )
+      throw new Error("invalid_execution_state");
+    const overview = includeOverview
+      ? readDeviceOverview(database, "persisted")
+      : undefined;
     const current = await lstat(path);
-    if (!current.isFile() || current.isSymbolicLink() || current.dev !== file.dev || current.ino !== file.ino) throw new Error('state_file_changed');
+    if (
+      !current.isFile() ||
+      current.isSymbolicLink() ||
+      current.dev !== file.dev ||
+      current.ino !== file.ino
+    )
+      throw new Error("state_file_changed");
     return { unresolved, ...(overview ? { overview } : {}) };
-  } finally { database.close(); }
+  } finally {
+    database.close();
+  }
 }
 
 /** Durable admission identities outlive disposable output; this is never a prompt replay queue. */
@@ -60,14 +142,19 @@ export class DeviceStore {
   readonly #db: DatabaseSync;
   readonly #limits: DeviceResourceLimits;
   #overview?: DeviceOverview;
-  constructor(nodeId: string, stateDir: string, resources: Partial<DeviceResourceLimits> = {}) {
+  constructor(
+    nodeId: string,
+    stateDir: string,
+    resources: Partial<DeviceResourceLimits> = {},
+  ) {
     this.#limits = resourceLimits(resources);
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-    const path = join(stateDir, 'runs.sqlite');
+    const path = join(stateDir, "runs.sqlite");
     this.#db = new DatabaseSync(path);
     try {
       chmodSync(path, 0o600);
-      this.#db.exec(`PRAGMA locking_mode=EXCLUSIVE; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
+      this.#db
+        .exec(`PRAGMA locking_mode=EXCLUSIVE; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;
         BEGIN EXCLUSIVE;
         CREATE TABLE IF NOT EXISTS node (id TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS device_preparations (run_id TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -82,176 +169,394 @@ export class DeviceStore {
         CREATE TABLE IF NOT EXISTS device_closed_sessions (session_key TEXT PRIMARY KEY);
         INSERT OR IGNORE INTO device_event_stats(run_id,event_count,event_bytes) SELECT run_id,count(*),sum(length(CAST(payload AS BLOB))) FROM device_events GROUP BY run_id;
         COMMIT;`);
-      const owner = this.#db.prepare('SELECT id FROM node').get();
-      if (owner && owner.id !== nodeId) throw new Error('state_node_mismatch');
-      if (!owner) this.#db.prepare('INSERT INTO node VALUES (?)').run(nodeId);
-      this.#db.prepare("UPDATE device_executions SET value=json_set(value,'$.state','unknown') WHERE json_extract(value,'$.state')='running'").run();
+      const owner = this.#db.prepare("SELECT id FROM node").get();
+      if (owner && owner.id !== nodeId) throw new Error("state_node_mismatch");
+      if (!owner) this.#db.prepare("INSERT INTO node VALUES (?)").run(nodeId);
+      this.#db
+        .prepare(
+          "UPDATE device_executions SET value=json_set(value,'$.state','unknown') WHERE json_extract(value,'$.state')='running'",
+        )
+        .run();
       // Existing records receive a full retention period; no migration infers that an unknown run is safe to delete.
       const now = Date.now();
-      this.#db.prepare("UPDATE device_preparations SET value=json_set(value,'$.createdAt',?) WHERE json_extract(value,'$.createdAt') IS NULL").run(now);
-      this.#db.prepare("UPDATE device_preparations SET value=json_set(value,'$.releasedAt',?) WHERE json_extract(value,'$.released')=1 AND json_extract(value,'$.releasedAt') IS NULL").run(now);
-      this.#db.prepare("UPDATE device_executions SET value=json_set(value,'$.settledAt',?) WHERE json_extract(value,'$.state') IN ('completed','cancelled','failed') AND json_extract(value,'$.settledAt') IS NULL").run(now);
-    } catch (error) { this.#db.close(); throw error; }
+      this.#db
+        .prepare(
+          "UPDATE device_preparations SET value=json_set(value,'$.createdAt',?) WHERE json_extract(value,'$.createdAt') IS NULL",
+        )
+        .run(now);
+      this.#db
+        .prepare(
+          "UPDATE device_preparations SET value=json_set(value,'$.releasedAt',?) WHERE json_extract(value,'$.released')=1 AND json_extract(value,'$.releasedAt') IS NULL",
+        )
+        .run(now);
+      this.#db
+        .prepare(
+          "UPDATE device_executions SET value=json_set(value,'$.settledAt',?) WHERE json_extract(value,'$.state') IN ('completed','cancelled','failed') AND json_extract(value,'$.settledAt') IS NULL",
+        )
+        .run(now);
+    } catch (error) {
+      this.#db.close();
+      throw error;
+    }
   }
   preparation(runId: string): StoredPreparation | undefined {
-    const row = this.#db.prepare('SELECT value FROM device_preparations WHERE run_id=?').get(runId);
+    const row = this.#db
+      .prepare("SELECT value FROM device_preparations WHERE run_id=?")
+      .get(runId);
     return row ? JSON.parse(String(row.value)) : undefined;
   }
   prepare(runId: string, value: StoredPreparation): void {
-    this.#db.prepare('INSERT OR REPLACE INTO device_preparations VALUES (?,?)').run(runId, JSON.stringify({ ...value, createdAt: value.createdAt ?? Date.now() }));
+    this.#db
+      .prepare("INSERT OR REPLACE INTO device_preparations VALUES (?,?)")
+      .run(
+        runId,
+        JSON.stringify({ ...value, createdAt: value.createdAt ?? Date.now() }),
+      );
   }
   get(runId: string): StoredExecution | undefined {
-    const row = this.#db.prepare('SELECT value,(SELECT truncated FROM device_event_stats WHERE run_id=e.run_id) AS truncated FROM device_executions e WHERE run_id=?').get(runId);
-    return row ? { ...JSON.parse(String(row.value)), ...(row.truncated ? { historyTruncated: true } : {}) } : undefined;
+    const row = this.#db
+      .prepare(
+        "SELECT value,(SELECT truncated FROM device_event_stats WHERE run_id=e.run_id) AS truncated FROM device_executions e WHERE run_id=?",
+      )
+      .get(runId);
+    return row
+      ? {
+          ...JSON.parse(String(row.value)),
+          ...(row.truncated ? { historyTruncated: true } : {}),
+        }
+      : undefined;
   }
   admit(execution: StoredExecution): void {
     const now = Date.now();
-    this.#db.prepare('INSERT INTO device_executions VALUES (?,?)').run(execution.runId, JSON.stringify({ ...execution, createdAt: now, lastObservedAt: now }));
+    this.#db
+      .prepare("INSERT INTO device_executions VALUES (?,?)")
+      .run(
+        execution.runId,
+        JSON.stringify({ ...execution, createdAt: now, lastObservedAt: now }),
+      );
     this.#overview = undefined;
   }
   save(execution: StoredExecution): void {
     const stored = this.get(execution.runId);
-    const now = Date.now(), terminal = execution.state !== 'running' && execution.state !== 'unknown';
-    const result = execution.result && typeof execution.result === 'object' ? execution.result as Record<string, unknown> : undefined;
+    const now = Date.now(),
+      terminal = execution.state !== "running" && execution.state !== "unknown";
+    const result =
+      execution.result && typeof execution.result === "object"
+        ? (execution.result as Record<string, unknown>)
+        : undefined;
     const usage = reportedUsage(result?.usage);
-    const value = { ...stored, ...execution,
-      ...(stored?.state === 'running' ? { lastObservedAt: now } : {}),
-      ...(terminal ? { settledAt: stored?.settledAt ?? now, finishedAt: stored?.finishedAt ?? now } : {}),
+    const value = {
+      ...stored,
+      ...execution,
+      ...(stored?.state === "running" ? { lastObservedAt: now } : {}),
+      ...(terminal
+        ? {
+            settledAt: stored?.settledAt ?? now,
+            finishedAt: stored?.finishedAt ?? now,
+          }
+        : {}),
       ...(usage ? { usage } : {}),
     };
     const encoded = JSON.stringify(value);
-    if (Buffer.byteLength(encoded) > this.#limits.maxResultBytes) throw new Error('execution_result_too_large');
-    this.#db.prepare('UPDATE device_executions SET value=? WHERE run_id=?').run(encoded, execution.runId);
+    if (Buffer.byteLength(encoded) > this.#limits.maxResultBytes)
+      throw new Error("execution_result_too_large");
+    this.#db
+      .prepare("UPDATE device_executions SET value=? WHERE run_id=?")
+      .run(encoded, execution.runId);
     this.#overview = undefined;
   }
   overview(now = Date.now()): DeviceOverview {
     // The control handler reads status several times per request. Reuse its bounded projection.
-    if (!this.#overview || now < this.#overview.capturedAt || now - this.#overview.capturedAt >= 1_000)
-      this.#overview = readDeviceOverview(this.#db, 'live', now, this.#limits.maxConcurrentExecutions);
+    if (
+      !this.#overview ||
+      now < this.#overview.capturedAt ||
+      now - this.#overview.capturedAt >= 1_000
+    )
+      this.#overview = readDeviceOverview(
+        this.#db,
+        "live",
+        now,
+        this.#limits.maxConcurrentExecutions,
+      );
     return this.#overview;
   }
   unresolved(): string[] {
-    return this.#db.prepare("SELECT run_id FROM device_executions WHERE json_extract(value,'$.state')='unknown' AND json_extract(value,'$.admissionRecovery') IS NULL LIMIT 100").all().map(row => String(row.run_id));
+    return this.#db
+      .prepare(
+        "SELECT run_id FROM device_executions WHERE json_extract(value,'$.state')='unknown' AND json_extract(value,'$.admissionRecovery') IS NULL LIMIT 100",
+      )
+      .all()
+      .map((row) => String(row.run_id));
   }
   private recoveryCheckpoint(): RecoveryCheckpoint | undefined {
-    const row = this.#db.prepare('SELECT value FROM device_admission_recovery WHERE id=1').get();
-    return row ? JSON.parse(String(row.value)) as RecoveryCheckpoint : undefined;
+    const row = this.#db
+      .prepare("SELECT value FROM device_admission_recovery WHERE id=1")
+      .get();
+    return row
+      ? (JSON.parse(String(row.value)) as RecoveryCheckpoint)
+      : undefined;
   }
   private recoveryMatches(checkpoint: RecoveryCheckpoint): boolean {
     const ids = this.unresolved().sort();
-    return ids.length === checkpoint.runs.length && ids.every((runId, index) => {
-      const saved = checkpoint.runs[index]!;
-      return saved.runId === runId && this.get(runId)?.input === saved.input;
-    });
+    return (
+      ids.length === checkpoint.runs.length &&
+      ids.every((runId, index) => {
+        const saved = checkpoint.runs[index]!;
+        return saved.runId === runId && this.get(runId)?.input === saved.input;
+      })
+    );
   }
   admissionRecoveryStatus(bootId: string | null): AdmissionRecoveryStatus {
-    const ids = this.unresolved(), checkpoint = this.recoveryCheckpoint();
+    const ids = this.unresolved(),
+      checkpoint = this.recoveryCheckpoint();
     const valid = checkpoint && this.recoveryMatches(checkpoint);
-    const canResume = !!bootId && !!valid && checkpoint.runs.every(run => run.bootId !== bootId);
-    return { unresolvedCount: ids.length, supported: !!bootId,
-      ...(valid ? { checkpointId: checkpoint.id } : {}), requiresRestart: !!valid && !canResume, canResume };
+    const canResume =
+      !!bootId &&
+      !!valid &&
+      checkpoint.runs.every((run) => run.bootId !== bootId);
+    return {
+      unresolvedCount: ids.length,
+      supported: !!bootId,
+      ...(valid ? { checkpointId: checkpoint.id } : {}),
+      requiresRestart: !!valid && !canResume,
+      canResume,
+    };
   }
   prepareAdmissionRecovery(bootId: string | null): AdmissionRecoveryStatus {
-    if (!bootId) throw new Error('admission_recovery_unsupported');
+    if (!bootId) throw new Error("admission_recovery_unsupported");
     const previous = this.recoveryCheckpoint();
-    if (previous && this.recoveryMatches(previous)) return this.admissionRecoveryStatus(bootId);
+    if (previous && this.recoveryMatches(previous))
+      return this.admissionRecoveryStatus(bootId);
     const ids = this.unresolved().sort();
-    if (!ids.length) throw new Error('admission_recovery_changed');
-    const checkpoint: RecoveryCheckpoint = { id: randomUUID(), runs: ids.map(runId => {
-      const run = this.get(runId)!;
-      // Older records gain a checkpoint now; they need a subsequent verified host restart.
-      return { runId, input: run.input, bootId: run.bootId ?? bootId };
-    }) };
-    this.#db.prepare('INSERT OR REPLACE INTO device_admission_recovery VALUES (1,?)').run(JSON.stringify(checkpoint));
+    if (!ids.length) throw new Error("admission_recovery_changed");
+    const checkpoint: RecoveryCheckpoint = {
+      id: randomUUID(),
+      runs: ids.map((runId) => {
+        const run = this.get(runId)!;
+        // Older records gain a checkpoint now; they need a subsequent verified host restart.
+        return { runId, input: run.input, bootId: run.bootId ?? bootId };
+      }),
+    };
+    this.#db
+      .prepare("INSERT OR REPLACE INTO device_admission_recovery VALUES (1,?)")
+      .run(JSON.stringify(checkpoint));
     return this.admissionRecoveryStatus(bootId);
   }
-  resumeAdmission(checkpointId: string, bootId: string | null): AdmissionRecoveryStatus {
-    if (!bootId) throw new Error('admission_recovery_unsupported');
+  resumeAdmission(
+    checkpointId: string,
+    bootId: string | null,
+  ): AdmissionRecoveryStatus {
+    if (!bootId) throw new Error("admission_recovery_unsupported");
     const checkpoint = this.recoveryCheckpoint();
-    if (!checkpoint || checkpoint.id !== checkpointId || !this.recoveryMatches(checkpoint)) throw new Error('admission_recovery_changed');
-    if (!this.admissionRecoveryStatus(bootId).canResume) throw new Error('admission_recovery_restart_required');
-    this.#db.exec('BEGIN');
+    if (
+      !checkpoint ||
+      checkpoint.id !== checkpointId ||
+      !this.recoveryMatches(checkpoint)
+    )
+      throw new Error("admission_recovery_changed");
+    if (!this.admissionRecoveryStatus(bootId).canResume)
+      throw new Error("admission_recovery_restart_required");
+    this.#db.exec("BEGIN");
     try {
       for (const item of checkpoint.runs) {
         const record = this.get(item.runId)!;
         // Preserve unknown, input fingerprint, native context and outputs. Only admission is recovered.
-        this.save({ ...record, admissionRecovery: { checkpointId, verifiedAt: new Date().toISOString(), evidence: 'host_restarted' } });
+        this.save({
+          ...record,
+          admissionRecovery: {
+            checkpointId,
+            verifiedAt: new Date().toISOString(),
+            evidence: "host_restarted",
+          },
+        });
       }
-      this.#db.prepare('DELETE FROM device_admission_recovery WHERE id=1').run();
-      this.#db.exec('COMMIT');
-    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+      this.#db
+        .prepare("DELETE FROM device_admission_recovery WHERE id=1")
+        .run();
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
     return this.admissionRecoveryStatus(bootId);
   }
   markReleased(runId: string): void {
-    this.#db.prepare("UPDATE device_preparations SET value=json_set(value,'$.released',json('true'),'$.releasedAt',?) WHERE run_id=?").run(Date.now(), runId);
+    this.#db
+      .prepare(
+        "UPDATE device_preparations SET value=json_set(value,'$.released',json('true'),'$.releasedAt',?) WHERE run_id=?",
+      )
+      .run(Date.now(), runId);
   }
   observe(runId: string, kind: string, payload: unknown): boolean {
-    const encoded = JSON.stringify(payload ?? null), bytes = Buffer.byteLength(encoded);
-    const stats = this.#db.prepare('SELECT event_count,event_bytes,truncated FROM device_event_stats WHERE run_id=?').get(runId);
+    const encoded = JSON.stringify(payload ?? null),
+      bytes = Buffer.byteLength(encoded);
+    const stats = this.#db
+      .prepare(
+        "SELECT event_count,event_bytes,truncated FROM device_event_stats WHERE run_id=?",
+      )
+      .get(runId);
     if (stats?.truncated) return false;
-    const exceeded = bytes > this.#limits.maxEventBytes || Number(stats?.event_count ?? 0) >= this.#limits.maxRunEvents || Number(stats?.event_bytes ?? 0) + bytes > this.#limits.maxRunEventBytes;
-    const content = exceeded ? JSON.stringify({ type: 'history_truncated', reason: 'observation_retention_limit' }) : encoded;
-    this.#db.exec('BEGIN');
+    const exceeded =
+      bytes > this.#limits.maxEventBytes ||
+      Number(stats?.event_count ?? 0) >= this.#limits.maxRunEvents ||
+      Number(stats?.event_bytes ?? 0) + bytes > this.#limits.maxRunEventBytes;
+    const content = exceeded
+      ? JSON.stringify({
+          type: "history_truncated",
+          reason: "observation_retention_limit",
+        })
+      : encoded;
+    this.#db.exec("BEGIN");
     try {
-      this.#db.prepare('INSERT INTO device_events (run_id,kind,payload) VALUES (?,?,?)').run(runId, exceeded ? 'history_truncated' : kind, content);
-      this.#db.prepare(`INSERT INTO device_event_stats VALUES (?,1,?,?) ON CONFLICT(run_id) DO UPDATE SET event_count=event_count+1,event_bytes=event_bytes+excluded.event_bytes,truncated=excluded.truncated`).run(runId, Buffer.byteLength(content), exceeded ? 1 : 0);
-      this.#db.prepare("UPDATE device_executions SET value=json_set(value,'$.lastObservedAt',?) WHERE run_id=? AND json_extract(value,'$.state')='running'").run(Date.now(), runId);
-      this.#db.exec('COMMIT');
-    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+      this.#db
+        .prepare(
+          "INSERT INTO device_events (run_id,kind,payload) VALUES (?,?,?)",
+        )
+        .run(runId, exceeded ? "history_truncated" : kind, content);
+      this.#db
+        .prepare(
+          `INSERT INTO device_event_stats VALUES (?,1,?,?) ON CONFLICT(run_id) DO UPDATE SET event_count=event_count+1,event_bytes=event_bytes+excluded.event_bytes,truncated=excluded.truncated`,
+        )
+        .run(runId, Buffer.byteLength(content), exceeded ? 1 : 0);
+      this.#db
+        .prepare(
+          "UPDATE device_executions SET value=json_set(value,'$.lastObservedAt',?) WHERE run_id=? AND json_extract(value,'$.state')='running'",
+        )
+        .run(Date.now(), runId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
     return !exceeded;
   }
-  events(runId: string, after: number): { sequence: number; kind: string; payload: unknown }[] {
-    if (this.get(runId)?.detailsExpired) throw new Error('execution_details_expired');
-    const result: { sequence: number; kind: string; payload: unknown }[] = []; let bytes = 0;
-    for (const row of this.#db.prepare(`SELECT sequence,kind,CASE WHEN length(CAST(payload AS BLOB))>? THEN json_object('type','observation_omitted','reason','observation_bytes_exceeded','originalKind',kind,'bytes',length(CAST(payload AS BLOB))) ELSE payload END AS payload FROM device_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT 100`).iterate(this.#limits.maxEventBytes, runId, after)) {
-      const text = String(row.payload); bytes += Buffer.byteLength(text);
+  events(
+    runId: string,
+    after: number,
+  ): { sequence: number; kind: string; payload: unknown }[] {
+    if (this.get(runId)?.detailsExpired)
+      throw new Error("execution_details_expired");
+    const result: { sequence: number; kind: string; payload: unknown }[] = [];
+    let bytes = 0;
+    for (const row of this.#db
+      .prepare(
+        `SELECT sequence,kind,CASE WHEN length(CAST(payload AS BLOB))>? THEN json_object('type','observation_omitted','reason','observation_bytes_exceeded','originalKind',kind,'bytes',length(CAST(payload AS BLOB))) ELSE payload END AS payload FROM device_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT 100`,
+      )
+      .iterate(this.#limits.maxEventBytes, runId, after)) {
+      const text = String(row.payload);
+      bytes += Buffer.byteLength(text);
       if (result.length && bytes > this.#limits.maxPageBytes) break;
-      result.push({ sequence: Number(row.sequence), kind: String(row.kind), payload: JSON.parse(text) });
+      result.push({
+        sequence: Number(row.sequence),
+        kind: String(row.kind),
+        payload: JSON.parse(text),
+      });
     }
     return result;
   }
-  expirePreparations(before: number): { runId: string; directories: PreparedDirectories }[] {
-    return this.#db.prepare(`SELECT run_id,value FROM device_preparations p WHERE NOT EXISTS(SELECT 1 FROM device_executions e WHERE e.run_id=p.run_id) AND coalesce(json_extract(value,'$.released'),0)=0 AND json_extract(value,'$.createdAt')<? LIMIT 100`).all(before).map(row => ({ runId: String(row.run_id), directories: (JSON.parse(String(row.value)) as StoredPreparation).directories }));
+  expirePreparations(
+    before: number,
+  ): { runId: string; directories: PreparedDirectories }[] {
+    return this.#db
+      .prepare(
+        `SELECT run_id,value FROM device_preparations p WHERE NOT EXISTS(SELECT 1 FROM device_executions e WHERE e.run_id=p.run_id) AND coalesce(json_extract(value,'$.released'),0)=0 AND json_extract(value,'$.createdAt')<? LIMIT 100`,
+      )
+      .all(before)
+      .map((row) => ({
+        runId: String(row.run_id),
+        directories: (JSON.parse(String(row.value)) as StoredPreparation)
+          .directories,
+      }));
   }
   expireDetails(now = Date.now()): number {
-    const rows = this.#db.prepare(`SELECT e.run_id FROM device_executions e JOIN device_preparations p ON p.run_id=e.run_id
+    const rows = this.#db
+      .prepare(
+        `SELECT e.run_id FROM device_executions e JOIN device_preparations p ON p.run_id=e.run_id
       WHERE json_extract(e.value,'$.state') IN ('completed','cancelled','failed') AND coalesce(json_extract(e.value,'$.detailsExpired'),0)=0
-      AND json_extract(p.value,'$.released')=1 AND max(json_extract(e.value,'$.settledAt'),json_extract(p.value,'$.releasedAt'))<? LIMIT 100`).all(now - this.#limits.historyRetentionMs);
-    this.#db.exec('BEGIN');
+      AND json_extract(p.value,'$.released')=1 AND max(json_extract(e.value,'$.settledAt'),json_extract(p.value,'$.releasedAt'))<? LIMIT 100`,
+      )
+      .all(now - this.#limits.historyRetentionMs);
+    this.#db.exec("BEGIN");
     try {
       for (const row of rows) {
-        this.#db.prepare("UPDATE device_executions SET value=json_set(json_remove(value,'$.result','$.environment'),'$.detailsExpired',json('true')) WHERE run_id=?").run(row.run_id!);
-        this.#db.prepare('DELETE FROM device_events WHERE run_id=?').run(row.run_id!);
-        this.#db.prepare('DELETE FROM device_event_stats WHERE run_id=?').run(row.run_id!);
+        this.#db
+          .prepare(
+            "UPDATE device_executions SET value=json_set(json_remove(value,'$.result','$.environment'),'$.detailsExpired',json('true')) WHERE run_id=?",
+          )
+          .run(row.run_id!);
+        this.#db
+          .prepare("DELETE FROM device_events WHERE run_id=?")
+          .run(row.run_id!);
+        this.#db
+          .prepare("DELETE FROM device_event_stats WHERE run_id=?")
+          .run(row.run_id!);
       }
-      this.#db.exec('COMMIT');
-    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
     // Reclaim large freed SQLite pages only during idle maintenance, never during execution.
-    const pages = Number(this.#db.prepare('PRAGMA page_count').get()?.page_count), free = Number(this.#db.prepare('PRAGMA freelist_count').get()?.freelist_count);
-    if (free > 1024 && free > pages / 2) this.#db.exec('VACUUM');
+    const pages = Number(
+        this.#db.prepare("PRAGMA page_count").get()?.page_count,
+      ),
+      free = Number(
+        this.#db.prepare("PRAGMA freelist_count").get()?.freelist_count,
+      );
+    if (free > 1024 && free > pages / 2) this.#db.exec("VACUUM");
     return rows.length;
   }
   storageUsage(): { databaseBytes: number; identities: number } {
-    const pages = Number(this.#db.prepare('PRAGMA page_count').get()?.page_count), size = Number(this.#db.prepare('PRAGMA page_size').get()?.page_size);
-    const row = this.#db.prepare('SELECT count(*) AS count FROM (SELECT run_id FROM device_preparations UNION SELECT run_id FROM device_executions)').get();
+    const pages = Number(
+        this.#db.prepare("PRAGMA page_count").get()?.page_count,
+      ),
+      size = Number(this.#db.prepare("PRAGMA page_size").get()?.page_size);
+    const row = this.#db
+      .prepare(
+        "SELECT count(*) AS count FROM (SELECT run_id FROM device_preparations UNION SELECT run_id FROM device_executions)",
+      )
+      .get();
     return { databaseBytes: pages * size, identities: Number(row?.count ?? 0) };
   }
   assertCapacity(runId?: string): void {
-    const exists = runId !== undefined && (this.preparation(runId) !== undefined || this.get(runId) !== undefined);
+    const exists =
+      runId !== undefined &&
+      (this.preparation(runId) !== undefined || this.get(runId) !== undefined);
     const usage = this.storageUsage();
-    if (!exists && usage.identities >= this.#limits.maxIdentities || usage.databaseBytes >= this.#limits.maxStateBytes) throw new Error('node_storage_full');
+    if (
+      (!exists && usage.identities >= this.#limits.maxIdentities) ||
+      usage.databaseBytes >= this.#limits.maxStateBytes
+    )
+      throw new Error("node_storage_full");
   }
   assertSessionOpen(sessionKey: string): void {
-    if (this.#db.prepare('SELECT 1 FROM device_closed_sessions WHERE session_key=?').get(sessionKey)) throw new Error('session_forgotten');
+    if (
+      this.#db
+        .prepare("SELECT 1 FROM device_closed_sessions WHERE session_key=?")
+        .get(sessionKey)
+    )
+      throw new Error("session_forgotten");
   }
   forgetSession(sessionKey: string): { runIds: string[] } {
-    const blocked = this.#db.prepare(`SELECT 1 FROM device_preparations p LEFT JOIN device_executions e ON e.run_id=p.run_id
-      WHERE json_extract(p.value,'$.sessionKey')=? AND (coalesce(json_extract(p.value,'$.released'),0)=0 OR json_extract(e.value,'$.state') IN ('running','unknown')) LIMIT 1`).get(sessionKey);
-    if (blocked) throw new Error('session_in_use');
-    const rows = this.#db.prepare("SELECT run_id FROM device_preparations WHERE json_extract(value,'$.sessionKey')=?").all(sessionKey);
-    if (!rows.length) throw new Error('session_not_found');
-    this.#db.prepare('INSERT OR IGNORE INTO device_closed_sessions VALUES (?)').run(sessionKey);
-    return { runIds: rows.map(row => String(row.run_id)) };
+    const blocked = this.#db
+      .prepare(
+        `SELECT 1 FROM device_preparations p LEFT JOIN device_executions e ON e.run_id=p.run_id
+      WHERE json_extract(p.value,'$.sessionKey')=? AND (coalesce(json_extract(p.value,'$.released'),0)=0 OR json_extract(e.value,'$.state') IN ('running','unknown')) LIMIT 1`,
+      )
+      .get(sessionKey);
+    if (blocked) throw new Error("session_in_use");
+    const rows = this.#db
+      .prepare(
+        "SELECT run_id FROM device_preparations WHERE json_extract(value,'$.sessionKey')=?",
+      )
+      .all(sessionKey);
+    if (!rows.length) throw new Error("session_not_found");
+    this.#db
+      .prepare("INSERT OR IGNORE INTO device_closed_sessions VALUES (?)")
+      .run(sessionKey);
+    return { runIds: rows.map((row) => String(row.run_id)) };
   }
-  close(): void { this.#db.close(); }
+  close(): void {
+    this.#db.close();
+  }
 }

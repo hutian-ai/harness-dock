@@ -11,15 +11,17 @@ import {
   type McpToolDefinition,
 } from "../packages/drivers/src/mcp-bridge.ts";
 
-const MCP_TEST_TOOLS: readonly McpToolDefinition[] = [{
-  name: "synthetic_search",
-  description: "Search synthetic test data.",
-  inputSchema: {
-    type: "object",
-    properties: { query: { type: "string" } },
-    additionalProperties: false,
+const MCP_TEST_TOOLS: readonly McpToolDefinition[] = [
+  {
+    name: "synthetic_search",
+    description: "Search synthetic test data.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      additionalProperties: false,
+    },
   },
-}];
+];
 
 test(
   "official MCP client negotiates stdio, sees only the manifest and forwards calls",
@@ -46,20 +48,33 @@ test(
     const descriptor = bridge.descriptor;
     assert.ok("command" in descriptor);
     assert.equal(
-      descriptor.env.some((entry) => /CONNECTION_TOKEN|DATABASE|CLAIM/u.test(entry.name)),
+      descriptor.env.some((entry) =>
+        /CONNECTION_TOKEN|DATABASE|CLAIM/u.test(entry.name),
+      ),
       false,
     );
     const transport = new StdioClientTransport({
       command: descriptor.command,
       args: descriptor.args,
-      env: Object.fromEntries(descriptor.env.map((entry) => [entry.name, entry.value])),
+      env: Object.fromEntries(
+        descriptor.env.map((entry) => [entry.name, entry.value]),
+      ),
       stderr: "pipe",
     });
     let stderr = "";
-    transport.stderr?.on("data", chunk => { stderr = (stderr + String(chunk)).slice(-8192); });
-    const client = new Client({ name: "harness-dock-integration-test", version: "1.0.0" });
+    transport.stderr?.on("data", (chunk) => {
+      stderr = (stderr + String(chunk)).slice(-8192);
+    });
+    const client = new Client({
+      name: "harness-dock-integration-test",
+      version: "1.0.0",
+    });
     try {
-      await client.connect(transport).catch(error => { throw new Error(`MCP stdio startup failed: ${stderr}`, { cause: error }); });
+      await client.connect(transport).catch((error) => {
+        throw new Error(`MCP stdio startup failed: ${stderr}`, {
+          cause: error,
+        });
+      });
       const listed = await client.listTools();
       assert.deepEqual(
         listed.tools.map((tool) => tool.name),
@@ -82,12 +97,18 @@ test(
         JSON.parse(response.type === "text" ? response.text : "{}").found,
         "synthetic-only",
       );
-      await assert.rejects(client.callTool({ name: "shell", arguments: {} }), ProtocolError);
+      await assert.rejects(
+        client.callTool({ name: "shell", arguments: {} }),
+        ProtocolError,
+      );
       assert.equal(calls.length, 1);
       // Reuse the same negotiated MCP connection, but never the old invocation callback.
       const secondCalled = once(invocations, "call");
       const late = assert.rejects(
-        client.callTool({ name: "synthetic_search", arguments: { query: "late" } }),
+        client.callTool({
+          name: "synthetic_search",
+          arguments: { query: "late" },
+        }),
         ProtocolError,
       );
       await client.ping();
@@ -121,9 +142,13 @@ test(
           return { content: { next: true } };
         },
       });
-      const next = await client.callTool({ name: "synthetic_search", arguments: {} });
+      const next = await client.callTool({
+        name: "synthetic_search",
+        arguments: {},
+      });
       assert.equal(
-        next.content[0]?.type === "text" && JSON.parse(next.content[0].text).next,
+        next.content[0]?.type === "text" &&
+          JSON.parse(next.content[0].text).next,
         true,
       );
       nextController.abort();
@@ -148,31 +173,37 @@ test(
   },
 );
 
-test("unauthenticated IPC cannot discover or invoke tools", { timeout: 5_000 }, async () => {
-  let calls = 0;
-  const bridge = await createMcpBridge({
-    tools: MCP_TEST_TOOLS,
-    signal: new AbortController().signal,
-    invocation: {
+test(
+  "unauthenticated IPC cannot discover or invoke tools",
+  { timeout: 5_000 },
+  async () => {
+    let calls = 0;
+    const bridge = await createMcpBridge({
+      tools: MCP_TEST_TOOLS,
       signal: new AbortController().signal,
-      async onToolCall() {
-        calls++;
-        throw new Error("must not run");
+      invocation: {
+        signal: new AbortController().signal,
+        async onToolCall() {
+          calls++;
+          throw new Error("must not run");
+        },
       },
-    },
-  });
-  try {
-    const descriptor = bridge.descriptor;
-    assert.ok("command" in descriptor);
-    const socket = connect(
-      descriptor.env.find((entry) => entry.name === "HARNESS_DOCK_MCP_ENDPOINT")!.value,
-    );
-    const closed = once(socket, "close");
-    socket.write(JSON.stringify({ token: "wrong" }) + "\n");
-    await closed;
-    assert.equal(calls, 0);
-    assert.equal(bridge.isReady(), false);
-  } finally {
-    await bridge.close();
-  }
-});
+    });
+    try {
+      const descriptor = bridge.descriptor;
+      assert.ok("command" in descriptor);
+      const socket = connect(
+        descriptor.env.find(
+          (entry) => entry.name === "HARNESS_DOCK_MCP_ENDPOINT",
+        )!.value,
+      );
+      const closed = once(socket, "close");
+      socket.write(JSON.stringify({ token: "wrong" }) + "\n");
+      await closed;
+      assert.equal(calls, 0);
+      assert.equal(bridge.isReady(), false);
+    } finally {
+      await bridge.close();
+    }
+  },
+);

@@ -1,0 +1,14 @@
+node_modules/
+.local/
+.next/
+dist/
+build/
+coverage/
+target/
+third-party/
+patches/
+.agents/
+.husky/_/
+**/pnpm-lock.yaml
+**/*.md
+**/*.sql

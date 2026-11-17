@@ -3,7 +3,8 @@ import { createConnection } from "node:net";
 // This subprocess only transports MCP. Caller credentials stay in the execution owner.
 const endpoint = process.env.HARNESS_DOCK_MCP_ENDPOINT;
 const token = process.env.HARNESS_DOCK_MCP_TOKEN;
-if (!endpoint || !token) throw new Error("Invocation MCP transport is unavailable");
+if (!endpoint || !token)
+  throw new Error("Invocation MCP transport is unavailable");
 delete process.env.HARNESS_DOCK_MCP_ENDPOINT;
 delete process.env.HARNESS_DOCK_MCP_TOKEN;
 const socket = createConnection(endpoint);

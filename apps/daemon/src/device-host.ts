@@ -1,76 +1,189 @@
-import { randomBytes, randomUUID } from 'node:crypto';
-import { arch, hostname, platform, release } from 'node:os';
+import { randomBytes, randomUUID } from "node:crypto";
+import { arch, hostname, platform, release } from "node:os";
 import {
-  discoverProviders, providerKeys, createProviderAdapters, boundedObservation, observeStartup, startStartupSpan,
-  type ProviderAdapters, type ProviderAdapter, type ProviderCapabilities, type McpInvocation,
-  type DiscoveredProvider, type ProviderKey, type NativePermissionRequest, type NativePermissionDecision,
-} from '@harness-dock/drivers';
-import type { DeviceConfig } from './config.ts';
-import type { DeviceInventory, DeviceExecuteInput as PublicExecuteInput } from '@harness-dock/protocol';
-import { providerEnvironment } from './provider-environment.ts';
-import { resolveProviderProxy, type ProxyDefaults } from './provider-proxy.ts';
-import { collectFiles, digest, prepareDirectories, releaseDirectories, verifySkillFiles, managedStateBytes, forgetSessionDirectories, type DeviceFile } from './device-files.ts';
-import { DeviceStore, type StoredExecution } from './device-store.ts';
-import { resourceLimits, type DeviceResourceLimits } from './device-resources.ts';
-import { ObservationWriter } from './observation-writer.ts';
-import { providerDetails } from './provider-details.ts';
-import { deviceBootIdentity } from './device-boot.ts';
-import { MAX_PROMPT_BYTES } from '@harness-dock/protocol';
-import { DeviceSelfTest, type SelfTestOutcome, type SelfTestSnapshot } from './device-self-test.ts';
+  discoverProviders,
+  providerKeys,
+  createProviderAdapters,
+  boundedObservation,
+  observeStartup,
+  startStartupSpan,
+  type ProviderAdapters,
+  type ProviderAdapter,
+  type ProviderCapabilities,
+  type McpInvocation,
+  type DiscoveredProvider,
+  type ProviderKey,
+  type NativePermissionRequest,
+  type NativePermissionDecision,
+} from "@harness-dock/drivers";
+import type { DeviceConfig } from "./config.ts";
+import type {
+  DeviceInventory,
+  DeviceExecuteInput as PublicExecuteInput,
+} from "@harness-dock/protocol";
+import { providerEnvironment } from "./provider-environment.ts";
+import { resolveProviderProxy, type ProxyDefaults } from "./provider-proxy.ts";
+import {
+  collectFiles,
+  digest,
+  prepareDirectories,
+  releaseDirectories,
+  verifySkillFiles,
+  managedStateBytes,
+  forgetSessionDirectories,
+  type DeviceFile,
+} from "./device-files.ts";
+import { DeviceStore, type StoredExecution } from "./device-store.ts";
+import {
+  resourceLimits,
+  type DeviceResourceLimits,
+} from "./device-resources.ts";
+import { ObservationWriter } from "./observation-writer.ts";
+import { providerDetails } from "./provider-details.ts";
+import { deviceBootIdentity } from "./device-boot.ts";
+import { MAX_PROMPT_BYTES } from "@harness-dock/protocol";
+import {
+  DeviceSelfTest,
+  type SelfTestOutcome,
+  type SelfTestSnapshot,
+} from "./device-self-test.ts";
 
-export type DeviceCallback = (method: string, params: unknown, timeoutMs?: number) => Promise<unknown>;
-type RunCallback = (kind: string, payload: unknown, timeoutMs?: number) => Promise<unknown>;
-export interface DeviceExecuteInput extends Omit<PublicExecuteInput, 'provider'> { provider: ProviderKey }
+export type DeviceCallback = (
+  method: string,
+  params: unknown,
+  timeoutMs?: number,
+) => Promise<unknown>;
+type RunCallback = (
+  kind: string,
+  payload: unknown,
+  timeoutMs?: number,
+) => Promise<unknown>;
+export interface DeviceExecuteInput extends Omit<
+  PublicExecuteInput,
+  "provider"
+> {
+  provider: ProviderKey;
+}
 interface InventoryProvider {
-  key: ProviderKey; displayName: string; status: 'ready' | 'not_found' | 'unavailable' | 'disabled';
-  version: string | null; models: string[]; inspection?: unknown; error?: string;
-  readiness?: { level: 'protocol'; checkedAt: string; modelExecutionVerified: false };
-  capabilities?: ProviderCapabilities; checkedAt?: number;
+  key: ProviderKey;
+  displayName: string;
+  status: "ready" | "not_found" | "unavailable" | "disabled";
+  version: string | null;
+  models: string[];
+  inspection?: unknown;
+  error?: string;
+  readiness?: {
+    level: "protocol";
+    checkedAt: string;
+    modelExecutionVerified: false;
+  };
+  capabilities?: ProviderCapabilities;
+  checkedAt?: number;
 }
 const object = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_request');
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("invalid_request");
   return value as Record<string, unknown>;
 };
 function withSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
-    const abort = () => reject(signal.reason ?? new Error('cancelled'));
-    if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
-    void operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    const abort = () => reject(signal.reason ?? new Error("cancelled"));
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    void operation
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
   });
 }
 const identity = (value: unknown): string => {
-  if (typeof value !== 'string' || !value || value.length > 500 || /[\u0000-\u001f]/u.test(value)) throw new Error('invalid_identity');
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > 500 ||
+    /[\u0000-\u001f]/u.test(value)
+  )
+    throw new Error("invalid_identity");
   return value;
 };
 function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value && typeof value === 'object') return `{${Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`;
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+      .join(",")}}`;
   return JSON.stringify(value);
 }
 function executionInput(value: unknown): DeviceExecuteInput {
   const input = object(value);
-  for (const key of Object.keys(input)) if (!['provider', 'runId', 'sessionKey', 'prompt', 'model', 'config', 'resumeSessionId', 'previousRunId', 'retainSession', 'tools'].includes(key)) throw new Error('unsupported_execution_field');
-  if (input.provider !== 'codex' && input.provider !== 'dsh') throw new Error('unsupported_provider');
+  for (const key of Object.keys(input))
+    if (
+      ![
+        "provider",
+        "runId",
+        "sessionKey",
+        "prompt",
+        "model",
+        "config",
+        "resumeSessionId",
+        "previousRunId",
+        "retainSession",
+        "tools",
+      ].includes(key)
+    )
+      throw new Error("unsupported_execution_field");
+  if (input.provider !== "codex" && input.provider !== "dsh")
+    throw new Error("unsupported_provider");
   identity(input.runId);
-  for (const key of ['sessionKey', 'model', 'resumeSessionId', 'previousRunId']) if (input[key] !== undefined) identity(input[key]);
-  if (typeof input.prompt !== 'string' || !input.prompt || Buffer.byteLength(input.prompt) > MAX_PROMPT_BYTES) throw new Error('invalid_prompt');
+  for (const key of ["sessionKey", "model", "resumeSessionId", "previousRunId"])
+    if (input[key] !== undefined) identity(input[key]);
+  if (
+    typeof input.prompt !== "string" ||
+    !input.prompt ||
+    Buffer.byteLength(input.prompt) > MAX_PROMPT_BYTES
+  )
+    throw new Error("invalid_prompt");
   if (input.config !== undefined) object(input.config);
-  if (input.retainSession !== undefined && typeof input.retainSession !== 'boolean') throw new Error('invalid_retain_session');
+  if (
+    input.retainSession !== undefined &&
+    typeof input.retainSession !== "boolean"
+  )
+    throw new Error("invalid_retain_session");
   if (input.tools !== undefined) {
     const tools = object(input.tools);
     identity(tools.name);
-    if (!Array.isArray(tools.definitions) || tools.definitions.length > 100 || JSON.stringify(tools).length > 1_000_000) throw new Error('invalid_tools');
+    if (
+      !Array.isArray(tools.definitions) ||
+      tools.definitions.length > 100 ||
+      JSON.stringify(tools).length > 1_000_000
+    )
+      throw new Error("invalid_tools");
     const names = new Set();
     for (const raw of tools.definitions) {
-      const tool = object(raw); identity(tool.name); object(tool.inputSchema);
-      if (names.has(tool.name) || typeof tool.description !== 'string') throw new Error('invalid_tools');
+      const tool = object(raw);
+      identity(tool.name);
+      object(tool.inputSchema);
+      if (names.has(tool.name) || typeof tool.description !== "string")
+        throw new Error("invalid_tools");
       names.add(tool.name);
     }
   }
   return input as unknown as DeviceExecuteInput;
 }
 
-type ActiveExecution = { sessionKey: string; provider: ProviderKey; nativeSessionId?: string; adapter: ProviderAdapter; runId: string; controller: AbortController; promise: Promise<unknown>; historyTruncated: boolean; ready: boolean; steer?: (text: string) => Promise<'accepted' | 'rejected' | 'unknown'> };
+type ActiveExecution = {
+  sessionKey: string;
+  provider: ProviderKey;
+  nativeSessionId?: string;
+  adapter: ProviderAdapter;
+  runId: string;
+  controller: AbortController;
+  promise: Promise<unknown>;
+  historyTruncated: boolean;
+  ready: boolean;
+  steer?: (text: string) => Promise<"accepted" | "rejected" | "unknown">;
+};
 
 /** Owns device processes and evidence independently of any controller connection. */
 export class DeviceHost {
@@ -78,9 +191,14 @@ export class DeviceHost {
   readonly nodeId: string;
   readonly #store: DeviceStore;
   readonly #selfTests = new Map<ProviderKey, DeviceSelfTest>();
-  get #selfTestRunning(): boolean { return [...this.#selfTests.values()].some(test => test.running); }
+  get #selfTestRunning(): boolean {
+    return [...this.#selfTests.values()].some((test) => test.running);
+  }
   readonly #discovered = new Map<ProviderKey, DiscoveredProvider>();
-  readonly #sessions = new Map<string, { sessionKey: string; provider: ProviderKey; adapter: ProviderAdapter }>();
+  readonly #sessions = new Map<
+    string,
+    { sessionKey: string; provider: ProviderKey; adapter: ProviderAdapter }
+  >();
   readonly #limits: DeviceResourceLimits;
   readonly #lifetime = new AbortController();
   readonly #adapters = new Map<ProviderKey, ProviderAdapter>();
@@ -97,48 +215,95 @@ export class DeviceHost {
   #closed = false;
   #callback?: DeviceCallback;
   readonly #active = new Map<string, ActiveExecution>();
-  constructor(readonly config: DeviceConfig, private readonly providers: ProviderAdapters = createProviderAdapters(), private readonly proxyDefaults?: ProxyDefaults, private readonly bootIdentity: string | null = deviceBootIdentity()) {
+  constructor(
+    readonly config: DeviceConfig,
+    private readonly providers: ProviderAdapters = createProviderAdapters(),
+    private readonly proxyDefaults?: ProxyDefaults,
+    private readonly bootIdentity: string | null = deviceBootIdentity(),
+  ) {
     this.nodeId = config.nodeId;
     this.#limits = resourceLimits(config.resources);
-    this.#store = new DeviceStore(config.nodeId, config.stateDir, config.resources);
+    this.#store = new DeviceStore(
+      config.nodeId,
+      config.stateDir,
+      config.resources,
+    );
     this.#store.expireDetails();
-    for (const provider of ['codex', 'dsh'] as const) this.#selfTests.set(provider,
-      new DeviceSelfTest(config.stateDir, this.daemonId, (id, progress) => this.#runSelfTest(id, progress, provider), provider));
+    for (const provider of ["codex", "dsh"] as const)
+      this.#selfTests.set(
+        provider,
+        new DeviceSelfTest(
+          config.stateDir,
+          this.daemonId,
+          (id, progress) => this.#runSelfTest(id, progress, provider),
+          provider,
+        ),
+      );
     this.#armIdleTimer();
   }
-  #assertOpen(): void { if (this.#closed) throw new Error('device_stopping'); }
+  #assertOpen(): void {
+    if (this.#closed) throw new Error("device_stopping");
+  }
   #clearIdleTimer(): void {
-    clearTimeout(this.#idleTimer); this.#idleTimer = undefined; this.#idleGeneration++;
+    clearTimeout(this.#idleTimer);
+    this.#idleTimer = undefined;
+    this.#idleGeneration++;
   }
   #armIdleTimer(): void {
     this.#clearIdleTimer();
-    if (this.#closed || this.#maintenance || this.#active.size || this.#selfTestRunning) return;
+    if (
+      this.#closed ||
+      this.#maintenance ||
+      this.#active.size ||
+      this.#selfTestRunning
+    )
+      return;
     const generation = this.#idleGeneration;
-    this.#idleTimer = setTimeout(() => {
-      if (generation !== this.#idleGeneration || this.#closed) return;
-      void this.#maintain(async () => {
-        if (this.#idleDeadline !== undefined && Date.now() >= this.#idleDeadline) {
-          this.#idleDeadline = undefined;
-          await this.#closeProviders();
-        }
-        await this.#cleanup();
-      }).catch(error => console.error('Device idle maintenance failed:', error instanceof Error ? error.message : 'unknown'));
-    }, this.#idleDeadline === undefined ? 60_000 : Math.min(60_000, Math.max(0, this.#idleDeadline - Date.now())));
+    this.#idleTimer = setTimeout(
+      () => {
+        if (generation !== this.#idleGeneration || this.#closed) return;
+        void this.#maintain(async () => {
+          if (
+            this.#idleDeadline !== undefined &&
+            Date.now() >= this.#idleDeadline
+          ) {
+            this.#idleDeadline = undefined;
+            await this.#closeProviders();
+          }
+          await this.#cleanup();
+        }).catch((error) =>
+          console.error(
+            "Device idle maintenance failed:",
+            error instanceof Error ? error.message : "unknown",
+          ),
+        );
+      },
+      this.#idleDeadline === undefined
+        ? 60_000
+        : Math.min(60_000, Math.max(0, this.#idleDeadline - Date.now())),
+    );
     this.#idleTimer.unref();
   }
-  #maintain<T>(operation: () => Promise<T>, concurrent = false, localTest = false): Promise<T> {
+  #maintain<T>(
+    operation: () => Promise<T>,
+    concurrent = false,
+    localTest = false,
+  ): Promise<T> {
     this.#assertOpen();
-    if (this.#selfTestRunning && !localTest) throw new Error('device_busy');
-    if (this.#exclusiveMaintenance || !concurrent && this.#active.size) throw new Error('busy');
+    if (this.#selfTestRunning && !localTest) throw new Error("device_busy");
+    if (this.#exclusiveMaintenance || (!concurrent && this.#active.size))
+      throw new Error("busy");
     if (!concurrent) this.#exclusiveMaintenance = true;
     this.#clearIdleTimer();
     // Serialize short mutations, never the lifetime of an ACP prompt or approval.
-    const pending = (this.#maintenance ?? Promise.resolve()).catch(() => {}).then(() => {
-      this.#assertOpen();
-      if (this.#selfTestRunning && !localTest) throw new Error('device_busy');
-      if (!concurrent && this.#active.size) throw new Error('busy');
-      return operation();
-    });
+    const pending = (this.#maintenance ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => {
+        this.#assertOpen();
+        if (this.#selfTestRunning && !localTest) throw new Error("device_busy");
+        if (!concurrent && this.#active.size) throw new Error("busy");
+        return operation();
+      });
     this.#maintenance = pending;
     return pending.finally(() => {
       if (!concurrent) this.#exclusiveMaintenance = false;
@@ -148,154 +313,354 @@ export class DeviceHost {
   }
   async #closeProviders(): Promise<void> {
     const results = await Promise.allSettled([
-      ...[...this.#adapters.values()].map(adapter => adapter.close()),
-      ...[...this.#sessions.values()].map(session => session.adapter.close()),
+      ...[...this.#adapters.values()].map((adapter) => adapter.close()),
+      ...[...this.#sessions.values()].map((session) => session.adapter.close()),
       this.providers.close(),
     ]);
-    const failure = results.find(result => result.status === 'rejected');
+    const failure = results.find((result) => result.status === "rejected");
     this.#sessions.clear();
-    if (failure?.status === 'rejected') throw failure.reason;
+    if (failure?.status === "rejected") throw failure.reason;
   }
   async #cleanup(): Promise<void> {
     if (!this.#active.size) this.#store.expireDetails();
-    for (const prepared of this.#store.expirePreparations(Date.now() - this.#limits.preparationTtlMs)) {
+    for (const prepared of this.#store.expirePreparations(
+      Date.now() - this.#limits.preparationTtlMs,
+    )) {
       await releaseDirectories(this.config.stateDir, prepared.runId);
       this.#store.markReleased(prepared.runId);
     }
   }
   async #capacity(runId: string): Promise<void> {
-    if (this.#persistenceFailed) throw new Error('resource_exhausted:persistence_unconfirmed');
-    await observeStartup(runId, 'device_capacity_cleanup', () => this.#cleanup());
-    await observeStartup(runId, 'device_capacity_records', async () => this.#store.assertCapacity(runId));
-    const stateBytes = await observeStartup(runId, 'device_capacity_state_bytes', () => managedStateBytes(this.config.stateDir, this.#limits.maxStateBytes));
+    if (this.#persistenceFailed)
+      throw new Error("resource_exhausted:persistence_unconfirmed");
+    await observeStartup(runId, "device_capacity_cleanup", () =>
+      this.#cleanup(),
+    );
+    await observeStartup(runId, "device_capacity_records", async () =>
+      this.#store.assertCapacity(runId),
+    );
+    const stateBytes = await observeStartup(
+      runId,
+      "device_capacity_state_bytes",
+      () => managedStateBytes(this.config.stateDir, this.#limits.maxStateBytes),
+    );
     if (stateBytes >= this.#limits.maxStateBytes)
-      throw new Error('resource_exhausted:managed_state_bytes');
+      throw new Error("resource_exhausted:managed_state_bytes");
   }
-  get activeRunIds(): string[] { return [...this.#active.keys()]; }
+  get activeRunIds(): string[] {
+    return [...this.#active.keys()];
+  }
   get providerDetails() {
-    return Object.fromEntries((this.#providers ?? []).flatMap(provider => {
-      const details = providerDetails(provider);
-      return details ? [[provider.key, details]] : [];
-    }));
+    return Object.fromEntries(
+      (this.#providers ?? []).flatMap((provider) => {
+        const details = providerDetails(provider);
+        return details ? [[provider.key, details]] : [];
+      }),
+    );
   }
   async refreshProviderDetails() {
     // Inspection must never disturb execution, tests or unresolved work.
-    if (this.#active.size || this.#selfTestRunning || this.#store.unresolved().length || this.#maintenance || this.#probing)
-      throw new Error('device_busy');
+    if (
+      this.#active.size ||
+      this.#selfTestRunning ||
+      this.#store.unresolved().length ||
+      this.#maintenance ||
+      this.#probing
+    )
+      throw new Error("device_busy");
     await this.#inspectInventory(true);
   }
-  get overview() { return this.#store.overview(); }
-  maintenanceStatus() { return { activeRunIds: this.activeRunIds, unresolvedRunIds: this.#store.unresolved() }; }
-  get admissionRecoveryStatus() { return this.#store.admissionRecoveryStatus(this.bootIdentity); }
+  get overview() {
+    return this.#store.overview();
+  }
+  maintenanceStatus() {
+    return {
+      activeRunIds: this.activeRunIds,
+      unresolvedRunIds: this.#store.unresolved(),
+    };
+  }
+  get admissionRecoveryStatus() {
+    return this.#store.admissionRecoveryStatus(this.bootIdentity);
+  }
   prepareAdmissionRecovery() {
-    return this.#maintain(async () => this.#store.prepareAdmissionRecovery(this.bootIdentity));
+    return this.#maintain(async () =>
+      this.#store.prepareAdmissionRecovery(this.bootIdentity),
+    );
   }
   resumeAdmission(checkpointId: string) {
     identity(checkpointId);
-    return this.#maintain(async () => this.#store.resumeAdmission(checkpointId, this.bootIdentity));
+    return this.#maintain(async () =>
+      this.#store.resumeAdmission(checkpointId, this.bootIdentity),
+    );
   }
   /** Local observation only: idle never claims a retained native transport is connected. */
-  get providerActivity(): Record<ProviderKey, 'idle' | 'connecting' | 'executing' | 'checking' | 'unknown'> {
-    const states: Record<ProviderKey, 'idle' | 'connecting' | 'executing' | 'checking' | 'unknown'> = { codex: 'idle', dsh: 'idle' };
+  get providerActivity(): Record<
+    ProviderKey,
+    "idle" | "connecting" | "executing" | "checking" | "unknown"
+  > {
+    const states: Record<
+      ProviderKey,
+      "idle" | "connecting" | "executing" | "checking" | "unknown"
+    > = { codex: "idle", dsh: "idle" };
     for (const runId of this.#store.unresolved()) {
       const provider = this.#store.get(runId)?.provider;
-      if (provider === 'codex' || provider === 'dsh') states[provider] = 'unknown';
+      if (provider === "codex" || provider === "dsh")
+        states[provider] = "unknown";
     }
-    for (const [provider, test] of this.#selfTests) if (test.running) states[provider] = 'checking';
+    for (const [provider, test] of this.#selfTests)
+      if (test.running) states[provider] = "checking";
     for (const active of this.#active.values()) {
-      if (active.ready) states[active.provider] = 'executing';
-      else if (states[active.provider] !== 'executing') states[active.provider] = 'connecting';
+      if (active.ready) states[active.provider] = "executing";
+      else if (states[active.provider] !== "executing")
+        states[active.provider] = "connecting";
     }
     return states;
   }
-  get selfTestStatus(): SelfTestSnapshot | undefined { return this.#selfTests.get('codex')?.status; }
-  get selfTestStatuses(): SelfTestSnapshot[] { return [...this.#selfTests.values()].flatMap(test => test.status ? [test.status] : []); }
-  get selfTestProviders(): ProviderKey[] { return [...this.#selfTests.keys()]; }
+  get selfTestStatus(): SelfTestSnapshot | undefined {
+    return this.#selfTests.get("codex")?.status;
+  }
+  get selfTestStatuses(): SelfTestSnapshot[] {
+    return [...this.#selfTests.values()].flatMap((test) =>
+      test.status ? [test.status] : [],
+    );
+  }
+  get selfTestProviders(): ProviderKey[] {
+    return [...this.#selfTests.keys()];
+  }
   get providerProxies() {
     const defaults = this.proxyDefaults;
     if (!defaults) return undefined;
-    return Object.fromEntries(providerKeys.filter(key => !this.config.providers?.[key]?.disabled)
-      .map(key => [key, resolveProviderProxy(this.config.providers?.[key]?.environment ?? {}, defaults).status]));
+    return Object.fromEntries(
+      providerKeys
+        .filter((key) => !this.config.providers?.[key]?.disabled)
+        .map((key) => [
+          key,
+          resolveProviderProxy(
+            this.config.providers?.[key]?.environment ?? {},
+            defaults,
+          ).status,
+        ]),
+    );
   }
-  lookupSelfTest(id: string, provider: ProviderKey = 'codex'): { id: string; found: boolean; provider?: ProviderKey } {
+  lookupSelfTest(
+    id: string,
+    provider: ProviderKey = "codex",
+  ): { id: string; found: boolean; provider?: ProviderKey } {
     this.#assertOpen();
     const test = this.#selfTests.get(provider);
-    if (!test) throw new Error('unsupported_provider');
+    if (!test) throw new Error("unsupported_provider");
     const stored = this.#store.get(identity(id));
-    if (stored && stored.provider !== provider || [...this.#selfTests.entries()].some(([key, other]) => key !== provider && other.status?.id === id))
-      throw new Error('self_test_id_conflict');
-    return { id, found: test.status?.id === id || stored?.provider === provider, ...(provider === 'dsh' ? { provider } : {}) };
+    if (
+      (stored && stored.provider !== provider) ||
+      [...this.#selfTests.entries()].some(
+        ([key, other]) => key !== provider && other.status?.id === id,
+      )
+    )
+      throw new Error("self_test_id_conflict");
+    return {
+      id,
+      found: test.status?.id === id || stored?.provider === provider,
+      ...(provider === "dsh" ? { provider } : {}),
+    };
   }
-  startSelfTest(id: string, provider: ProviderKey = 'codex'): SelfTestSnapshot {
+  startSelfTest(id: string, provider: ProviderKey = "codex"): SelfTestSnapshot {
     this.#assertOpen();
     const test = this.#selfTests.get(provider);
-    if (!test) throw new Error('unsupported_provider');
+    if (!test) throw new Error("unsupported_provider");
     const previous = test.status;
     if (previous?.id === id) return previous;
-    if (this.#selfTestRunning || this.#active.size || this.#maintenance || this.#probing) throw new Error('device_busy');
-    if (this.#store.unresolved().length) throw new Error('unresolved_execution');
-    if (this.#store.get(id)) throw new Error('self_test_id_conflict');
+    if (
+      this.#selfTestRunning ||
+      this.#active.size ||
+      this.#maintenance ||
+      this.#probing
+    )
+      throw new Error("device_busy");
+    if (this.#store.unresolved().length)
+      throw new Error("unresolved_execution");
+    if (this.#store.get(id)) throw new Error("self_test_id_conflict");
     return test.start(id);
   }
-  async #runSelfTest(id: string, progress: (phase: 'checking' | 'executing', model?: string) => void, selectedProvider: ProviderKey): Promise<SelfTestOutcome> {
-    const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(120_000)]);
+  async #runSelfTest(
+    id: string,
+    progress: (phase: "checking" | "executing", model?: string) => void,
+    selectedProvider: ProviderKey,
+  ): Promise<SelfTestOutcome> {
+    const signal = AbortSignal.any([
+      this.#lifetime.signal,
+      AbortSignal.timeout(120_000),
+    ]);
     const rejected = new AbortController();
     const testSignal = AbortSignal.any([signal, rejected.signal]);
-    const sessionKey = `self-test:${id}`, marker = `DOCK_SELF_TEST_${randomBytes(12).toString('hex')}`;
+    const sessionKey = `self-test:${id}`,
+      marker = `DOCK_SELF_TEST_${randomBytes(12).toString("hex")}`;
     let violation: string | undefined, model: string | undefined;
     // No connection/approval ownership is transferred. Captured callbacks never fall back to the remote application.
     const call: RunCallback = async (kind, payload) => {
-      const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-      const item = value.item && typeof value.item === 'object' ? value.item as Record<string, unknown> : {};
-      const tool = kind === 'toolCall' || kind === 'event' && (['tool_call', 'tool_call_update'].includes(String(value.type))
-        || value.type === 'codex_event' && value.kind === 'item' && ['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'webSearch', 'fileChange'].includes(String(item.type)));
-      if (tool || kind === 'permission') {
-        violation ??= kind === 'permission' ? 'self_test_permission_requested' : 'self_test_unexpected_tool';
+      const value =
+        payload && typeof payload === "object"
+          ? (payload as Record<string, unknown>)
+          : {};
+      const item =
+        value.item && typeof value.item === "object"
+          ? (value.item as Record<string, unknown>)
+          : {};
+      const tool =
+        kind === "toolCall" ||
+        (kind === "event" &&
+          (["tool_call", "tool_call_update"].includes(String(value.type)) ||
+            (value.type === "codex_event" &&
+              value.kind === "item" &&
+              [
+                "commandExecution",
+                "mcpToolCall",
+                "dynamicToolCall",
+                "webSearch",
+                "fileChange",
+              ].includes(String(item.type)))));
+      if (tool || kind === "permission") {
+        violation ??=
+          kind === "permission"
+            ? "self_test_permission_requested"
+            : "self_test_unexpected_tool";
         rejected.abort(new Error(violation));
-        if (kind === 'toolCall') throw new Error(violation);
+        if (kind === "toolCall") throw new Error(violation);
       }
-      return kind === 'permission' ? value.form ? { action: 'cancel' } : 'deny' : null;
+      return kind === "permission"
+        ? value.form
+          ? { action: "cancel" }
+          : "deny"
+        : null;
     };
     try {
-      progress('checking');
-      const inventory = await this.#inspectInventory(true, true, testSignal) as DeviceInventory;
+      progress("checking");
+      const inventory = (await this.#inspectInventory(
+        true,
+        true,
+        testSignal,
+      )) as DeviceInventory;
       testSignal.throwIfAborted();
-      const provider = inventory.providers.find(value => value.key === selectedProvider);
-      if (provider?.status !== 'ready' || selectedProvider === 'codex' && provider.capabilities?.exactFinalAnswer !== true) return { state: 'failed', code: 'self_test_provider_unavailable' };
-      model = selectedProvider === 'dsh' && typeof object(provider.inspection).currentModelId === 'string' ? String(object(provider.inspection).currentModelId) : provider.models[0];
-      if (!model || !provider.models.includes(model)) return { state: 'failed', code: 'self_test_model_unavailable' };
+      const provider = inventory.providers.find(
+        (value) => value.key === selectedProvider,
+      );
+      if (
+        provider?.status !== "ready" ||
+        (selectedProvider === "codex" &&
+          provider.capabilities?.exactFinalAnswer !== true)
+      )
+        return { state: "failed", code: "self_test_provider_unavailable" };
+      model =
+        selectedProvider === "dsh" &&
+        typeof object(provider.inspection).currentModelId === "string"
+          ? String(object(provider.inspection).currentModelId)
+          : provider.models[0];
+      if (!model || !provider.models.includes(model))
+        return { state: "failed", code: "self_test_model_unavailable" };
       const inspection = object(provider.inspection);
-      if (selectedProvider === 'codex' && (!Array.isArray(inspection.permissionModes) || !inspection.permissionModes.some(value => object(value).value === 'read-only')))
-        return { state: 'failed', model, code: 'self_test_read_only_unavailable' };
-      const modes = Array.isArray(inspection.models) ? inspection.models.map(object) : [];
-      const selected = modes.find(value => value.id === model);
-      const config = { ...(selectedProvider === 'codex' ? { mode: 'read-only' } : {}), ...(Array.isArray(selected?.efforts) && selected.efforts.includes('low') ? { effort: 'low' } : {}) };
+      if (
+        selectedProvider === "codex" &&
+        (!Array.isArray(inspection.permissionModes) ||
+          !inspection.permissionModes.some(
+            (value) => object(value).value === "read-only",
+          ))
+      )
+        return {
+          state: "failed",
+          model,
+          code: "self_test_read_only_unavailable",
+        };
+      const modes = Array.isArray(inspection.models)
+        ? inspection.models.map(object)
+        : [];
+      const selected = modes.find((value) => value.id === model);
+      const config = {
+        ...(selectedProvider === "codex" ? { mode: "read-only" } : {}),
+        ...(Array.isArray(selected?.efforts) && selected.efforts.includes("low")
+          ? { effort: "low" }
+          : {}),
+      };
       await this.#prepare({ runId: id, sessionKey, files: [] }, true);
       testSignal.throwIfAborted();
-      progress('executing', model);
-      const response = object(await this.#execute({ provider: selectedProvider, runId: id, sessionKey, model, config,
-        prompt: `Reply with exactly ${marker}. Do not call tools, read files, search, or perform any other action.`, retainSession: false }, { call, signal: testSignal }));
+      progress("executing", model);
+      const response = object(
+        await this.#execute(
+          {
+            provider: selectedProvider,
+            runId: id,
+            sessionKey,
+            model,
+            config,
+            prompt: `Reply with exactly ${marker}. Do not call tools, read files, search, or perform any other action.`,
+            retainSession: false,
+          },
+          { call, signal: testSignal },
+        ),
+      );
       const result = object(response.result);
-      if (result.state === 'unknown') return { state: 'unknown', model, code: violation ?? (signal.aborted ? 'self_test_timed_out' : 'self_test_unconfirmed') };
-      if (violation) return { state: 'failed', model, code: violation };
-      if (result.state !== 'completed') return { state: 'failed', model, code: signal.aborted ? 'self_test_timed_out' : 'self_test_execution_failed' };
-      const messages = Array.isArray(result.messages) ? result.messages.map(object) : [];
-      const text = messages.filter(message => selectedProvider === 'dsh' || message.phase === 'final_answer').map(message => String(message.text)).join('\n').trim();
-      const completion = selectedProvider === 'dsh' ? typeof result.sessionId === 'string' && result.stopReason === 'end_turn'
-        : typeof result.threadId === 'string' && typeof result.turnId === 'string';
+      if (result.state === "unknown")
+        return {
+          state: "unknown",
+          model,
+          code:
+            violation ??
+            (signal.aborted ? "self_test_timed_out" : "self_test_unconfirmed"),
+        };
+      if (violation) return { state: "failed", model, code: violation };
+      if (result.state !== "completed")
+        return {
+          state: "failed",
+          model,
+          code: signal.aborted
+            ? "self_test_timed_out"
+            : "self_test_execution_failed",
+        };
+      const messages = Array.isArray(result.messages)
+        ? result.messages.map(object)
+        : [];
+      const text = messages
+        .filter(
+          (message) =>
+            selectedProvider === "dsh" || message.phase === "final_answer",
+        )
+        .map((message) => String(message.text))
+        .join("\n")
+        .trim();
+      const completion =
+        selectedProvider === "dsh"
+          ? typeof result.sessionId === "string" &&
+            result.stopReason === "end_turn"
+          : typeof result.threadId === "string" &&
+            typeof result.turnId === "string";
       if (text !== marker || !completion)
-        return { state: 'failed', model, code: 'self_test_answer_mismatch' };
-      return { state: 'passed', model };
+        return { state: "failed", model, code: "self_test_answer_mismatch" };
+      return { state: "passed", model };
     } catch {
       const record = this.#store.get(id);
-      return { state: record?.state === 'unknown' || record?.state === 'running' ? 'unknown' : 'failed', model,
-        code: violation ?? (signal.aborted ? 'self_test_timed_out' : 'self_test_unconfirmed') };
+      return {
+        state:
+          record?.state === "unknown" || record?.state === "running"
+            ? "unknown"
+            : "failed",
+        model,
+        code:
+          violation ??
+          (signal.aborted ? "self_test_timed_out" : "self_test_unconfirmed"),
+      };
     } finally {
       const record = this.#store.get(id);
-      if (!this.#closed && this.#store.preparation(id) && record?.state !== 'unknown' && record?.state !== 'running') {
+      if (
+        !this.#closed &&
+        this.#store.preparation(id) &&
+        record?.state !== "unknown" &&
+        record?.state !== "running"
+      ) {
         // Only this synthetic session is released; never close the remote application's provider pool.
-        try { await this.#release(id, true); await this.#forgetSession(sessionKey, true); }
-        catch { console.error('Local self-test cleanup deferred.'); }
+        try {
+          await this.#release(id, true);
+          await this.#forgetSession(sessionKey, true);
+        } catch {
+          console.error("Local self-test cleanup deferred.");
+        }
       }
       setTimeout(() => this.#armIdleTimer(), 0).unref();
     }
@@ -303,378 +668,849 @@ export class DeviceHost {
   /** Reserve shutdown synchronously so admission cannot race an installation change. */
   closeIfIdle(): Promise<void> {
     this.#assertOpen();
-    if (this.#active.size || this.#maintenance || this.#probing || this.#selfTestRunning) throw new Error('device_busy');
-    if (this.#store.unresolved().length) throw new Error('unresolved_execution');
+    if (
+      this.#active.size ||
+      this.#maintenance ||
+      this.#probing ||
+      this.#selfTestRunning
+    )
+      throw new Error("device_busy");
+    if (this.#store.unresolved().length)
+      throw new Error("unresolved_execution");
     return this.close();
   }
   bind(callback: DeviceCallback): () => void {
     this.#callback = callback;
-    return () => { if (this.#callback === callback) this.#callback = undefined; };
+    return () => {
+      if (this.#callback === callback) this.#callback = undefined;
+    };
   }
-  async #call(runId: string, kind: string, payload: unknown, timeoutMs = 30_000): Promise<unknown> {
-    if (!this.#callback) throw new Error('controller_disconnected');
-    return this.#callback('execution.callback', { runId, kind, payload }, timeoutMs);
+  async #call(
+    runId: string,
+    kind: string,
+    payload: unknown,
+    timeoutMs = 30_000,
+  ): Promise<unknown> {
+    if (!this.#callback) throw new Error("controller_disconnected");
+    return this.#callback(
+      "execution.callback",
+      { runId, kind, payload },
+      timeoutMs,
+    );
   }
-  async #observe(runId: string, kind: string, payload: unknown, call: RunCallback, localOnly = false): Promise<void> {
+  async #observe(
+    runId: string,
+    kind: string,
+    payload: unknown,
+    call: RunCallback,
+    localOnly = false,
+  ): Promise<void> {
     // Local facts were checked before ObservationWriter's projection; remote presentation remains bounded.
     const observation = boundedObservation(kind, payload);
     const stored = this.#store.observe(runId, kind, observation);
     const active = this.#active.get(runId);
     if (!stored && active && !active.historyTruncated) {
       active.historyTruncated = true;
-      try { await call('historyTruncated', { type: 'history_truncated', reason: 'observation_retention_limit' }); } catch { /* Persisted by the Store. */ }
+      try {
+        await call("historyTruncated", {
+          type: "history_truncated",
+          reason: "observation_retention_limit",
+        });
+      } catch {
+        /* Persisted by the Store. */
+      }
     }
-    if (!localOnly) try { await call(kind, observation); } catch { /* Reconnect observes persisted events; it never replays effects. */ }
+    if (!localOnly)
+      try {
+        await call(kind, observation);
+      } catch {
+        /* Reconnect observes persisted events; it never replays effects. */
+      }
   }
   events(runId: string, after: number) {
     this.#assertOpen();
     identity(runId);
-    if (!Number.isSafeInteger(after) || after < 0) throw new Error('invalid_sequence');
+    if (!Number.isSafeInteger(after) || after < 0)
+      throw new Error("invalid_sequence");
     return this.#store.events(runId, after);
   }
   async inventory(refresh = false): Promise<unknown> {
     return this.#inspectInventory(refresh);
   }
-  async #inspectInventory(refresh = false, localTest = false, selfTestSignal?: AbortSignal): Promise<unknown> {
-    if (this.#closed) throw new Error('device_stopping');
+  async #inspectInventory(
+    refresh = false,
+    localTest = false,
+    selfTestSignal?: AbortSignal,
+  ): Promise<unknown> {
+    if (this.#closed) throw new Error("device_stopping");
     if (this.#probing) return this.#probing;
-    if (this.#providers && (!refresh || this.#active.size)) return this.#inventory();
-    this.#probing = this.#maintain(async () => {
-      await this.#cleanup();
-      const signal = AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(90_000), ...(selfTestSignal ? [selfTestSignal] : [])]);
-      const found = await discoverProviders({ overrides: this.config.providers, signal });
-      const providers: InventoryProvider[] = [];
-      for (const provider of found) {
-        const item: InventoryProvider = { key: provider.key, displayName: provider.displayName,
-          status: provider.status === 'installed' ? 'unavailable' : provider.status, version: provider.version, models: [], checkedAt: Date.now() };
-        providers.push(item);
-        this.#discovered.set(provider.key, provider);
-        if (provider.status !== 'installed') {
-          item.error = provider.reason;
-          await this.#adapters.get(provider.key)?.close();
-          this.#adapters.delete(provider.key); this.#adapterKeys.delete(provider.key);
-          continue;
-        }
-        try {
-          const environment = providerEnvironment(this.config.providers?.[provider.key], process.env, this.proxyDefaults);
-          const key = digest(canonical({ executable: provider.executable, home: provider.home, environment }));
-          let adapter = this.#adapters.get(provider.key);
-          if (!adapter || this.#adapterKeys.get(provider.key) !== key) {
-            for (const [sessionKey, session] of this.#sessions) if (session.provider === provider.key) {
-              await session.adapter.close(); this.#sessions.delete(sessionKey);
-            }
-            await adapter?.close();
-            adapter = this.providers.create(provider, { cwd: this.config.cwd, stateDir: this.config.stateDir,
-              environment }, 'inspection');
-            this.#adapters.set(provider.key, adapter); this.#adapterKeys.set(provider.key, key);
-          }
-          const inspection = await adapter.inspect(signal);
-          item.inspection = inspection.inspection; item.models = inspection.models; item.capabilities = inspection.capabilities;
-          item.readiness = { level: 'protocol', checkedAt: new Date().toISOString(), modelExecutionVerified: false };
-          item.status = 'ready';
-        } catch (error) { item.error = error instanceof Error ? error.message : String(error); }
-        item.checkedAt = Date.now();
-      }
-      this.#providers = providers;
+    if (this.#providers && (!refresh || this.#active.size))
       return this.#inventory();
-    }, false, localTest);
-    try { return await this.#probing; } finally { this.#probing = undefined; }
+    this.#probing = this.#maintain(
+      async () => {
+        await this.#cleanup();
+        const signal = AbortSignal.any([
+          this.#lifetime.signal,
+          AbortSignal.timeout(90_000),
+          ...(selfTestSignal ? [selfTestSignal] : []),
+        ]);
+        const found = await discoverProviders({
+          overrides: this.config.providers,
+          signal,
+        });
+        const providers: InventoryProvider[] = [];
+        for (const provider of found) {
+          const item: InventoryProvider = {
+            key: provider.key,
+            displayName: provider.displayName,
+            status:
+              provider.status === "installed" ? "unavailable" : provider.status,
+            version: provider.version,
+            models: [],
+            checkedAt: Date.now(),
+          };
+          providers.push(item);
+          this.#discovered.set(provider.key, provider);
+          if (provider.status !== "installed") {
+            item.error = provider.reason;
+            await this.#adapters.get(provider.key)?.close();
+            this.#adapters.delete(provider.key);
+            this.#adapterKeys.delete(provider.key);
+            continue;
+          }
+          try {
+            const environment = providerEnvironment(
+              this.config.providers?.[provider.key],
+              process.env,
+              this.proxyDefaults,
+            );
+            const key = digest(
+              canonical({
+                executable: provider.executable,
+                home: provider.home,
+                environment,
+              }),
+            );
+            let adapter = this.#adapters.get(provider.key);
+            if (!adapter || this.#adapterKeys.get(provider.key) !== key) {
+              for (const [sessionKey, session] of this.#sessions)
+                if (session.provider === provider.key) {
+                  await session.adapter.close();
+                  this.#sessions.delete(sessionKey);
+                }
+              await adapter?.close();
+              adapter = this.providers.create(
+                provider,
+                {
+                  cwd: this.config.cwd,
+                  stateDir: this.config.stateDir,
+                  environment,
+                },
+                "inspection",
+              );
+              this.#adapters.set(provider.key, adapter);
+              this.#adapterKeys.set(provider.key, key);
+            }
+            const inspection = await adapter.inspect(signal);
+            item.inspection = inspection.inspection;
+            item.models = inspection.models;
+            item.capabilities = inspection.capabilities;
+            item.readiness = {
+              level: "protocol",
+              checkedAt: new Date().toISOString(),
+              modelExecutionVerified: false,
+            };
+            item.status = "ready";
+          } catch (error) {
+            item.error = error instanceof Error ? error.message : String(error);
+          }
+          item.checkedAt = Date.now();
+        }
+        this.#providers = providers;
+        return this.#inventory();
+      },
+      false,
+      localTest,
+    );
+    try {
+      return await this.#probing;
+    } finally {
+      this.#probing = undefined;
+    }
   }
   #inventory(): DeviceInventory {
-    return { nodeId: this.nodeId, daemonId: this.daemonId, workdir: this.config.cwd,
-      platform: { platform: platform(), arch: arch(), release: release(), hostname: hostname() },
-      activeRunIds: this.activeRunIds, unresolvedRunIds: this.#store.unresolved(), resources: this.#limits,
-      providers: (this.#providers ?? []).map(provider => ({ ...provider,
-        sessionResumeMode: provider.capabilities?.sessionResume ?? 'unsupported',
-      })) };
+    return {
+      nodeId: this.nodeId,
+      daemonId: this.daemonId,
+      workdir: this.config.cwd,
+      platform: {
+        platform: platform(),
+        arch: arch(),
+        release: release(),
+        hostname: hostname(),
+      },
+      activeRunIds: this.activeRunIds,
+      unresolvedRunIds: this.#store.unresolved(),
+      resources: this.#limits,
+      providers: (this.#providers ?? []).map((provider) => ({
+        ...provider,
+        sessionResumeMode:
+          provider.capabilities?.sessionResume ?? "unsupported",
+      })),
+    };
   }
   async prepare(value: unknown) {
     return this.#prepare(value);
   }
   async #prepare(value: unknown, localTest = false) {
-    const input = object(value), runId = identity(input.runId), sessionKey = input.sessionKey === undefined ? runId : identity(input.sessionKey);
-    const fingerprint = digest(canonical({ sessionKey, files: input.files ?? [] }));
+    const input = object(value),
+      runId = identity(input.runId),
+      sessionKey =
+        input.sessionKey === undefined ? runId : identity(input.sessionKey);
+    const fingerprint = digest(
+      canonical({ sessionKey, files: input.files ?? [] }),
+    );
     const queuedAt = performance.now();
-    return observeStartup(runId, 'device_prepare', () => this.#maintain(() => observeStartup(runId, 'device_prepare_body', async () => {
-      this.#store.assertSessionOpen(sessionKey);
-      const previous = this.#store.preparation(runId);
-      if (previous) {
-        if (previous.input !== fingerprint || previous.released) throw new Error('preparation_identity_conflict');
-        await verifySkillFiles(this.config.stateDir, previous.directories.skillDirectory, (input.files ?? []) as DeviceFile[]);
-        return previous.directories;
-      }
-      if ([...this.#active.values()].some(active => active.sessionKey === sessionKey)) throw new Error('session_busy');
-      if (this.#store.get(runId)) throw new Error('preparation_identity_conflict');
-      // Recover only directories which never reached durable admission.
-      await releaseDirectories(this.config.stateDir, runId);
-      await observeStartup(runId, 'device_prepare_capacity', () => this.#capacity(runId));
-      const directories = await observeStartup(runId, 'device_prepare_files', () => prepareDirectories(this.config.stateDir, runId, sessionKey, (input.files ?? []) as DeviceFile[], this.config.cwd));
-      await observeStartup(runId, 'device_prepare_persist', async () => { this.#store.prepare(runId, { input: fingerprint, sessionKey, directories }); });
-      return directories;
-    }, performance.now() - queuedAt), true, localTest));
+    return observeStartup(runId, "device_prepare", () =>
+      this.#maintain(
+        () =>
+          observeStartup(
+            runId,
+            "device_prepare_body",
+            async () => {
+              this.#store.assertSessionOpen(sessionKey);
+              const previous = this.#store.preparation(runId);
+              if (previous) {
+                if (previous.input !== fingerprint || previous.released)
+                  throw new Error("preparation_identity_conflict");
+                await verifySkillFiles(
+                  this.config.stateDir,
+                  previous.directories.skillDirectory,
+                  (input.files ?? []) as DeviceFile[],
+                );
+                return previous.directories;
+              }
+              if (
+                [...this.#active.values()].some(
+                  (active) => active.sessionKey === sessionKey,
+                )
+              )
+                throw new Error("session_busy");
+              if (this.#store.get(runId))
+                throw new Error("preparation_identity_conflict");
+              // Recover only directories which never reached durable admission.
+              await releaseDirectories(this.config.stateDir, runId);
+              await observeStartup(runId, "device_prepare_capacity", () =>
+                this.#capacity(runId),
+              );
+              const directories = await observeStartup(
+                runId,
+                "device_prepare_files",
+                () =>
+                  prepareDirectories(
+                    this.config.stateDir,
+                    runId,
+                    sessionKey,
+                    (input.files ?? []) as DeviceFile[],
+                    this.config.cwd,
+                  ),
+              );
+              await observeStartup(
+                runId,
+                "device_prepare_persist",
+                async () => {
+                  this.#store.prepare(runId, {
+                    input: fingerprint,
+                    sessionKey,
+                    directories,
+                  });
+                },
+              );
+              return directories;
+            },
+            performance.now() - queuedAt,
+          ),
+        true,
+        localTest,
+      ),
+    );
   }
   getExecution(runId: string) {
     this.#assertOpen();
     const value = this.#store.get(identity(runId));
     if (!value) return null;
-    const state = value.state === 'running' && !this.#active.has(runId) ? 'unknown' : value.state;
-    return { runId: value.runId, provider: value.provider, state, result: value.result,
-      detailsExpired: value.detailsExpired ?? false, historyTruncated: value.historyTruncated ?? false,
-      ...(value.admissionRecovery ? { admissionRecovered: true } : {}) };
+    const state =
+      value.state === "running" && !this.#active.has(runId)
+        ? "unknown"
+        : value.state;
+    return {
+      runId: value.runId,
+      provider: value.provider,
+      state,
+      result: value.result,
+      detailsExpired: value.detailsExpired ?? false,
+      historyTruncated: value.historyTruncated ?? false,
+      ...(value.admissionRecovery ? { admissionRecovered: true } : {}),
+    };
   }
   async execute(value: unknown): Promise<unknown> {
     return this.#execute(value);
   }
-  async #execute(value: unknown, local?: { call: RunCallback; signal: AbortSignal }): Promise<unknown> {
+  async #execute(
+    value: unknown,
+    local?: { call: RunCallback; signal: AbortSignal },
+  ): Promise<unknown> {
     this.#assertOpen();
-    const input = executionInput(value), fingerprint = digest(canonical(input));
+    const input = executionInput(value),
+      fingerprint = digest(canonical(input));
     const existing = this.#store.get(input.runId);
     if (existing) {
-      if (existing.input !== fingerprint) throw new Error('execution_identity_conflict');
-      if (existing.detailsExpired) throw new Error('execution_details_expired');
-      if (this.#active.has(input.runId)) return this.#active.get(input.runId)!.promise;
-      return { provider: existing.provider, result: existing.result ?? { state: existing.state, error: 'unconfirmed_previous_execution' } };
+      if (existing.input !== fingerprint)
+        throw new Error("execution_identity_conflict");
+      if (existing.detailsExpired) throw new Error("execution_details_expired");
+      if (this.#active.has(input.runId))
+        return this.#active.get(input.runId)!.promise;
+      return {
+        provider: existing.provider,
+        result: existing.result ?? {
+          state: existing.state,
+          error: "unconfirmed_previous_execution",
+        },
+      };
     }
     const queuedAt = performance.now();
-    const admitted = await observeStartup(input.runId, 'device_admission', () => this.#maintain(() => observeStartup(input.runId, 'device_admission_body', async () => {
-      const duplicate = this.#store.get(input.runId);
-      if (duplicate) {
-        if (duplicate.input !== fingerprint) throw new Error('execution_identity_conflict');
-        if (duplicate.detailsExpired) throw new Error('execution_details_expired');
-        return { result: this.#active.get(input.runId)?.promise ?? Promise.resolve({ provider: duplicate.provider, result: duplicate.result ?? { state: duplicate.state, error: 'unconfirmed_previous_execution' } }) };
-      }
-      if (this.#active.size >= this.#limits.maxConcurrentExecutions) throw new Error('device_busy');
-      const key = input.sessionKey ?? input.runId;
-      if ([...this.#active.values()].some(active => active.sessionKey === key ||
-        input.resumeSessionId && active.provider === input.provider && active.nativeSessionId === input.resumeSessionId)) throw new Error('session_busy');
-      await observeStartup(input.runId, 'device_admission_capacity', () => this.#capacity(input.runId));
-      this.#assertOpen();
-      local?.signal.throwIfAborted();
-      this.#store.assertSessionOpen(input.sessionKey ?? input.runId);
-      const unresolved = this.#store.unresolved();
-      if (unresolved.length) throw new Error(`unresolved_execution:${unresolved[0]}`);
-      const prepared = this.#store.preparation(input.runId);
-      if (!prepared || prepared.released || prepared.sessionKey !== (input.sessionKey ?? input.runId)) throw new Error('execution_not_prepared');
-      const probeAdapter = this.#adapters.get(input.provider);
-      const available = this.#providers?.find(item => item.key === input.provider);
-      if (!probeAdapter || available?.status !== 'ready') throw new Error('provider_unavailable');
-      if (input.model && !available.models.includes(input.model)) throw new Error('model_unavailable');
-      const config = input.config ?? {};
-      probeAdapter.validate({ model: input.model, config });
-      const adapterKey = `${input.provider}:${key}`;
-      let retained = this.#sessions.get(adapterKey);
-      if (!retained) {
-        if (this.#sessions.size >= this.#limits.maxConcurrentExecutions) {
-          const idle = [...this.#sessions].find(([, session]) => ![...this.#active.values()].some(active => active.adapter === session.adapter));
-          if (idle) { await idle[1].adapter.close(); this.#sessions.delete(idle[0]); }
-        }
-        retained = { sessionKey: key, provider: input.provider, adapter: this.providers.create(this.#discovered.get(input.provider)!, {
-          cwd: this.config.cwd, stateDir: this.config.stateDir,
-          environment: providerEnvironment(this.config.providers?.[input.provider], process.env, this.proxyDefaults), inspection: available.inspection,
-        }, 'session') };
-        this.#sessions.set(adapterKey, retained);
-      }
-      const adapter = retained.adapter;
-      const controller = new AbortController();
-      const environment = adapter.environment({ sessionKey: prepared.sessionKey, workdir: prepared.directories.workdir,
-        config, skillDirectory: prepared.directories.skillDirectory });
-      const record: StoredExecution = { runId: input.runId, provider: input.provider, input: fingerprint, state: 'running', environment,
-        ...(input.model ? { model: input.model } : {}), ...(this.bootIdentity ? { bootId: this.bootIdentity } : {}) };
-      this.#store.admit(record); // Persist before any provider process or prompt is started.
-      const active = { runId: input.runId, sessionKey: key, provider: input.provider, nativeSessionId: input.resumeSessionId, adapter, controller, historyTruncated: false, ready: false, promise: Promise.resolve<unknown>(null), steer: undefined as ((text: string) => Promise<'accepted' | 'rejected' | 'unknown'>) | undefined };
-      this.#active.set(input.runId, active);
-      active.promise = (async () => {
-        // This closure keeps local diagnostic callbacks local even after completion or a remote rebind.
-        const call: RunCallback = local?.call ?? ((kind, payload, timeout) => this.#call(input.runId, kind, payload, timeout));
-        const signal = AbortSignal.any([controller.signal, this.#lifetime.signal, ...(local ? [local.signal] : [])]);
-        const observations = new ObservationWriter((kind, payload) => this.#observe(input.runId, kind, payload, call, !!local), signal);
-        const reports = new Set<Promise<unknown>>();
-        let pendingPermissions = 0;
-        let permissionTail = Promise.resolve();
-        let started = false;
-        const finishNativeStartup = startStartupSpan(input.runId, 'device_native_start');
-        const ready = async (sessionId?: string) => {
-          if (sessionId && [...this.#active.values()].some(other => other !== active && other.provider === input.provider && other.nativeSessionId === sessionId)) throw new Error('native_session_busy');
-          active.nativeSessionId = sessionId;
-          finishNativeStartup();
-          await observeStartup(input.runId, 'device_ready_callback', () => call('ready', { sessionId })); signal.throwIfAborted(); started = true; active.ready = true;
-        };
-        const invocation: McpInvocation = { signal,
-          onToolCall: async tool => {
-            signal.throwIfAborted();
-            observations.seal();
-            return await withSignal(call('toolCall', tool, 5 * 60_000), signal) as Awaited<ReturnType<McpInvocation['onToolCall']>>;
-          },
-          onToolResultDelivery: async delivery => { await call('toolDelivery', delivery); },
-        };
-        const permission = async (request: NativePermissionRequest, nativeSignal: AbortSignal, responseSent?: Promise<void>): Promise<NativePermissionDecision> => {
-          if (this.#active.get(input.runId) !== active || signal.aborted || nativeSignal.aborted || pendingPermissions + reports.size >= 32) return 'deny';
-          observations.seal();
-          pendingPermissions++;
-          // Native tools may request approvals in a parallel batch. Keep the
-          // bounded queue local instead of exhausting the transport's incoming
-          // handler budget with long-lived approval RPCs. Abort never replays one.
-          const previous = permissionTail;
-          let release!: () => void;
-          const slot = new Promise<void>(resolve => { release = resolve; });
-          permissionTail = previous.then(() => slot);
-          let decision: unknown;
-          try {
-            const approvalSignal = AbortSignal.any([signal, nativeSignal]);
-            await withSignal(previous, approvalSignal);
-            approvalSignal.throwIfAborted();
-            decision = await withSignal(call('permission', request, 30 * 60_000), approvalSignal);
-          } catch { /* Fail closed. */ }
-          finally { pendingPermissions--; release(); }
-          let effective: NativePermissionDecision = request.form ? { action: 'cancel' } : 'deny';
-          if (!signal.aborted && !nativeSignal.aborted && this.#active.get(input.runId) === active) {
-            if (request.options && decision && typeof decision === 'object' && 'optionId' in decision
-              && request.options.some(option => option.optionId === decision.optionId)) effective = { optionId: String(decision.optionId) };
-            else if (request.form && decision && typeof decision === 'object' && 'action' in decision
-              && ['accept', 'decline', 'cancel'].includes(String(decision.action)) && Buffer.byteLength(JSON.stringify(decision)) <= 32768)
-              effective = decision as NativePermissionDecision;
-            else if (!request.form && !request.options
-              && (decision === 'deny' || decision === 'allow' && request.canAllow)) effective = decision;
-          }
-          const confirmed = decision !== undefined && canonical(decision) === canonical(effective);
-          if (responseSent) {
-            const reporting = withSignal(responseSent, AbortSignal.any([signal, this.#lifetime.signal, AbortSignal.timeout(30_000)])).then(
-              () => call('permissionDelivered', { id: request.id, decision: effective, success: confirmed && !signal.aborted && !nativeSignal.aborted }),
-              () => call('permissionDelivered', { id: request.id, decision: effective, success: false }),
-            );
-            reports.add(reporting);
-            void reporting.finally(() => reports.delete(reporting)).catch(() => {});
-          }
-          return effective;
-        };
-        try {
-          const result = await adapter.execute({ runId: input.runId, sessionKey: prepared.sessionKey,
-            prompt: input.prompt, model: input.model, config, resumeSessionId: input.resumeSessionId,
-            previousRunId: input.previousRunId, retainSession: input.retainSession ?? false,
-            workdir: prepared.directories.workdir, skillDirectory: prepared.directories.skillDirectory,
-            signal, tools: input.tools, invocation,
-            ready, observe: async (kind, payload) => {
-              if (local) await call(kind, payload);
-              await observations.write(kind, payload);
-            }, permission,
-            steering: steer => { active.steer = steer ?? undefined; void call('steering', { available: Boolean(steer) }).catch(() => {}); },
-          }, environment);
-          await observations.finish();
-          const state = object(result).state;
-          record.state = ['completed', 'failed', 'cancelled'].includes(String(state)) ? state as StoredExecution['state'] : 'unknown';
-          record.result = result;
-        } catch (error) {
-          finishNativeStartup('failed');
-          record.state = started ? 'unknown' : 'failed';
-          record.result = { state: record.state, error: error instanceof Error ? error.message : String(error) };
-        } finally {
-          observations.close();
-          try {
-            try { this.#store.save(record); }
-            catch (error) {
-              // A Provider result that cannot be retained must not escape as confirmed success.
-              record.state = 'unknown';
-              record.result = { state: 'unknown', error: error instanceof Error ? error.message : 'execution_persistence_failed' };
-              try { this.#store.save(record); }
-              catch (failure) { this.#persistenceFailed = true; throw failure; }
-            }
-            // Delivery reporting failure never upgrades Provider evidence or retransmits a callback.
-            await Promise.allSettled(reports);
-          } finally {
-            this.#active.delete(input.runId);
-            this.#idleDeadline = Date.now() + this.#limits.idleTimeoutMs;
-            this.#armIdleTimer();
-          }
-        }
-        return { provider: input.provider, result: record.result };
-      })();
-      return { result: active.promise };
-    }, performance.now() - queuedAt), true, !!local));
+    const admitted = await observeStartup(input.runId, "device_admission", () =>
+      this.#maintain(
+        () =>
+          observeStartup(
+            input.runId,
+            "device_admission_body",
+            async () => {
+              const duplicate = this.#store.get(input.runId);
+              if (duplicate) {
+                if (duplicate.input !== fingerprint)
+                  throw new Error("execution_identity_conflict");
+                if (duplicate.detailsExpired)
+                  throw new Error("execution_details_expired");
+                return {
+                  result:
+                    this.#active.get(input.runId)?.promise ??
+                    Promise.resolve({
+                      provider: duplicate.provider,
+                      result: duplicate.result ?? {
+                        state: duplicate.state,
+                        error: "unconfirmed_previous_execution",
+                      },
+                    }),
+                };
+              }
+              if (this.#active.size >= this.#limits.maxConcurrentExecutions)
+                throw new Error("device_busy");
+              const key = input.sessionKey ?? input.runId;
+              if (
+                [...this.#active.values()].some(
+                  (active) =>
+                    active.sessionKey === key ||
+                    (input.resumeSessionId &&
+                      active.provider === input.provider &&
+                      active.nativeSessionId === input.resumeSessionId),
+                )
+              )
+                throw new Error("session_busy");
+              await observeStartup(
+                input.runId,
+                "device_admission_capacity",
+                () => this.#capacity(input.runId),
+              );
+              this.#assertOpen();
+              local?.signal.throwIfAborted();
+              this.#store.assertSessionOpen(input.sessionKey ?? input.runId);
+              const unresolved = this.#store.unresolved();
+              if (unresolved.length)
+                throw new Error(`unresolved_execution:${unresolved[0]}`);
+              const prepared = this.#store.preparation(input.runId);
+              if (
+                !prepared ||
+                prepared.released ||
+                prepared.sessionKey !== (input.sessionKey ?? input.runId)
+              )
+                throw new Error("execution_not_prepared");
+              const probeAdapter = this.#adapters.get(input.provider);
+              const available = this.#providers?.find(
+                (item) => item.key === input.provider,
+              );
+              if (!probeAdapter || available?.status !== "ready")
+                throw new Error("provider_unavailable");
+              if (input.model && !available.models.includes(input.model))
+                throw new Error("model_unavailable");
+              const config = input.config ?? {};
+              probeAdapter.validate({ model: input.model, config });
+              const adapterKey = `${input.provider}:${key}`;
+              let retained = this.#sessions.get(adapterKey);
+              if (!retained) {
+                if (
+                  this.#sessions.size >= this.#limits.maxConcurrentExecutions
+                ) {
+                  const idle = [...this.#sessions].find(
+                    ([, session]) =>
+                      ![...this.#active.values()].some(
+                        (active) => active.adapter === session.adapter,
+                      ),
+                  );
+                  if (idle) {
+                    await idle[1].adapter.close();
+                    this.#sessions.delete(idle[0]);
+                  }
+                }
+                retained = {
+                  sessionKey: key,
+                  provider: input.provider,
+                  adapter: this.providers.create(
+                    this.#discovered.get(input.provider)!,
+                    {
+                      cwd: this.config.cwd,
+                      stateDir: this.config.stateDir,
+                      environment: providerEnvironment(
+                        this.config.providers?.[input.provider],
+                        process.env,
+                        this.proxyDefaults,
+                      ),
+                      inspection: available.inspection,
+                    },
+                    "session",
+                  ),
+                };
+                this.#sessions.set(adapterKey, retained);
+              }
+              const adapter = retained.adapter;
+              const controller = new AbortController();
+              const environment = adapter.environment({
+                sessionKey: prepared.sessionKey,
+                workdir: prepared.directories.workdir,
+                config,
+                skillDirectory: prepared.directories.skillDirectory,
+              });
+              const record: StoredExecution = {
+                runId: input.runId,
+                provider: input.provider,
+                input: fingerprint,
+                state: "running",
+                environment,
+                ...(input.model ? { model: input.model } : {}),
+                ...(this.bootIdentity ? { bootId: this.bootIdentity } : {}),
+              };
+              this.#store.admit(record); // Persist before any provider process or prompt is started.
+              const active = {
+                runId: input.runId,
+                sessionKey: key,
+                provider: input.provider,
+                nativeSessionId: input.resumeSessionId,
+                adapter,
+                controller,
+                historyTruncated: false,
+                ready: false,
+                promise: Promise.resolve<unknown>(null),
+                steer: undefined as
+                  | ((
+                      text: string,
+                    ) => Promise<"accepted" | "rejected" | "unknown">)
+                  | undefined,
+              };
+              this.#active.set(input.runId, active);
+              active.promise = (async () => {
+                // This closure keeps local diagnostic callbacks local even after completion or a remote rebind.
+                const call: RunCallback =
+                  local?.call ??
+                  ((kind, payload, timeout) =>
+                    this.#call(input.runId, kind, payload, timeout));
+                const signal = AbortSignal.any([
+                  controller.signal,
+                  this.#lifetime.signal,
+                  ...(local ? [local.signal] : []),
+                ]);
+                const observations = new ObservationWriter(
+                  (kind, payload) =>
+                    this.#observe(input.runId, kind, payload, call, !!local),
+                  signal,
+                );
+                const reports = new Set<Promise<unknown>>();
+                let pendingPermissions = 0;
+                let permissionTail = Promise.resolve();
+                let started = false;
+                const finishNativeStartup = startStartupSpan(
+                  input.runId,
+                  "device_native_start",
+                );
+                const ready = async (sessionId?: string) => {
+                  if (
+                    sessionId &&
+                    [...this.#active.values()].some(
+                      (other) =>
+                        other !== active &&
+                        other.provider === input.provider &&
+                        other.nativeSessionId === sessionId,
+                    )
+                  )
+                    throw new Error("native_session_busy");
+                  active.nativeSessionId = sessionId;
+                  finishNativeStartup();
+                  await observeStartup(
+                    input.runId,
+                    "device_ready_callback",
+                    () => call("ready", { sessionId }),
+                  );
+                  signal.throwIfAborted();
+                  started = true;
+                  active.ready = true;
+                };
+                const invocation: McpInvocation = {
+                  signal,
+                  onToolCall: async (tool) => {
+                    signal.throwIfAborted();
+                    observations.seal();
+                    return (await withSignal(
+                      call("toolCall", tool, 5 * 60_000),
+                      signal,
+                    )) as Awaited<ReturnType<McpInvocation["onToolCall"]>>;
+                  },
+                  onToolResultDelivery: async (delivery) => {
+                    await call("toolDelivery", delivery);
+                  },
+                };
+                const permission = async (
+                  request: NativePermissionRequest,
+                  nativeSignal: AbortSignal,
+                  responseSent?: Promise<void>,
+                ): Promise<NativePermissionDecision> => {
+                  if (
+                    this.#active.get(input.runId) !== active ||
+                    signal.aborted ||
+                    nativeSignal.aborted ||
+                    pendingPermissions + reports.size >= 32
+                  )
+                    return "deny";
+                  observations.seal();
+                  pendingPermissions++;
+                  // Native tools may request approvals in a parallel batch. Keep the
+                  // bounded queue local instead of exhausting the transport's incoming
+                  // handler budget with long-lived approval RPCs. Abort never replays one.
+                  const previous = permissionTail;
+                  let release!: () => void;
+                  const slot = new Promise<void>((resolve) => {
+                    release = resolve;
+                  });
+                  permissionTail = previous.then(() => slot);
+                  let decision: unknown;
+                  try {
+                    const approvalSignal = AbortSignal.any([
+                      signal,
+                      nativeSignal,
+                    ]);
+                    await withSignal(previous, approvalSignal);
+                    approvalSignal.throwIfAborted();
+                    decision = await withSignal(
+                      call("permission", request, 30 * 60_000),
+                      approvalSignal,
+                    );
+                  } catch {
+                    /* Fail closed. */
+                  } finally {
+                    pendingPermissions--;
+                    release();
+                  }
+                  let effective: NativePermissionDecision = request.form
+                    ? { action: "cancel" }
+                    : "deny";
+                  if (
+                    !signal.aborted &&
+                    !nativeSignal.aborted &&
+                    this.#active.get(input.runId) === active
+                  ) {
+                    if (
+                      request.options &&
+                      decision &&
+                      typeof decision === "object" &&
+                      "optionId" in decision &&
+                      request.options.some(
+                        (option) => option.optionId === decision.optionId,
+                      )
+                    )
+                      effective = { optionId: String(decision.optionId) };
+                    else if (
+                      request.form &&
+                      decision &&
+                      typeof decision === "object" &&
+                      "action" in decision &&
+                      ["accept", "decline", "cancel"].includes(
+                        String(decision.action),
+                      ) &&
+                      Buffer.byteLength(JSON.stringify(decision)) <= 32768
+                    )
+                      effective = decision as NativePermissionDecision;
+                    else if (
+                      !request.form &&
+                      !request.options &&
+                      (decision === "deny" ||
+                        (decision === "allow" && request.canAllow))
+                    )
+                      effective = decision;
+                  }
+                  const confirmed =
+                    decision !== undefined &&
+                    canonical(decision) === canonical(effective);
+                  if (responseSent) {
+                    const reporting = withSignal(
+                      responseSent,
+                      AbortSignal.any([
+                        signal,
+                        this.#lifetime.signal,
+                        AbortSignal.timeout(30_000),
+                      ]),
+                    ).then(
+                      () =>
+                        call("permissionDelivered", {
+                          id: request.id,
+                          decision: effective,
+                          success:
+                            confirmed &&
+                            !signal.aborted &&
+                            !nativeSignal.aborted,
+                        }),
+                      () =>
+                        call("permissionDelivered", {
+                          id: request.id,
+                          decision: effective,
+                          success: false,
+                        }),
+                    );
+                    reports.add(reporting);
+                    void reporting
+                      .finally(() => reports.delete(reporting))
+                      .catch(() => {});
+                  }
+                  return effective;
+                };
+                try {
+                  const result = await adapter.execute(
+                    {
+                      runId: input.runId,
+                      sessionKey: prepared.sessionKey,
+                      prompt: input.prompt,
+                      model: input.model,
+                      config,
+                      resumeSessionId: input.resumeSessionId,
+                      previousRunId: input.previousRunId,
+                      retainSession: input.retainSession ?? false,
+                      workdir: prepared.directories.workdir,
+                      skillDirectory: prepared.directories.skillDirectory,
+                      signal,
+                      tools: input.tools,
+                      invocation,
+                      ready,
+                      observe: async (kind, payload) => {
+                        if (local) await call(kind, payload);
+                        await observations.write(kind, payload);
+                      },
+                      permission,
+                      steering: (steer) => {
+                        active.steer = steer ?? undefined;
+                        void call("steering", {
+                          available: Boolean(steer),
+                        }).catch(() => {});
+                      },
+                    },
+                    environment,
+                  );
+                  await observations.finish();
+                  const state = object(result).state;
+                  record.state = ["completed", "failed", "cancelled"].includes(
+                    String(state),
+                  )
+                    ? (state as StoredExecution["state"])
+                    : "unknown";
+                  record.result = result;
+                } catch (error) {
+                  finishNativeStartup("failed");
+                  record.state = started ? "unknown" : "failed";
+                  record.result = {
+                    state: record.state,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  };
+                } finally {
+                  observations.close();
+                  try {
+                    try {
+                      this.#store.save(record);
+                    } catch (error) {
+                      // A Provider result that cannot be retained must not escape as confirmed success.
+                      record.state = "unknown";
+                      record.result = {
+                        state: "unknown",
+                        error:
+                          error instanceof Error
+                            ? error.message
+                            : "execution_persistence_failed",
+                      };
+                      try {
+                        this.#store.save(record);
+                      } catch (failure) {
+                        this.#persistenceFailed = true;
+                        throw failure;
+                      }
+                    }
+                    // Delivery reporting failure never upgrades Provider evidence or retransmits a callback.
+                    await Promise.allSettled(reports);
+                  } finally {
+                    this.#active.delete(input.runId);
+                    this.#idleDeadline =
+                      Date.now() + this.#limits.idleTimeoutMs;
+                    this.#armIdleTimer();
+                  }
+                }
+                return { provider: input.provider, result: record.result };
+              })();
+              return { result: active.promise };
+            },
+            performance.now() - queuedAt,
+          ),
+        true,
+        !!local,
+      ),
+    );
     return admitted.result;
   }
   cancel(runId: string) {
     this.#assertOpen();
     identity(runId);
-    if ([...this.#selfTests.values()].some(test => test.running && test.status?.runId === runId)) throw new Error('device_busy');
+    if (
+      [...this.#selfTests.values()].some(
+        (test) => test.running && test.status?.runId === runId,
+      )
+    )
+      throw new Error("device_busy");
     const active = this.#active.get(runId);
-    if (active) { active.controller.abort(new Error('cancel_requested')); return { requested: true }; }
+    if (active) {
+      active.controller.abort(new Error("cancel_requested"));
+      return { requested: true };
+    }
     return { requested: false, state: this.#store.get(runId)?.state ?? null };
   }
   async steer(runId: string, text: string) {
     this.#assertOpen();
     identity(runId);
-    if ([...this.#selfTests.values()].some(test => test.running && test.status?.runId === runId)) throw new Error('device_busy');
-    if (typeof text !== 'string' || !text || text.length > 100_000) throw new Error('invalid_steer');
+    if (
+      [...this.#selfTests.values()].some(
+        (test) => test.running && test.status?.runId === runId,
+      )
+    )
+      throw new Error("device_busy");
+    if (typeof text !== "string" || !text || text.length > 100_000)
+      throw new Error("invalid_steer");
     const active = this.#active.get(runId);
-    if (active?.runId !== runId || !active.steer) return 'rejected';
+    if (active?.runId !== runId || !active.steer) return "rejected";
     return active.steer(text);
   }
   async reconcile(runId: string) {
     this.#assertOpen();
     const record = this.#store.get(identity(runId));
     if (!record) return null;
-    if (record.detailsExpired) throw new Error('execution_details_expired');
-    if (['completed', 'failed', 'cancelled'].includes(record.state)) return { provider: record.provider, result: record.result };
+    if (record.detailsExpired) throw new Error("execution_details_expired");
+    if (["completed", "failed", "cancelled"].includes(record.state))
+      return { provider: record.provider, result: record.result };
     return this.#maintain(async () => {
-      const result = await this.providers.reconcile(record.provider, record.environment, runId, AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(30_000)]));
-      if (result) { record.state = result.state; record.result = result; this.#store.save(record); }
+      const result = await this.providers.reconcile(
+        record.provider,
+        record.environment,
+        runId,
+        AbortSignal.any([this.#lifetime.signal, AbortSignal.timeout(30_000)]),
+      );
+      if (result) {
+        record.state = result.state;
+        record.result = result;
+        this.#store.save(record);
+      }
       return result ? { provider: record.provider, result } : null;
     });
   }
   async collect(runId: string) {
     return this.#maintain(async () => {
-      if (this.#active.has(runId)) throw new Error('busy');
+      if (this.#active.has(runId)) throw new Error("busy");
       const prepared = this.#store.preparation(identity(runId));
-      if (!prepared || prepared.released) throw new Error('preparation_not_found');
-      return collectFiles(this.config.stateDir, prepared.directories.outputDirectory);
+      if (!prepared || prepared.released)
+        throw new Error("preparation_not_found");
+      return collectFiles(
+        this.config.stateDir,
+        prepared.directories.outputDirectory,
+      );
     }, true);
   }
   async release(runId: string) {
     return this.#release(runId);
   }
   async #release(runId: string, localTest = false) {
-    return this.#maintain(async () => {
-      if (this.#active.has(runId)) throw new Error('busy');
-      const prepared = this.#store.preparation(identity(runId));
-      if (!prepared) {
-        if (!this.#store.get(runId)) await releaseDirectories(this.config.stateDir, runId);
+    return this.#maintain(
+      async () => {
+        if (this.#active.has(runId)) throw new Error("busy");
+        const prepared = this.#store.preparation(identity(runId));
+        if (!prepared) {
+          if (!this.#store.get(runId))
+            await releaseDirectories(this.config.stateDir, runId);
+          return null;
+        }
+        if (prepared.released) return null;
+        const execution = this.#store.get(runId);
+        if (execution?.state === "running" || execution?.state === "unknown")
+          throw new Error("unresolved_execution");
+        await releaseDirectories(this.config.stateDir, runId);
+        this.#store.markReleased(runId);
+        if (!this.#active.size) this.#store.expireDetails();
         return null;
-      }
-      if (prepared.released) return null;
-      const execution = this.#store.get(runId);
-      if (execution?.state === 'running' || execution?.state === 'unknown') throw new Error('unresolved_execution');
-      await releaseDirectories(this.config.stateDir, runId);
-      this.#store.markReleased(runId);
-      if (!this.#active.size) this.#store.expireDetails();
-      return null;
-    }, true, localTest);
+      },
+      true,
+      localTest,
+    );
   }
   async forgetSession(sessionKey: string) {
     return this.#forgetSession(sessionKey);
   }
   async #forgetSession(sessionKey: string, localTest = false) {
     identity(sessionKey);
-    return this.#maintain(async () => {
-      // Durable invalidation precedes deletion; interrupted cleanup remains safely retryable.
-      const forgotten = this.#store.forgetSession(sessionKey);
-      if (!localTest) await this.providers.close();
-      for (const [key, session] of this.#sessions) if (session.sessionKey === sessionKey) {
-        await session.adapter.forgetSession(sessionKey); await session.adapter.close(); this.#sessions.delete(key);
-      }
-      await forgetSessionDirectories(this.config.stateDir, sessionKey);
-      return forgotten;
-    }, false, localTest);
+    return this.#maintain(
+      async () => {
+        // Durable invalidation precedes deletion; interrupted cleanup remains safely retryable.
+        const forgotten = this.#store.forgetSession(sessionKey);
+        if (!localTest) await this.providers.close();
+        for (const [key, session] of this.#sessions)
+          if (session.sessionKey === sessionKey) {
+            await session.adapter.forgetSession(sessionKey);
+            await session.adapter.close();
+            this.#sessions.delete(key);
+          }
+        await forgetSessionDirectories(this.config.stateDir, sessionKey);
+        return forgotten;
+      },
+      false,
+      localTest,
+    );
   }
   close(): Promise<void> {
     if (this.#closing) return this.#closing;
     this.#closed = true;
     this.#clearIdleTimer();
-    this.#lifetime.abort(new Error('daemon_shutdown'));
-    for (const active of this.#active.values()) active.controller.abort(new Error('daemon_shutdown'));
+    this.#lifetime.abort(new Error("daemon_shutdown"));
+    for (const active of this.#active.values())
+      active.controller.abort(new Error("daemon_shutdown"));
     this.#closing = (async () => {
       await this.#maintenance?.catch(() => {});
-      await Promise.allSettled([...this.#active.values()].map(active => active.promise));
-      try { await this.#closeProviders(); } finally { this.#store.close(); }
+      await Promise.allSettled(
+        [...this.#active.values()].map((active) => active.promise),
+      );
+      try {
+        await this.#closeProviders();
+      } finally {
+        this.#store.close();
+      }
     })();
     return this.#closing;
   }

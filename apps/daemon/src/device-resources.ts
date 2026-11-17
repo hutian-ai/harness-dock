@@ -12,13 +12,26 @@ export const DEVICE_RESOURCES = {
   maxPageBytes: 1024 * 1024,
   maxResultBytes: 16 * 1024 * 1024,
 } as const;
-export type DeviceResourceLimits = { [K in keyof typeof DEVICE_RESOURCES]: number };
-export function resourceLimits(input: Partial<DeviceResourceLimits> = {}): DeviceResourceLimits {
+export type DeviceResourceLimits = {
+  [K in keyof typeof DEVICE_RESOURCES]: number;
+};
+export function resourceLimits(
+  input: Partial<DeviceResourceLimits> = {},
+): DeviceResourceLimits {
   for (const [key, value] of Object.entries(input))
-    if (!(Object.hasOwn(DEVICE_RESOURCES, key)) || !Number.isSafeInteger(value) || value <= 0)
-      throw new Error('invalid_resource_limit');
+    if (
+      !Object.hasOwn(DEVICE_RESOURCES, key) ||
+      !Number.isSafeInteger(value) ||
+      value <= 0
+    )
+      throw new Error("invalid_resource_limit");
   const limits = { ...DEVICE_RESOURCES, ...input };
-  if (limits.maxConcurrentExecutions > 8 || limits.idleTimeoutMs > 2_147_483_647 || limits.maxPageBytes < limits.maxEventBytes || limits.maxRunEventBytes < limits.maxEventBytes)
-    throw new Error('invalid_resource_limit');
+  if (
+    limits.maxConcurrentExecutions > 8 ||
+    limits.idleTimeoutMs > 2_147_483_647 ||
+    limits.maxPageBytes < limits.maxEventBytes ||
+    limits.maxRunEventBytes < limits.maxEventBytes
+  )
+    throw new Error("invalid_resource_limit");
   return limits;
 }
