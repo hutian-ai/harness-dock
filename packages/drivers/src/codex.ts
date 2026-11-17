@@ -44,6 +44,8 @@ export interface CodexExecutionConfig {
   /** Application-wide native host endpoint; never another chat identity. */
   desktopHost?: { pipePath: string; nodePath: string };
   skillDirectory?: string;
+  /** Per-execution policy; omitted preserves the device user's native memory settings. */
+  nativeMemory?: "disabled";
   mcpServers?: AcpRuntimeOptions["mcpServers"];
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
 }
@@ -425,6 +427,7 @@ export class CodexExecutor {
             resume: input.resumeThreadId,
             cwd: this.config.cwd,
             home: this.config.codexHome,
+            nativeMemory: this.config.nativeMemory,
           }),
         ),
         state: "unknown",

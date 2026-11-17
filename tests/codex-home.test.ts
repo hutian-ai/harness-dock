@@ -70,6 +70,30 @@ test("adapter policy preserves explicit native options and adds caller skills wi
     model_reasoning_summary: "concise",
   });
   assert.deepEqual(JSON.parse(defaults.CODEX_ACP_APP_SERVER_ARGS!), []);
+  const managed = codexAdapterEnvironment({
+    cwd: "/work",
+    codexHome: "/native",
+    stateDir: "/state",
+    environment,
+    nativeMemory: "disabled",
+  });
+  assert.deepEqual(JSON.parse(managed.CODEX_CONFIG!), {
+    ...configured,
+    "features.memories": false,
+    "memories.generate_memories": false,
+    "memories.use_memories": false,
+  });
+  assert.deepEqual(JSON.parse(managed.CODEX_ACP_APP_SERVER_ARGS!), [
+    "-c",
+    "synthetic=true",
+    "-c",
+    "features.memories=false",
+    "-c",
+    "memories.generate_memories=false",
+    "-c",
+    "memories.use_memories=false",
+  ]);
+  assert.deepEqual(JSON.parse(environment.CODEX_CONFIG), configured);
 });
 
 test("native preparation preserves configuration, authentication and skill directories", async () => {

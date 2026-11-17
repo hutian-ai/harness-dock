@@ -248,6 +248,8 @@ export function createProviderAdapter(
       typeof input.config.serviceTier === "string"
         ? input.config.serviceTier
         : undefined,
+    nativeMemory:
+      input.config.nativeMemory === "disabled" ? "disabled" : undefined,
     environment: options.environment,
   });
   return {
@@ -279,8 +281,14 @@ export function createProviderAdapter(
     validate({ model, config }) {
       if (
         Object.keys(config).some(
-          (key) => !["effort", "serviceTier", "mode"].includes(key),
+          (key) =>
+            !["effort", "serviceTier", "mode", "nativeMemory"].includes(key),
         )
+      )
+        throw new Error("unsupported_config");
+      if (
+        config.nativeMemory !== undefined &&
+        config.nativeMemory !== "disabled"
       )
         throw new Error("unsupported_config");
       const selected = inspection.models.find((value) => value.id === model);

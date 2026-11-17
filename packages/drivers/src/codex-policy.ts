@@ -33,6 +33,13 @@ export function codexAdapterEnvironment(
   environment.CODEX_CONFIG = JSON.stringify({
     model_reasoning_summary: "concise",
     ...configured,
+    ...(config.nativeMemory === "disabled"
+      ? {
+          "features.memories": false,
+          "memories.generate_memories": false,
+          "memories.use_memories": false,
+        }
+      : {}),
   });
   const roots = [
     ...stringArray(environment.CODEX_ACP_SKILL_ROOTS),
@@ -42,6 +49,15 @@ export function codexAdapterEnvironment(
     throw new Error("invalid_codex_skill_roots");
   environment.CODEX_ACP_SKILL_ROOTS = JSON.stringify([...new Set(roots)]);
   const args = stringArray(environment.CODEX_ACP_APP_SERVER_ARGS);
+  if (config.nativeMemory === "disabled")
+    args.push(
+      "-c",
+      "features.memories=false",
+      "-c",
+      "memories.generate_memories=false",
+      "-c",
+      "memories.use_memories=false",
+    );
   if (config.desktopHost && process.platform === "darwin")
     args.push(
       "-c",

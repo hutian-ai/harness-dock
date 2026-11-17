@@ -114,6 +114,8 @@ export interface DeviceExecuteInput {
   sessionKey?: string;
   prompt: string;
   model?: string;
+  /** Provider options. Codex accepts nativeMemory: "disabled" for caller-owned memory;
+   * omitted preserves native defaults. This does not restrict filesystem access. */
   config?: Record<string, unknown>;
   resumeSessionId?: string;
   previousRunId?: string;
