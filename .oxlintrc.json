@@ -1,0 +1,57 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "node": true,
+    "browser": true
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/target/**",
+    "third-party/**",
+    "patches/**",
+    ".local/**",
+    ".agents/**",
+    ".husky/**"
+  ],
+  "rules": {
+    "typescript/ban-ts-comment": "error",
+    "eslint/no-array-constructor": "error",
+    "eslint/no-case-declarations": "error",
+    "eslint/no-empty": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "error",
+    "eslint/no-fallthrough": "error",
+    "typescript/no-namespace": "error",
+    "eslint/no-prototype-builtins": "error",
+    "eslint/no-regex-spaces": "error",
+    "typescript/no-require-imports": "error",
+    "eslint/no-unexpected-multiline": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unsafe-function-type": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "eslint/no-var": "error",
+        "eslint/prefer-const": "error",
+        "eslint/prefer-rest-params": "error",
+        "eslint/prefer-spread": "error"
+      }
+    },
+    {
+      "files": ["**/*.{js,jsx,mjs,cjs}"],
+      "rules": {
+        "eslint/no-redeclare": "error",
+        "eslint/no-undef": "error"
+      }
+    }
+  ]
+}
