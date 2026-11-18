@@ -5,15 +5,8 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { renameSync } from "node:fs";
+import { chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { id } from "@harness-dock/protocol";
@@ -376,7 +369,8 @@ export async function serveControl(
       await (await import("@harness-dock/drivers")).protectWindowsPipe(path);
     else await chmod(path, 0o600);
     await writeFile(pending, JSON.stringify(status()), { mode: 0o600 });
-    await rename(pending, descriptor(config));
+    // Publish and enable requests in one event-loop turn after securing the endpoint.
+    renameSync(pending, descriptor(config));
     ready = true;
   } catch (error) {
     server.close();
