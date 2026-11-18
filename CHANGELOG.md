@@ -52,3 +52,10 @@
 - 产品与维护文档统一迁至 `apps/docs-site`，移除重复文档和开发过程快照。
 - 曾收敛为 Codex 最小版本，移除其他 Provider、闲置 ACP 执行/探测逻辑、设备容器实验和交互演示控制台。
 - 当时设备配置仅接受正式字段和 Codex 条目，删除旧配置的宽松兼容；当前源码已加入具名 dsh 条目。应用继续通过 SDK 执行任务，CLI 用于安装、诊断和验收。
+
+## Unreleased — ZCode runtime (2026-11-18)
+
+- Add a named ZCode adapter using pinned zcode-acp-server 0.88.0 and the selected native installation/account. Reuse the ACP session lifecycle with dsh; preserve native approvals, bounded evidence and no-replay semantics.
+- Include ZCode discovery, local self-test metadata and panel selection. New sessions start in build mode; bridge quota auto-resume and remote serving are disabled.
+- Project the trailing assistant message only after successful end_turn for application final-answer delivery. Interrupted or tool-ending turns do not promote progress to a final answer.
+- macOS source acceptance covers GLM Coding Plan, native execution, MCP, resume, attachments and cancellation. Community protocol compatibility, Windows acceptance, caller Skills and steering remain outside this verified scope. No distribution release.

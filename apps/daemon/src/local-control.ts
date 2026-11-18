@@ -100,7 +100,7 @@ const recoveryRequest = (value: unknown): { id: string } => {
 const responseProvider = (value: unknown): SelfTestProvider | undefined =>
   value === undefined
     ? "codex"
-    : value === "codex" || value === "dsh"
+    : value === "codex" || value === "dsh" || value === "zcode"
       ? value
       : undefined;
 

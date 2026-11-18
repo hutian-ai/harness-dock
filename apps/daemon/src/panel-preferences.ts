@@ -11,7 +11,7 @@ import { withOperationOwner } from "./operation-owner.ts";
 
 export interface PendingTest {
   config: string;
-  provider: "codex" | "dsh";
+  provider: "codex" | "dsh" | "zcode";
   id: string;
 }
 export type PanelAppearance = "system" | "light" | "dark";
@@ -79,7 +79,7 @@ function pending(value: unknown): PendingTest | undefined {
     !isAbsolute(item.config ?? "") ||
     item.config.includes("\0") ||
     !id.safeParse(item.id).success ||
-    !["codex", "dsh"].includes(item.provider) ||
+    !["codex", "dsh", "zcode"].includes(item.provider) ||
     Object.keys(item).some((key) => !["config", "provider", "id"].includes(key))
   )
     throw new Error("invalid_panel_preferences");
@@ -89,7 +89,7 @@ function pending(value: unknown): PendingTest | undefined {
 export async function panelPreferences(
   operation: PanelPreferenceOperation,
   config: string,
-  provider?: "codex" | "dsh",
+  provider?: "codex" | "dsh" | "zcode",
   testId?: string,
   home = homedir(),
   appearance?: PanelAppearance,

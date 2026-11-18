@@ -1,9 +1,58 @@
 /** Public JSON contracts. No provider implementation or application domain types. */
 export const MAX_PROMPT_BYTES = 8 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_IMAGES_BYTES = 16 * 1024 * 1024;
+/** Inline ACP image input; data is pure base64, never a path or URL. */
+export interface DeviceImageInput {
+  mediaType: string;
+  data: string;
+}
+/** Shared client/device admission; does not decode or retain binary copies. */
+export function validatePromptInput(input: {
+  prompt: unknown;
+  attachments?: unknown;
+}): void {
+  const images = input.attachments;
+  if (images !== undefined && (!Array.isArray(images) || images.length > 64))
+    throw new Error("invalid_image_input");
+  let total = 0;
+  for (const image of images ?? []) {
+    if (
+      !image ||
+      typeof image !== "object" ||
+      Array.isArray(image) ||
+      Object.keys(image).some((key) => !["mediaType", "data"].includes(key)) ||
+      typeof image.mediaType !== "string" ||
+      image.mediaType.length > 128 ||
+      !/^image\/[a-zA-Z0-9.+-]+$/.test(image.mediaType) ||
+      typeof image.data !== "string" ||
+      !image.data.length ||
+      image.data.length > 4 * Math.ceil(MAX_IMAGE_BYTES / 3) ||
+      image.data.length % 4 !== 0 ||
+      /[^A-Za-z0-9+/=]/.test(image.data) ||
+      !/^[^=]*={0,2}$/.test(image.data)
+    )
+      throw new Error("invalid_image_input");
+    const bytes =
+      (image.data.length / 4) * 3 -
+      (image.data.endsWith("==") ? 2 : image.data.endsWith("=") ? 1 : 0);
+    total += bytes;
+    if (bytes > MAX_IMAGE_BYTES || total > MAX_IMAGES_BYTES)
+      throw new Error("image_input_too_large");
+  }
+  if (
+    typeof input.prompt !== "string" ||
+    (!input.prompt.trim() && !images?.length) ||
+    new TextEncoder().encode(input.prompt).length > MAX_PROMPT_BYTES
+  )
+    throw new Error("invalid_prompt");
+}
 export type DeviceExecutionState =
   "running" | "completed" | "cancelled" | "failed" | "unknown";
 export interface DeviceProviderCapabilities {
   protocol: "acp";
+  /** Actual ACP initialization; absent means image input is unavailable. */
+  promptCapabilities?: { image: boolean };
   sessionResume: "native" | "unsupported";
   resultQuery: "native" | "unsupported";
   exactFinalAnswer: boolean;
@@ -113,6 +162,7 @@ export interface DeviceExecuteInput {
   runId: string;
   sessionKey?: string;
   prompt: string;
+  attachments?: DeviceImageInput[];
   model?: string;
   /** Provider options. Codex accepts nativeMemory: "disabled" for caller-owned memory;
    * omitted preserves native defaults. This does not restrict filesystem access. */

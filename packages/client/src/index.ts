@@ -23,6 +23,7 @@ export type {
   DeviceProvider,
   DeviceProviderCapabilities,
   DeviceExecuteInput,
+  DeviceImageInput,
   DeviceExecutionState,
   DeviceExecutionResult,
   DeviceExecutionResponse,

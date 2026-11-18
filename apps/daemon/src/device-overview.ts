@@ -76,7 +76,7 @@ export function readDeviceOverview(
   const counts = { total: 0, running: 0, unknown: 0, ended: 0 };
   const executions: ExecutionOverview[] = [];
   const usage = new Map<string, ProviderUsageOverview>(
-    ["codex", "dsh"].map((provider) => [
+    ["codex", "dsh", "zcode"].map((provider) => [
       provider,
       { provider, executions: 0, reportedExecutions: 0 },
     ]),

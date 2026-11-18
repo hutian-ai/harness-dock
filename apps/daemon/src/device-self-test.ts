@@ -15,7 +15,7 @@ import {
 import { join } from "node:path";
 import { id as uuid } from "@harness-dock/protocol";
 
-export type SelfTestProvider = "codex" | "dsh";
+export type SelfTestProvider = "codex" | "dsh" | "zcode";
 export interface SelfTestSnapshot {
   id: string;
   runId: string;
@@ -74,7 +74,8 @@ function snapshot(
     item.runId !== item.id ||
     (item.provider !== undefined &&
       item.provider !== "codex" &&
-      item.provider !== "dsh") ||
+      item.provider !== "dsh" &&
+      item.provider !== "zcode") ||
     (item.provider ?? "codex") !== provider ||
     !uuid.safeParse(item.daemonId).success ||
     !["running", "passed", "failed", "unknown"].includes(String(item.state)) ||
@@ -117,7 +118,7 @@ export class DeviceSelfTest {
   ) {
     if (!uuid.safeParse(daemonId).success)
       throw new Error("invalid_self_test_id");
-    if (provider !== "codex" && provider !== "dsh")
+    if (provider !== "codex" && provider !== "dsh" && provider !== "zcode")
       throw new Error("invalid_self_test_provider");
     this.#stateDir = stateDir;
     this.#daemonId = daemonId;
@@ -159,7 +160,11 @@ export class DeviceSelfTest {
     if (this.#storageFault) throw storageError();
     let peer: SelfTestSnapshot | undefined;
     try {
-      peer = this.#read(this.#provider === "codex" ? "dsh" : "codex");
+      for (const provider of ["codex", "dsh", "zcode"] as const) {
+        if (provider === this.#provider) continue;
+        const other = this.#read(provider);
+        if (other?.id === id) peer = other;
+      }
     } catch {
       this.#storageFault = true;
       throw storageError();
@@ -288,7 +293,7 @@ export class DeviceSelfTest {
   #pathFor(provider: SelfTestProvider): string {
     return join(
       this.#stateDir,
-      provider === "codex" ? "self-test.json" : "self-test-dsh.json",
+      provider === "codex" ? "self-test.json" : `self-test-${provider}.json`,
     );
   }
 

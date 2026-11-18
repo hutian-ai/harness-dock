@@ -55,6 +55,7 @@ impl Panel {
             match key {
                 "codex" => "Codex",
                 "dsh" => "DeepSeek Harness",
+                "zcode" => "ZCode",
                 _ => "Harness",
             }
             .to_owned()
@@ -219,7 +220,9 @@ impl Panel {
                     ),
                     _ => ("测试响应".into(), None),
                 };
-            let detail = if key == "dsh" {
+            let detail = if key == "zcode" {
+                "将发送一条简短测试请求，会使用 ZCode 原生账户额度。工具操作保留审批，结果不明时不会自动重发。"
+            } else if key == "dsh" {
                 "将发送一条简短测试请求，会使用模型额度。测试沿用 DeepSeek Harness 的原生权限，不提供只读保证。结果不明时不会自动重发。"
             } else {
                 "将发送一条简短测试请求，会使用模型额度。测试使用 Codex 的原生只读模式。结果不明时不会自动重发。"

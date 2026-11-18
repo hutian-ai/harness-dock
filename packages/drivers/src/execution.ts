@@ -1,5 +1,6 @@
 import type { CodexEvent } from "./codex-events.ts";
 import type { ElicitationContentValue } from "@agentclientprotocol/sdk";
+import type { ImageInput } from "./acp-input.ts";
 
 export type NativeInteractionResponse =
   | { optionId: string }
@@ -79,6 +80,7 @@ export function nativeElicitationResponse(
 export interface HarnessExecutionInput {
   runId: string;
   prompt: string;
+  attachments?: ImageInput[];
   resumeThreadId?: string;
   previousRunId?: string;
   signal: AbortSignal;

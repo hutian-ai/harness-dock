@@ -18,7 +18,8 @@
     "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/server": "2.3.0",
     "acpx": "0.22.0",
-    "execa": "10.0.1"
+    "execa": "10.0.1",
+    "zcode-acp-server": "0.88.0"
   },
   "files": [
     "dist",

@@ -26,6 +26,7 @@ import {
 } from "./native-permission-modes.ts";
 import { decodeCodexEvents } from "./codex-events.ts";
 import { AcpUpdates } from "./acp-updates.ts";
+import { AcpInitialization } from "./acp-input.ts";
 import { codexControl } from "./codex-control.ts";
 import { codexAdapterEnvironment } from "./codex-policy.ts";
 import { observeStartup, startStartupSpan } from "./startup-trace.ts";
@@ -55,6 +56,7 @@ export interface CodexModel {
   serviceTiers: string[];
 }
 export interface CodexInspection {
+  promptCapabilities?: { image: boolean };
   /** Native probe-session options, never written back to the user configuration. */
   configOptions?: unknown;
   desktopHostState?: "connected" | "disabled" | "unavailable";
@@ -159,6 +161,7 @@ export class CodexExecutor {
   private executing = false;
   private startupRunId?: string;
   private readonly updates = new AcpUpdates();
+  private readonly initialization = new AcpInitialization();
   private readonly startupSpans = new Map<
     string,
     ReturnType<typeof startStartupSpan>
@@ -168,6 +171,7 @@ export class CodexExecutor {
     "onAcpMessage" | "processLifecycle"
   > = {
     onAcpMessage: (direction, value) => {
+      this.initialization.observe(direction, value);
       this.updates.observe(direction, value);
       if (!this.startupRunId) return;
       const message = object(value),
@@ -271,7 +275,11 @@ export class CodexExecutor {
     await rename(temporary, target);
   }
   async inspect(signal: AbortSignal): Promise<CodexInspection> {
-    const runtime = this.runtimeFactory(this.config);
+    const initialization = new AcpInitialization();
+    const runtime = this.runtimeFactory(this.config, undefined, {
+      onAcpMessage: (direction, value) =>
+        initialization.observe(direction, value),
+    });
     try {
       // Inventory never resumes an empty native thread: Codex may not persist it until the first turn.
       const previous = await runtime.findSession({
@@ -322,6 +330,7 @@ export class CodexExecutor {
       const status = await runtime.getStatus({ handle, signal });
       return {
         models,
+        promptCapabilities: initialization.promptCapabilities,
         desktopHostState,
         configOptions: status.details?.configOptions,
         ...nativePermissionModes(status.details?.configOptions),
@@ -421,6 +430,7 @@ export class CodexExecutor {
         fingerprint: hash(
           JSON.stringify({
             prompt: input.prompt,
+            attachments: input.attachments,
             model: input.model,
             effort: input.effort,
             serviceTier: input.serviceTier,
@@ -493,6 +503,7 @@ export class CodexExecutor {
             signal,
           });
         });
+        this.initialization.assertImages(input.attachments);
         await input.onReady(threadId);
         input.signal.throwIfAborted();
         this.finishStartup();
@@ -502,6 +513,7 @@ export class CodexExecutor {
           handle,
           requestId: input.runId,
           text: input.prompt,
+          attachments: input.attachments,
           mode: "prompt",
           signal,
           onPermissionRequest: async (request, context) => {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import type { DeviceImageInput } from "@harness-dock/protocol";
 import { ServerClient, type ServerClientOptions } from "./server-client.ts";
 import { loadClientOptions } from "./onboarding.ts";
 import {
@@ -15,6 +16,7 @@ export interface DockExecutionHandle {
 }
 export interface DockRunOptions {
   prompt: string;
+  attachments?: DeviceImageInput[];
   /** Use a new private path per task. An existing receipt prevents resubmission. */
   receipt: string;
   nodeId?: string;
@@ -53,6 +55,11 @@ export class Dock {
       provider: options.provider ?? "codex",
       runId: randomUUID(),
       prompt: options.prompt,
+      ...(options.attachments === undefined
+        ? {}
+        : {
+            attachments: options.attachments.map((image) => ({ ...image })),
+          }),
       ...(options.model === undefined ? {} : { model: options.model }),
     };
     const receipt = resolve(options.receipt);

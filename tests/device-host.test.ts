@@ -77,6 +77,7 @@ test(
       },
       createProviderAdapters(() => ({
         inspect: async () => ({
+          promptCapabilities: { image: true },
           models: [{ id: "synthetic", efforts: [], serviceTiers: [] }],
           config: {
             sandbox: "workspace-write",
@@ -184,7 +185,12 @@ test(
     await rm(growth);
     await host.release("capacity");
     await host.prepare({ runId: "approval" });
-    const first = host.execute(request("approval"));
+    const imageRequest = {
+      ...request("approval"),
+      prompt: "",
+      attachments: [{ mediaType: "image/png", data: "YWJj" }],
+    };
+    const first = host.execute(imageRequest);
     await waiting.promise;
     await assert.rejects(host.refreshProviderDetails(), /device_busy/);
     assert.deepEqual(
@@ -192,7 +198,18 @@ test(
       [{ id: "synthetic", efforts: [] }],
       "cached capabilities survive busy refusal",
     );
-    const replay = host.execute(request("approval"));
+    assert.deepEqual(
+      inputs.get("approval")!.attachments,
+      imageRequest.attachments,
+    );
+    const replay = host.execute(imageRequest);
+    await assert.rejects(
+      host.execute({
+        ...imageRequest,
+        attachments: [{ mediaType: "image/png", data: "ZGVm" }],
+      }),
+      /execution_identity_conflict/,
+    );
     await assert.rejects(
       host.prepare({ runId: "same-session", sessionKey: "approval" }),
       /session_busy/,

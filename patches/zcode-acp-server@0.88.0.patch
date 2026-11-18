@@ -1,0 +1,115 @@
+diff --git a/dist/config/options.js b/dist/config/options.js
+index 9ff8048f5694950edaf1e36fb4a09fcf21328961..0252cb2370b264d191448b5b99e29d994f8a07b0 100644
+--- a/dist/config/options.js
++++ b/dist/config/options.js
+@@ -727,7 +727,11 @@ export async function buildConfigOptions(server, zcodeSid, receiverRoot) {
+             // refresh vehicle: every rebuild (switch, credential change, config_
+             // option_update) re-attaches it, so the provider list stays live for
+             // the whole session lifetime. See docs/CONFIG-OPTIONS.md.
+-            _meta: { zcode: buildProviderMeta(currentProvider, localModels) },
++            _meta: { zcode: { ...buildProviderMeta(currentProvider, localModels),
++                ...(snapshot === undefined ? {} : { modelCapabilities: snapshot.map(m => ({
++                    id: formatModelValue(m.providerId, m.modelId), efforts: m.levels ?? [],
++                })) }),
++            } },
+         },
+         {
+             id: "mode",
+@@ -793,6 +797,56 @@ function providerDisplayNames(localModels) {
+  * entitled models for already-enabled providers so `session/new` matches
+  * `session/set_config_option` synchronously before the cold probe finishes.
+  */
++// Read-only fallback for bundled account providers on native versions without
++// an audited deferred-session probe. Never infer another model's thought menu.
++// Follow native ModelConfigRules order; decline personal/legacy overrides rather
++// than claim their effective registry can be reconstructed from the builtin file.
++function builtinAccountEfforts(providerId, modelId) {
++    const table = readBuiltinTable()?.table;
++    if (table?.schemaVersion !== 1) return undefined;
++    const config = table.config;
++    const provider = config?.providerConfigRules?.providerRules?.find(r => r.providerId === providerId)?.config;
++    if (provider?.access?.type !== "zhipu-account" || !provider.builtinModelIds?.includes(modelId)) return undefined;
++    const personal = readPersonalProviderConfig()?.config;
++    const sameProvider = r => configProviderIdFor(r.providerId) === configProviderIdFor(providerId);
++    if (personal?.providerConfigRules?.providerRules?.some(r => sameProvider(r) && Object.keys(r.config ?? {}).some(key => key !== "modelOrder")) ||
++        [...(personal?.modelConfigRules?.providerModelRules ?? []), ...(personal?.modelConfigRules?.manualProviderModelRules ?? [])]
++            .some(r => sameProvider(r) && r.modelId === modelId)) return undefined;
++    try {
++        if (readConfig().provider?.[configProviderIdFor(providerId)]?.models?.[modelId]) return undefined;
++    } catch { return undefined; }
++    const rules = config?.modelConfigRules;
++    if (!rules) return undefined;
++    let levels;
++    const match = (pattern, value, insensitive = false) => typeof pattern === "string" && typeof value === "string" &&
++        new RegExp(`^(?:${pattern})$`, insensitive ? "i" : undefined).test(value);
++    let baseUrl;
++    try {
++        const url = new URL(provider.api?.baseUrl);
++        const suffix = `${url.search}${url.hash}`;
++        const raw = url.toString();
++        baseUrl = (suffix ? raw.slice(0, -suffix.length) : raw).replace(/\/+$/, "") + suffix;
++    } catch {}
++    const apply = rule => {
++        const specs = rule.config?.optionSpecs;
++        if (specs === null || specs?.reasoningLevel === null) levels = [];
++        else if (specs?.reasoningLevel?.values !== undefined) levels = specs.reasoningLevel.values ?? [];
++    };
++    try {
++        for (const rule of rules.modelRules ?? [])
++            if (match(rule.modelMatch, modelId, true)) apply(rule);
++        for (const rule of rules.modelApiRules ?? [])
++            if (match(rule.modelMatch, modelId, true) && (rule.apiTypeMatch === undefined || match(rule.apiTypeMatch, provider.api?.type))) apply(rule);
++        for (const rule of rules.providerSiteRules ?? [])
++            if (match(rule.modelMatch, modelId, true) && (rule.apiTypeMatch === undefined || match(rule.apiTypeMatch, provider.api?.type)) && match(rule.baseUrlMatch, baseUrl)) apply(rule);
++        // Account providers currently have no template. Unknown composition is
++        // deliberately not projected as a definitive capability declaration.
++        if (provider.templateId) return undefined;
++        for (const rule of rules.builtinProviderModelRules ?? [])
++            if (rule.providerId === providerId && rule.modelId === modelId) apply(rule);
++    } catch { return undefined; }
++    return Array.isArray(levels) && levels.every(v => typeof v === "string") ? levels : undefined;
++}
+ function canonicalizeInitialModelOption(options) {
+     const localModels = loadAllModels();
+     if (localModels.length === 0)
+@@ -830,7 +884,14 @@ function canonicalizeInitialModelOption(options) {
+     const currentValue = choices.some((choice) => choice.value === mappedCurrent)
+         ? mappedCurrent
+         : (choices[0]?.value ?? existing.currentValue);
+-    options[index] = { ...existing, currentValue, options: choices };
++    options[index] = { ...existing, currentValue, options: choices,
++        _meta: { ...existing._meta, zcode: { ...existing._meta?.zcode,
++            modelCapabilities: models.flatMap(m => {
++                const efforts = builtinAccountEfforts(m.providerId, m.modelId);
++                return efforts === undefined ? [] : [{ id: formatModelValue(m.providerId, m.modelId), efforts }];
++            }),
++        } },
++    };
+     return options;
+ }
+ /** Apply a validated, ephemeral create snapshot to a lazy session's initial menu. */
+@@ -868,7 +929,23 @@ export async function buildInitialConfigOptions(server, receiverRoot, result) {
+     const index = options.findIndex((option) => option.id === "model");
+     const existing = options[index];
+     if (index >= 0 && existing?.type === "select")
+-        options[index] = { ...existing, currentValue, options: choices };
++        options[index] = {
++            ...existing, currentValue, options: choices,
++            _meta: {
++                ...existing._meta,
++                zcode: {
++                    ...existing._meta?.zcode,
++                    // Native per-model catalog; never copy the active model's choices.
++                    modelCapabilities: available.slice(0, 256).map(entry => ({
++                        id: formatModelValue(entry.ref.providerId, entry.ref.modelId),
++                        efforts: (entry.reasoning?.levels ?? [])
++                            .map(level => level.value)
++                            .filter(value => typeof value === "string" && value.length > 0 && value.length <= 64)
++                            .slice(0, 32),
++                    })),
++                },
++            },
++        };
+     return options;
+ }
+ /**

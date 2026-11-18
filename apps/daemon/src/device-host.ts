@@ -41,7 +41,7 @@ import {
 import { ObservationWriter } from "./observation-writer.ts";
 import { providerDetails } from "./provider-details.ts";
 import { deviceBootIdentity } from "./device-boot.ts";
-import { MAX_PROMPT_BYTES } from "@harness-dock/protocol";
+import { validatePromptInput } from "@harness-dock/protocol";
 import {
   DeviceSelfTest,
   type SelfTestOutcome,
@@ -124,6 +124,7 @@ function executionInput(value: unknown): DeviceExecuteInput {
         "runId",
         "sessionKey",
         "prompt",
+        "attachments",
         "model",
         "config",
         "resumeSessionId",
@@ -133,17 +134,16 @@ function executionInput(value: unknown): DeviceExecuteInput {
       ].includes(key)
     )
       throw new Error("unsupported_execution_field");
-  if (input.provider !== "codex" && input.provider !== "dsh")
+  if (
+    input.provider !== "codex" &&
+    input.provider !== "dsh" &&
+    input.provider !== "zcode"
+  )
     throw new Error("unsupported_provider");
   identity(input.runId);
   for (const key of ["sessionKey", "model", "resumeSessionId", "previousRunId"])
     if (input[key] !== undefined) identity(input[key]);
-  if (
-    typeof input.prompt !== "string" ||
-    !input.prompt ||
-    Buffer.byteLength(input.prompt) > MAX_PROMPT_BYTES
-  )
-    throw new Error("invalid_prompt");
+  validatePromptInput({ prompt: input.prompt, attachments: input.attachments });
   if (input.config !== undefined) object(input.config);
   if (
     input.retainSession !== undefined &&
@@ -229,7 +229,7 @@ export class DeviceHost {
       config.resources,
     );
     this.#store.expireDetails();
-    for (const provider of ["codex", "dsh"] as const)
+    for (const provider of ["codex", "dsh", "zcode"] as const)
       this.#selfTests.set(
         provider,
         new DeviceSelfTest(
@@ -401,10 +401,10 @@ export class DeviceHost {
     const states: Record<
       ProviderKey,
       "idle" | "connecting" | "executing" | "checking" | "unknown"
-    > = { codex: "idle", dsh: "idle" };
+    > = { codex: "idle", dsh: "idle", zcode: "idle" };
     for (const runId of this.#store.unresolved()) {
       const provider = this.#store.get(runId)?.provider;
-      if (provider === "codex" || provider === "dsh")
+      if (provider === "codex" || provider === "dsh" || provider === "zcode")
         states[provider] = "unknown";
     }
     for (const [provider, test] of this.#selfTests)
@@ -1043,6 +1043,11 @@ export class DeviceHost {
                 throw new Error("provider_unavailable");
               if (input.model && !available.models.includes(input.model))
                 throw new Error("model_unavailable");
+              if (
+                input.attachments?.length &&
+                available.capabilities?.promptCapabilities?.image !== true
+              )
+                throw new Error("image_input_unsupported");
               const config = input.config ?? {};
               probeAdapter.validate({ model: input.model, config });
               const adapterKey = `${input.provider}:${key}`;
@@ -1296,6 +1301,7 @@ export class DeviceHost {
                       runId: input.runId,
                       sessionKey: prepared.sessionKey,
                       prompt: input.prompt,
+                      attachments: input.attachments,
                       model: input.model,
                       config,
                       resumeSessionId: input.resumeSessionId,

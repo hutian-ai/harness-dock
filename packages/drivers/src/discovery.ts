@@ -2,9 +2,12 @@ import { homedir } from "node:os";
 import { discoverCodexInstallation } from "./codex-environment.ts";
 import { discoverDshInstallation } from "./dsh-environment.ts";
 
+import { discoverZcodeInstallation } from "./zcode-environment.ts";
+
 const providerDiscovery = {
   codex: discoverCodexInstallation,
   dsh: discoverDshInstallation,
+  zcode: discoverZcodeInstallation,
 };
 export type ProviderKey = keyof typeof providerDiscovery;
 export const providerKeys = Object.freeze(

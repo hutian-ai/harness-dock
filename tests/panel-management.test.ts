@@ -452,6 +452,7 @@ test("panel projects discovered installations and test capabilities without conf
     providers: {
       codex: { executable, home: root },
       dsh: { executable, home: root },
+      zcode: { disabled: true },
     },
   };
   await writeFile(paths.configPath, JSON.stringify(config), { mode: 0o600 });
@@ -505,6 +506,7 @@ test("panel projects discovered installations and test capabilities without conf
         "native-echo",
         dshSupported,
       ],
+      ["zcode", "disabled", "native-echo", false],
     ],
   );
   for (const provider of state.providers.filter(

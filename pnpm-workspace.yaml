@@ -6,7 +6,11 @@ syncInjectedDepsAfterScripts:
   - build
 allowBuilds:
   esbuild: true
+  zcode-acp-server: false
 patchedDependencies:
   "@agentclientprotocol/codex-acp@2.3.0": patches/@agentclientprotocol__codex-acp@2.3.0.patch
   "@openclaw/fs-safe@0.27.2": patches/@openclaw__fs-safe@0.27.2.patch
   acpx@0.22.0: patches/acpx@0.22.0.patch
+  zcode-acp-server@0.88.0: patches/zcode-acp-server@0.88.0.patch
+minimumReleaseAgeExclude:
+  - zcode-acp-server@0.88.0

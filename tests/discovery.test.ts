@@ -63,7 +63,7 @@ test(
     });
     assert.deepEqual(
       providers.map((provider) => provider.key),
-      ["codex", "dsh"],
+      ["codex", "dsh", "zcode"],
     );
     const dsh = providers[1]!;
     assert.equal(dsh.status, "installed");

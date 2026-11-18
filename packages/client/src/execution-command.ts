@@ -2,7 +2,7 @@ import { mkdir, open, readFile, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   id,
-  MAX_PROMPT_BYTES,
+  validatePromptInput,
   type DeviceExecuteInput,
   type DeviceExecutionCallback,
   type DeviceExecutionResponse,
@@ -14,7 +14,7 @@ export { MAX_PROMPT_BYTES } from "@harness-dock/protocol";
 export const DEFAULT_EXECUTION_TIMEOUT_MS = 60 * 60_000;
 export type RunInput = Pick<
   DeviceExecuteInput,
-  "provider" | "runId" | "prompt" | "model"
+  "provider" | "runId" | "prompt" | "model" | "attachments"
 >;
 export type ExecutionPeer = Pick<
   ServerPeer,
@@ -37,7 +37,7 @@ export interface RunReceipt {
   nodeId: string;
   runId: string;
   createdAt: string;
-  input: RunInput;
+  input: RunInput & Pick<DeviceExecuteInput, "config" | "tools">;
 }
 
 export function validateRunInput(input: RunInput): void {
@@ -48,12 +48,7 @@ export function validateRunInput(input: RunInput): void {
     input.provider.length > 128
   )
     throw new Error("invalid_provider");
-  if (
-    typeof input.prompt !== "string" ||
-    !input.prompt.trim() ||
-    Buffer.byteLength(input.prompt) > MAX_PROMPT_BYTES
-  )
-    throw new Error("invalid_prompt: provide nonempty text up to 8 MiB");
+  validatePromptInput(input);
   if (
     input.model !== undefined &&
     (typeof input.model !== "string" || !input.model.trim())
@@ -61,12 +56,40 @@ export function validateRunInput(input: RunInput): void {
     throw new Error("invalid_model");
 }
 
+function validateReceiptInput(input: Record<string, unknown>): void {
+  if (
+    Object.keys(input).some(
+      (key) =>
+        ![
+          "provider",
+          "runId",
+          "prompt",
+          "model",
+          "config",
+          "tools",
+          "attachments",
+        ].includes(key),
+    )
+  )
+    throw new Error("invalid_run_receipt");
+  for (const key of ["config", "tools"]) {
+    if (
+      input[key] !== undefined &&
+      (input[key] === null ||
+        typeof input[key] !== "object" ||
+        Array.isArray(input[key]))
+    )
+      throw new Error("invalid_run_receipt");
+  }
+  validateRunInput(input as unknown as RunInput);
+}
+
 /** Immutable caller input, never a claim that the device admitted or completed it. */
 export async function writeRunReceipt(
   path: string,
   receipt: RunReceipt,
 ): Promise<void> {
-  validateRunInput(receipt.input);
+  validateReceiptInput(receipt.input);
   id.parse(receipt.clientId);
   id.parse(receipt.nodeId);
   id.parse(receipt.runId);
@@ -100,18 +123,14 @@ export async function readRunReceipt(path: string): Promise<RunReceipt> {
     throw new Error("invalid_run_receipt_permissions");
   const value = record(JSON.parse(await readFile(path, "utf8"))),
     input = record(value.input);
-  if (
-    value.version !== 1 ||
-    typeof value.createdAt !== "string" ||
-    Object.keys(input).some(
-      (key) => !["provider", "runId", "prompt", "model"].includes(key),
-    )
-  )
+  if (value.version !== 1 || typeof value.createdAt !== "string")
     throw new Error("invalid_run_receipt");
+  // Interactive callers freeze these public execution options too. Status only
+  // reads the original identity; it never submits the stored input again.
+  validateReceiptInput(input);
   id.parse(value.clientId);
   id.parse(value.nodeId);
   id.parse(value.runId);
-  validateRunInput(input as unknown as RunInput);
   if (value.runId !== input.runId) throw new Error("invalid_run_receipt");
   return value as unknown as RunReceipt;
 }
@@ -201,6 +220,12 @@ export async function runTask(
       Array.isArray(inventory.providers) ? inventory.providers.map(record) : []
     ).find((value) => value.key === input.provider);
     if (provider?.status !== "ready") throw new Error("provider_not_ready");
+    if (
+      input.attachments?.length &&
+      record(record(provider.capabilities ?? {}).promptCapabilities ?? {})
+        .image !== true
+    )
+      throw new Error("image_input_unsupported");
     if (
       input.model !== undefined &&
       (!Array.isArray(provider.models) ||

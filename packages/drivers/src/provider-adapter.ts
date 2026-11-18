@@ -1,9 +1,11 @@
+import { ZcodeHost, type ZcodeHostEnvironment } from "./zcode.ts";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { CodexHost, type CodexHostEnvironment } from "./codex-host.ts";
 import type { CodexInspection } from "./codex.ts";
 import { DshHost, type DshHostEnvironment, type DshInspection } from "./dsh.ts";
 import type { DiscoveredProvider } from "./discovery.ts";
+import type { ImageInput } from "./acp-input.ts";
 import type {
   NativePermissionRequest,
   NativePermissionDecision,
@@ -17,6 +19,7 @@ export type CodexHostPort = Pick<
 export type DshHostPort = Pick<DshHost, "inspect" | "execute" | "close">;
 export interface ProviderCapabilities {
   protocol: "acp";
+  promptCapabilities?: { image: boolean };
   sessionResume: "native" | "unsupported";
   resultQuery: "native" | "unsupported";
   exactFinalAnswer: boolean;
@@ -34,6 +37,7 @@ export interface ProviderExecution {
   runId: string;
   sessionKey: string;
   prompt: string;
+  attachments?: ImageInput[];
   model?: string;
   config: Record<string, unknown>;
   resumeSessionId?: string;
@@ -102,6 +106,8 @@ export function createProviderAdapters(
   let inspectionOwnsHost = false;
   return {
     create(provider, options, scope) {
+      if (provider.key === "zcode")
+        return createZcodeAdapter(provider, options);
       if (provider.key === "dsh")
         return createDshAdapter(provider, { ...options, dsh: dsh() });
       if (scope === "inspection") inspectionOwnsHost = true;
@@ -163,6 +169,7 @@ function createDshAdapter(
         inspection,
         capabilities: {
           protocol: "acp",
+          promptCapabilities: inspection.promptCapabilities,
           browser: "unverified",
           sessionResume: inspection.sessionResume ? "native" : "unsupported",
           resultQuery: "unsupported",
@@ -193,6 +200,7 @@ function createDshAdapter(
         environment: selectedEnvironment as DshHostEnvironment,
         runId: input.runId,
         prompt: input.prompt,
+        attachments: input.attachments,
         model: input.model,
         effort:
           typeof input.config.effort === "string"
@@ -213,6 +221,104 @@ function createDshAdapter(
     },
     close: () => options.dsh.close(),
     forgetSession: () => options.dsh.close(),
+  };
+}
+
+function createZcodeAdapter(
+  provider: DiscoveredProvider,
+  options: ProviderAdapterOptions,
+): ProviderAdapter {
+  const host = new ZcodeHost();
+  let inspection = options.inspection as DshInspection | undefined;
+  const environment = (
+    input: Parameters<ProviderAdapter["environment"]>[0],
+  ): ZcodeHostEnvironment => ({
+    cwd: input.workdir,
+    zcodeHome: provider.home!,
+    zcodeBin: provider.executable!,
+    stateDir: join(
+      options.stateDir,
+      "providers",
+      "zcode",
+      digest(input.sessionKey),
+      "execution",
+    ),
+    environment: options.environment,
+  });
+  return {
+    async inspect(signal) {
+      inspection = await host.inspect(
+        environment({
+          sessionKey: "probe",
+          workdir: options.cwd,
+          skillDirectory: "",
+          config: {},
+        }),
+        signal,
+      );
+      return {
+        models: inspection.models.map((model) => model.id),
+        inspection,
+        capabilities: {
+          protocol: "acp",
+          promptCapabilities: inspection.promptCapabilities,
+          browser: "unverified",
+          sessionResume: inspection.sessionResume ? "native" : "unsupported",
+          resultQuery: "unsupported",
+          exactFinalAnswer: false,
+          callerSkills: false,
+          permissionInteractions: ["options"],
+          desktopTools: "not_reported",
+        },
+      };
+    },
+    validate({ model, config }) {
+      if (Object.keys(config).some((key) => !["effort", "mode"].includes(key)))
+        throw new Error("unsupported_config");
+      const modeOption = inspection?.configOptions.find(
+        (o) => o && typeof o === "object" && "id" in o && o.id === "mode",
+      ) as { options?: { value: string }[] } | undefined;
+      validateMode(config, modeOption?.options);
+      const selected = inspection?.models.find(
+        (value) => value.id === (model ?? inspection?.currentModelId),
+      );
+      if (
+        config.effort !== undefined &&
+        (typeof config.effort !== "string" ||
+          !selected?.efforts.includes(config.effort))
+      )
+        throw new Error("configuration_unavailable");
+    },
+    environment,
+    async execute(input, selectedEnvironment) {
+      input.steering(null);
+      return host.execute({
+        environment: selectedEnvironment as ZcodeHostEnvironment,
+        runId: input.runId,
+        prompt: input.prompt,
+        attachments: input.attachments,
+        model: input.model,
+        mode:
+          typeof input.config.mode === "string" ? input.config.mode : undefined,
+        effort:
+          typeof input.config.effort === "string"
+            ? input.config.effort
+            : undefined,
+        resumeThreadId: input.resumeSessionId,
+        retainSession: input.retainSession,
+        signal: input.signal,
+        tools: {
+          name: input.tools?.name ?? "controller",
+          definitions: input.tools?.definitions ?? [],
+          invocation: input.invocation,
+        },
+        onReady: input.ready,
+        onEvent: (event) => input.observe("event", event),
+        permission: input.permission,
+      });
+    },
+    close: () => host.close(),
+    forgetSession: () => host.close(),
   };
 }
 
@@ -268,6 +374,7 @@ export function createProviderAdapter(
         inspection,
         capabilities: {
           protocol: "acp",
+          promptCapabilities: inspection.promptCapabilities,
           browser: "unverified",
           sessionResume: "native",
           resultQuery: "native",
@@ -306,6 +413,7 @@ export function createProviderAdapter(
         environment: selectedEnvironment as CodexHostEnvironment,
         runId: input.runId,
         prompt: input.prompt,
+        attachments: input.attachments,
         model: input.model,
         mode:
           typeof input.config.mode === "string" ? input.config.mode : undefined,

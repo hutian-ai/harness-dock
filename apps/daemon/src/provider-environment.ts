@@ -26,6 +26,7 @@ const discoveryVariables = new Set([
   "CODEX_HOME",
   "CODEX_CLI_PATH",
   "DSH_HOME",
+  "ZCODE_HOME",
   "NVM_DIR",
 ]);
 

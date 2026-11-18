@@ -93,6 +93,7 @@ for (const patch of [
   "acpx@0.22.0.patch",
   "@agentclientprotocol__codex-acp@2.3.0.patch",
   "@openclaw__fs-safe@0.27.2.patch",
+  "zcode-acp-server@0.88.0.patch",
 ])
   await copyFile(
     resolve("patches", patch),

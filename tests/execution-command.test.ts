@@ -204,19 +204,32 @@ test("a lost task response never repeats execution or releases resources", async
 });
 
 test("task preparation requires matching inventory identity and an available provider and explicit model", async () => {
-  for (const failure of ["node", "daemon", "provider", "model"] as const) {
+  for (const failure of [
+    "node",
+    "daemon",
+    "provider",
+    "model",
+    "image",
+  ] as const) {
     const value = fixture();
     if (failure === "node") value.inventory.nodeId = randomUUID();
     if (failure === "daemon") value.inventory.daemonId = randomUUID();
     if (failure === "provider")
       value.inventory.providers[0]!.status = "unavailable";
     const input =
-      failure === "model"
-        ? { ...value.input, model: "not-advertised" }
-        : value.input;
+      failure === "image"
+        ? {
+            ...value.input,
+            attachments: [{ mediaType: "image/png", data: "YWJj" }],
+          }
+        : failure === "model"
+          ? { ...value.input, model: "not-advertised" }
+          : value.input;
     await assert.rejects(runTask(value.peer, input), (error) => {
       assert.ok(error instanceof ExecutionCommandError, failure);
       assert.equal(error.executionAttempted, false, failure);
+      if (failure === "image")
+        assert.equal(error.message, "image_input_unsupported");
       return true;
     });
     assert.deepEqual(

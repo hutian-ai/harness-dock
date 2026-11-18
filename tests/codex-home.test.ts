@@ -167,7 +167,7 @@ test("Codex discovery honors the local installation and never substitutes a bund
   const providers = await discoverProviders(options);
   assert.deepEqual(
     providers.map((provider) => provider.key),
-    ["codex", "dsh"],
+    ["codex", "dsh", "zcode"],
   );
   const [found] = providers;
   assert.equal(found?.executable, await realpath(executable));

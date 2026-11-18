@@ -116,7 +116,7 @@ const request = z.strictObject({
   scope: z.enum(["connection", "installation"]).optional(),
   invitation: z.string().min(1).max(4096).optional(),
   testId: z.string().uuid().optional(),
-  provider: z.enum(["codex", "dsh"]).optional(),
+  provider: z.enum(["codex", "dsh", "zcode"]).optional(),
   enabled: z.boolean().optional(),
   selectedOnly: z.boolean().optional(),
   appearance: z.enum(["system", "light", "dark"]).optional(),
@@ -216,6 +216,13 @@ async function privateConfig(path: string) {
 
 // Named test implementations belong to the device. The panel renders their metadata.
 const selfTestProfiles = {
+  zcode: {
+    displayName: "ZCode",
+    experimental: true,
+    selfTestKind: "native-echo",
+    acceptanceDescription:
+      "通过本机 ZCode 与固定版本社区 ACP 适配器执行回显；使用原生账户额度，工具操作保留审批。",
+  },
   codex: {
     displayName: "Codex",
     experimental: false,

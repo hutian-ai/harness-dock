@@ -31,13 +31,14 @@ harness-dock-client run <client.json> (--prompt <text> | --prompt-file <file>)
   [--node-id <UUID>] [--provider codex] [--model <native-model>]
   [--run-id <UUID>] [--receipt <new-private-file>] [--timeout-ms <N>]
 harness-dock-client status <client.json> --node-id <UUID> --run-id <UUID>
-harness-dock-client status <client.json> --receipt <request-record.json>
+harness-dock-client status <client.json> --receipt <request-record.json> [--reconcile]
 harness-dock-client --version
 run sends one real task and can use model quota. Native approvals prompt on an interactive stdin; otherwise they are denied. No automatic approvals.
 run saves the original request at .local/client-runs/<runId>.json before submitting. Existing receipts are never overwritten. Native model defaults are preserved unless --model is given.
 run writes progress/approvals to stderr and one result JSON to stdout. Exit 0: completed; 1: failed/cancelled, invalid input or not_submitted; 2: attempted execution with unknown/unconfirmed result. Default execute timeout: 3600000 ms (maximum 86400000).
 Ctrl-C/SIGTERM only stop observation (exit 130/143), not confirmed native cancellation. Query status with the original receipt; never automatically repeat run. Outputs are not automatically released.
 status only queries the original execution. A successful query is not proof of task completion; null means no stored evidence, not that nothing executed.
+status --reconcile also reads the original native turn when its stored state is unknown. It never submits a prompt or replays a tool or approval.
 test explicitly sends two synthetic model prompts and can use model quota. --approval requires a TTY and exposes only a synthetic test tool. It never auto-allows native permissions.
 Use a dedicated application credential: one application identity supports one active connection. doctor never replaces an existing application or device connection.`;
 
@@ -135,6 +136,7 @@ async function main(): Promise<void> {
       version: { type: "boolean" },
       json: { type: "boolean" },
       probe: { type: "boolean" },
+      reconcile: { type: "boolean" },
       "node-id": { type: "string" },
       "run-id": { type: "string" },
       model: { type: "string" },
@@ -158,7 +160,7 @@ async function main(): Promise<void> {
       nodes: ["json"],
       doctor: ["node-id", "probe", "json"],
       test: ["node-id", "model", "approval", "json"],
-      status: ["node-id", "run-id", "receipt", "json"],
+      status: ["node-id", "run-id", "receipt", "json", "reconcile"],
       run: [
         "node-id",
         "provider",
@@ -250,9 +252,23 @@ async function main(): Promise<void> {
               "device_offline: start its daemon and check its doctor",
             );
           if (command === "status") {
-            const snapshot = await peer.request("getExecution", {
-              runId: receipt?.runId ?? values["run-id"]!,
-            });
+            const runId = receipt?.runId ?? values["run-id"]!;
+            let snapshot = await peer.request("getExecution", { runId });
+            if (
+              values.reconcile &&
+              snapshot?.runId === runId &&
+              snapshot.state === "unknown"
+            ) {
+              try {
+                await peer.request("reconcile", { runId }, 45_000);
+                snapshot = await peer.request("getExecution", { runId });
+              } catch (error) {
+                // Preserve the stored observation when a native read is unavailable.
+                console.error(
+                  `native_reconciliation_unconfirmed: ${diagnosticError(error)}`,
+                );
+              }
+            }
             console.log(JSON.stringify(snapshot, null, 2));
             if (snapshot === null)
               console.error(

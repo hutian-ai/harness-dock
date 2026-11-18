@@ -31,11 +31,14 @@ export class AcpUpdates {
     sessionId: string;
     update: Record<string, unknown>;
     bytes: number;
+    afterPrompt: boolean;
   }[] = [];
   #bytes = 0;
   #sessionId?: string;
   #failure?: Error;
   #abort?: (error: Error) => void;
+  #promptId?: string | number;
+  #promptReturned = false;
 
   begin(sessionId: string, abort?: (error: Error) => void): void {
     this.end();
@@ -49,11 +52,30 @@ export class AcpUpdates {
     this.#sessionId = undefined;
     this.#failure = undefined;
     this.#abort = undefined;
+    this.#promptId = undefined;
+    this.#promptReturned = false;
   }
 
   observe(direction: string, value: unknown): void {
-    if (!this.#sessionId || this.#failure || direction !== "inbound") return;
+    if (!this.#sessionId || this.#failure) return;
     const message = object(value);
+    if (
+      direction === "outbound" &&
+      message.method === "session/prompt" &&
+      object(message.params).sessionId === this.#sessionId &&
+      (typeof message.id === "string" || typeof message.id === "number")
+    ) {
+      this.#promptId = message.id;
+      this.#promptReturned = false;
+    }
+    if (direction !== "inbound") return;
+    if (
+      this.#promptId !== undefined &&
+      message.id === this.#promptId &&
+      !("method" in message) &&
+      typeof object(message.result).stopReason === "string"
+    )
+      this.#promptReturned = true;
     if (message.method !== "session/update") return;
     const params = object(message.params),
       update = object(params.update);
@@ -97,6 +119,7 @@ export class AcpUpdates {
       sessionId: params.sessionId,
       update: JSON.parse(encoded),
       bytes,
+      afterPrompt: this.#promptReturned,
     });
     this.#bytes += bytes;
   }
@@ -138,7 +161,19 @@ export class AcpUpdates {
         };
       }
       if (this.#failure) throw this.#failure;
-      if (this.#pending.length) throw new Error("acp_update_order_mismatch");
+      // ACPX switches a retained session to its idle projection before the
+      // consumer necessarily drains this queue. Late session metadata then has
+      // no turn event. Only discard metadata beyond the matching prompt reply;
+      // unmatched text/tools and all in-turn drift still fail closed.
+      if (
+        this.#pending.some(
+          (raw) =>
+            !raw.afterPrompt ||
+            raw.sessionId !== this.#sessionId ||
+            String(raw.update.sessionUpdate).trim() !== "session_info_update",
+        )
+      )
+        throw new Error("acp_update_order_mismatch");
     } finally {
       this.end();
     }

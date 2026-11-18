@@ -149,6 +149,14 @@ test("DSH inspection reads opaque native models, effort and ACP capabilities wit
     assert.equal(value.currentModelId, model);
     assert.equal(value.sessionResume, true);
     assert.deepEqual(value.mcpCapabilities, { http: true });
+    assert.deepEqual(value.promptCapabilities, { image: false });
+    const rejected = await f.host.execute(
+      f.input({
+        attachments: [{ mediaType: "image/png", data: "YWJj" }],
+      }),
+    );
+    assert.equal(rejected.state, "failed");
+    assert.equal(rejected.error, "image_input_unsupported");
     assert.equal(
       (await f.requests()).some(
         (request) => request.method === "session/prompt",

@@ -61,3 +61,15 @@ notice entry. Review this supplement when updating Cargo.lock.
 The Codex and DeepSeek identification artwork retains the Lobe Icons MIT notice
 and brand attribution in `apps/gpui-panel/Resources/README.md`. The artwork does
 not imply endorsement or transfer brand rights.
+
+## ZCode ACP bridge
+
+The pinned package includes a local patch to preserve per-model reasoning
+capabilities and read bundled account-provider declarations without creating
+native probe sessions. See `patches/zcode-acp-server@0.88.0.patch`.
+
+The optional ZCode runtime uses `zcode-acp-server` 0.88.0 by the
+[ZCode ACP Server contributors](https://github.com/william0wang/zcode-acp),
+licensed under Apache-2.0. Its distributed package includes the upstream LICENSE.
+Dock uses the installed native ZCode engine; it does not redistribute that engine.
+The bridge is a community implementation, not an official Z.ai ACP interface.
