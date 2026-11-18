@@ -78,6 +78,7 @@ for (const [dependency, patch] of [
     "@agentclientprotocol__codex-acp@2.3.0.patch",
   ],
   ["@openclaw/fs-safe", "@openclaw__fs-safe@0.27.2.patch"],
+  ["zcode-acp-server", "zcode-acp-server@0.88.0.patch"],
 ]) {
   const packageDirectory = dirname(
     driverRequire.resolve(`${dependency}/package.json`),
@@ -93,6 +94,38 @@ for (const [dependency, patch] of [
     { cwd: packageDirectory, stdio: "inherit" },
   );
 }
+// Exercise the packaged stdio bridge without starting a native ZCode session.
+const bridgeHome = await mkdtemp(join(directory, "zcode-"));
+const bridgeEntry = driverRequire.resolve("zcode-acp-server");
+assert.throws(
+  () => createRequire(bridgeEntry).resolve("zcode-acp-martty/package.json"),
+  {
+    code: "MODULE_NOT_FOUND",
+  },
+);
+const handshake = execFileSync(process.execPath, [bridgeEntry], {
+  cwd: bridgeHome,
+  env: {
+    HOME: bridgeHome,
+    ZCODE_HOME: join(bridgeHome, "native"),
+    XDG_CONFIG_HOME: join(bridgeHome, "config"),
+    ZCODE_ACP_REMOTE: "0",
+  },
+  encoding: "utf8",
+  timeout: 15_000,
+  input:
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: 1, clientCapabilities: {} },
+    }) + "\n",
+});
+const response = JSON.parse(handshake);
+assert.equal(response.id, 1);
+assert.equal(response.result.protocolVersion, 1);
+assert.equal(response.result.agentInfo.name, "zcode-acp-server");
+
 // The SDK archive must install without the unpacked controller or a warm registry cache.
 await rm(join(directory, "controller"), { recursive: true });
 const consumer = join(directory, "consumer");

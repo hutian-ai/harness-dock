@@ -29,28 +29,25 @@
     "panel:check": "node --import tsx scripts/check-panel.ts",
     "client": "node --import tsx packages/client/src/cli.ts",
     "server": "node --import tsx apps/server/src/cli.ts",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
     "format": "prettier --write --ignore-unknown .",
     "format:check": "prettier --check --ignore-unknown .",
     "prepare": "husky",
-    "lint:staged": "lint-staged"
+    "lint:staged": "nano-staged"
   },
   "devDependencies": {
-    "@eslint/js": "9.39.4",
     "@modelcontextprotocol/client": "2.3.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.0",
     "acpx": "0.22.0",
-    "eslint": "9.39.4",
     "execa": "10.0.1",
-    "globals": "17.11.0",
     "husky": "9.1.7",
-    "lint-staged": "17.6.0",
+    "nano-staged": "1.0.2",
+    "oxlint": "1.94.0",
     "prettier": "3.9.6",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.68.0",
     "ws": "8.22.0"
   }
 }

@@ -7,6 +7,9 @@ syncInjectedDepsAfterScripts:
 allowBuilds:
   esbuild: true
   zcode-acp-server: false
+overrides:
+  # Dock launches dist/index.js (stdio ACP). Martty is used only by the interactive TUI.
+  "zcode-acp-server@0.88.0>zcode-acp-martty": "-"
 patchedDependencies:
   "@agentclientprotocol/codex-acp@2.3.0": patches/@agentclientprotocol__codex-acp@2.3.0.patch
   "@openclaw/fs-safe@0.27.2": patches/@openclaw__fs-safe@0.27.2.patch

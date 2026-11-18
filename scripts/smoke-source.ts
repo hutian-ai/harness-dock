@@ -151,7 +151,11 @@ try {
   configPath = initialized.configPath as string;
   const device = JSON.parse(await readFile(configPath, "utf8"));
   // No native installation, authentication, inherited account home or model call is used.
-  device.providers = { codex: { disabled: true }, dsh: { disabled: true } };
+  device.providers = {
+    codex: { disabled: true },
+    dsh: { disabled: true },
+    zcode: { disabled: true },
+  };
   await writeFile(configPath, JSON.stringify(device));
   const started = JSON.parse(await cli("daemon", "start", configPath));
   client = new ServerClient(await loadClientOptions(paths.clientPath));
@@ -168,6 +172,7 @@ try {
     [
       { key: "codex", status: "disabled" },
       { key: "dsh", status: "disabled" },
+      { key: "zcode", status: "disabled" },
     ],
   );
   const runId = randomUUID(),
@@ -244,5 +249,5 @@ try {
   }
 }
 console.log(
-  `PASS source smoke: source CLIs, pairing, background start/stop/restart, SDK connection, managed files and diagnostics. Codex and dsh disabled; no model execution. Evidence: ${relative(root, directory)}`,
+  `PASS source smoke: source CLIs, pairing, background start/stop/restart, SDK connection, managed files and diagnostics. Codex, dsh and ZCode disabled; no model execution. Evidence: ${relative(root, directory)}`,
 );
