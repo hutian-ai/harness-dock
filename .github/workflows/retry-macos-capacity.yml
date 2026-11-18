@@ -1,0 +1,69 @@
+name: Retry macOS runner capacity
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+
+concurrency:
+  group: retry-macos-capacity-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    if: >-
+      github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+      contains(fromJSON('["failure", "cancelled", "timed_out"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # This privileged workflow only inspects GitHub metadata. No checkout is needed.
+      - name: Retry an unassigned macOS job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="repos/$GITHUB_REPOSITORY"
+          run="$repo/actions/runs/$RUN_ID"
+          jobs=$(gh api "$run/attempts/$ATTEMPT/jobs?per_page=100")
+          job_id=$(jq -r --argjson attempt "$ATTEMPT" '.jobs[] | select(
+            .run_attempt == $attempt and .name == "Check and offline bundle (macos-15)" and
+            .labels == ["macos-15"] and (.conclusion | IN("cancelled", "failure", "timed_out")) and
+            (.runner_id // 0) == 0 and (.steps | length) == 0
+          ) | .id' <<< "$jobs")
+          if [[ -z "$job_id" ]]; then exit 0; fi
+
+          annotations=$(gh api "$repo/check-runs/$job_id/annotations?per_page=100")
+          if ! jq -e '
+            any(.[]; .message == "The job was not acquired by Runner of type hosted even after multiple attempts") and
+            any(.[]; .message | startswith("Due to capacity constraints, jobs targeting macOS arm64 runners"))
+          ' <<< "$annotations" > /dev/null; then exit 0; fi
+
+          # Avoid reviving a superseded run or duplicating an already-started attempt.
+          source_run=$(jq '.workflow_run' "$GITHUB_EVENT_PATH")
+          workflow_id=$(jq -r .workflow_id <<< "$source_run")
+          runs=$(gh api -X GET "$repo/actions/workflows/$workflow_id/runs" \
+            -f branch="$(jq -r .head_branch <<< "$source_run")" -F per_page=100)
+          latest_id=$(jq -r --argjson source "$source_run" 'first(.workflow_runs[] | select(
+            .head_repository.id == $source.head_repository.id and
+            ((.event == "pull_request") == ($source.event == "pull_request"))
+          ) | .id) // empty' <<< "$runs")
+          if [[ "$latest_id" != "$RUN_ID" ]]; then exit 0; fi
+          current=$(gh api "$run")
+          if ! jq -e --argjson attempt "$ATTEMPT" '
+            .status == "completed" and .run_attempt == $attempt
+          ' <<< "$current" > /dev/null; then exit 0; fi
+
+          if (( ATTEMPT >= 3 )); then
+            echo "::error::macOS runner capacity is still unavailable. CI run $RUN_ID has reached its retry limit."
+            exit 1
+          fi
+          gh api -X POST "$repo/actions/jobs/$job_id/rerun" --silent
+          echo "Requested macOS attempt $((ATTEMPT + 1)) for [CI run $RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID)." >> "$GITHUB_STEP_SUMMARY"
