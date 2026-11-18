@@ -560,12 +560,13 @@ test(
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {randomUUID} from 'node:crypto';
 const controlModule=new URL('./local-control.js',import.meta.url);
 const {serveControl}=await import(controlModule.href);
 if(process.argv[2]==='help') console.log(JSON.stringify({controlModule:controlModule.href,protocolModule:import.meta.resolve('@harness-dock/protocol')}));
 else if(process.argv[2]==='run') {
  const config=JSON.parse(await readFile(process.argv[3],'utf8'));
- const status={nodeId:config.nodeId,daemonId:'synthetic-panel-daemon',pid:process.pid,connected:false,endpoint:config.endpoint,
+ const status={nodeId:config.nodeId,daemonId:randomUUID(),pid:process.pid,connected:false,endpoint:config.endpoint,
   entrypoint:fileURLToPath(import.meta.url),runtime:process.execPath};
  await serveControl(config,()=>status,async()=>{},async()=>{
   let reason=''; try{reason=await readFile(join(config.stateDir,'busy'),'utf8');}catch{}
@@ -686,7 +687,10 @@ else if(process.argv[2]==='run') {
     await rm(bundle, { recursive: true });
     // Removing/moving the application payload must not break the installed device runtime.
     await runPanelOperation({ operation: "start", config: configPath }, bundle);
-    assert.equal((await panelStatus(configPath)).running, true);
+    const restarted = await panelStatus(configPath);
+    assert.equal(restarted.running, true);
+    assert.equal(restarted.nodeId, state.nodeId);
+    assert.ok(restarted.daemonId && restarted.daemonId !== state.daemonId);
     assert.deepEqual(await readFile(configPath), before);
     await runPanelOperation({ operation: "stop", config: configPath }, bundle);
   },
