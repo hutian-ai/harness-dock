@@ -173,7 +173,6 @@ export async function createMcpBridge<TDelivery = unknown>(input: {
       { name: input.name ?? "harness-dock-tools", version: "1.0.0" },
       { capabilities: { tools: { listChanged: false } } },
     );
-    let inFlight = 0;
     mcp.setRequestHandler("tools/list", async () => {
       ready = true;
       resolveReady?.();
@@ -192,15 +191,8 @@ export async function createMcpBridge<TDelivery = unknown>(input: {
           "Runtime invocation is not active",
         );
       const key = `${connectionId}-${context.mcpReq.id}`;
-      if (
-        inFlight >= 8 ||
-        active.requests.size >= 100 ||
-        active.requests.has(key)
-      )
-        throw new ProtocolError(
-          INVALID_REQUEST,
-          "Duplicate or excessive tool request",
-        );
+      if (active.requests.has(key))
+        throw new ProtocolError(INVALID_REQUEST, "Duplicate tool request");
       const call: McpToolCall = {
         callId: `mcp-${active.id}-${key}`,
         name: request.params.name,
@@ -217,9 +209,9 @@ export async function createMcpBridge<TDelivery = unknown>(input: {
           "Unknown tool or invalid arguments",
         );
       active.requests.add(key);
-      inFlight += 1;
       const operation = (async () => {
         try {
+          if (current !== active) throw new Error("Runtime invocation expired");
           input.signal.throwIfAborted();
           active.invocation.signal.throwIfAborted();
           context.mcpReq.signal.throwIfAborted();
@@ -246,8 +238,6 @@ export async function createMcpBridge<TDelivery = unknown>(input: {
             INTERNAL_ERROR,
             "Runtime tool request failed or was canceled",
           );
-        } finally {
-          inFlight -= 1;
         }
       })();
       active.pending.add(operation);

@@ -21,6 +21,7 @@ import { DeviceHost } from "./device-host.ts";
 import { serveControl } from "./local-control.ts";
 import { daemonEnvironment } from "./provider-environment.ts";
 import { discoverProxyDefaults } from "./provider-proxy.ts";
+import { DevicePower } from "./device-power.ts";
 
 /** Outbound connection recovery restores observation; it never replays requests. */
 export class DeviceConnection {
@@ -196,14 +197,20 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
   const host = new DeviceHost(config, undefined, proxyDefaults);
   const ca = config.caFile ? await readFile(config.caFile, "utf8") : undefined;
   const connection = new DeviceConnection(host, config, ca);
+  const power = new DevicePower(config.stateDir);
   let stopping: Promise<void> | undefined;
   const stop = () =>
     (stopping ??= (async () => {
       connection.stop();
-      await host.close();
+      try {
+        await host.close();
+      } finally {
+        await power.close();
+      }
     })());
   let closeControl: (() => Promise<void>) | undefined;
   try {
+    await power.start();
     closeControl = await serveControl(
       config,
       () => ({
@@ -212,6 +219,7 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
         pid: process.pid,
         connected: connection.connected,
         endpoint: config.endpoint,
+        power: power.status,
         ...(connection.connectionError
           ? { connectionError: connection.connectionError }
           : {}),
@@ -232,8 +240,8 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
       () => {
         const closing = host.closeIfIdle();
         connection.stop();
-        stopping = closing;
-        return closing;
+        stopping = closing.finally(() => power.close());
+        return stopping;
       },
       (id, provider) => host.startSelfTest(id, provider),
       (id, provider) => host.lookupSelfTest(id, provider),
@@ -242,6 +250,7 @@ export async function runDeviceDaemon(config: DeviceConfig): Promise<void> {
         resume: (id) => host.resumeAdmission(id),
       },
       () => host.refreshProviderDetails(),
+      (enabled) => power.setEnabled(enabled),
     );
     connection.connect();
   } catch (error) {

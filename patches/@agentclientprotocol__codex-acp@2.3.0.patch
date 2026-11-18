@@ -1,7 +1,8 @@
 diff --git a/dist/index.js b/dist/index.js
+index f44e3aa831b7229ee6a2a681d45f6aa4ee2271b6..4356bd593463d6549e116deec601a10c5e7c37a0 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -27964,6 +27964,10 @@
+@@ -27964,6 +27964,10 @@ var require2 = createRequire(import.meta.url);
  var DRAINED_MARKER_METHOD = "codex-acp/stdoutDrained";
  function startCodexConnection(codexPath, env, appServerStartupArgs = ["app-server"], options = {}) {
    const spawnEnv = env ?? process.env;
@@ -12,7 +13,7 @@ diff --git a/dist/index.js b/dist/index.js
    let codex;
    if (codexPath) {
      codex = process.platform === "win32" ? (0, import_cross_spawn.default)(codexPath, appServerStartupArgs, { env: spawnEnv }) : spawn(codexPath, appServerStartupArgs, { env: spawnEnv });
-@@ -33839,10 +33843,8 @@
+@@ -33839,10 +33843,8 @@ function webSearchTitle(item) {
  
  // src/ContentChunks.ts
  function createMessagePhaseMeta(phase, airClient) {
@@ -25,7 +26,7 @@ diff --git a/dist/index.js b/dist/index.js
  }
  function createUserMessageChunk(content, messageId, meta3) {
    if (messageId) {
-@@ -35759,9 +35761,20 @@
+@@ -35759,9 +35761,21 @@ ${diff}`, "");
      if (handledBySubagents) return;
      if (ignoredBySubagents) return;
      if (updateEvent === void 0) updateEvent = await this.createUpdateEvent(notification);
@@ -36,6 +37,7 @@ diff --git a/dist/index.js b/dist/index.js
 +    if (notification.params.threadId === this.sessionState.sessionId &&
 +        (notification.method === "item/started" || notification.method === "item/completed")) {
 +      const item = this.dockItemDetails(notification.params.item);
++      if (notification.method === "item/completed") this.dockSummaries?.delete(JSON.stringify([notification.params.turnId, notification.params.item.id]));
 +      if (item) nativeItem = { threadId: notification.params.threadId, turnId: notification.params.turnId,
 +        stage: notification.method === "item/started" ? "started" : "completed", item };
 +    }
@@ -49,7 +51,7 @@ diff --git a/dist/index.js b/dist/index.js
    }
    async waitForNativeSubagentSession(childThreadId) {
      return await this.subagents.waitForMaterializedSession(childThreadId);
-@@ -35869,14 +35882,17 @@
+@@ -35869,15 +35883,19 @@ ${params.turnId}`;
              }
            }
          }
@@ -67,9 +69,11 @@ diff --git a/dist/index.js b/dist/index.js
 +        if (notification.params.threadId !== this.sessionState.sessionId) return null;
 +        return this.dockEvent({ kind: "turn_started", threadId: notification.params.threadId, turnId: notification.params.turn.id });
        case "turn/completed":
++        if (notification.params.threadId === this.sessionState.sessionId) this.dockSummaries?.clear();
          await this.plans.flush();
          this.plans.clearTurn();
-@@ -35891,8 +35907,13 @@
+         this.latestRootTurnId = this.sessionState.currentTurnId ?? this.latestRootTurnId;
+@@ -35891,8 +35909,13 @@ ${params.turnId}`;
          this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
          this.sessionState.openToolCalls.clear();
          return null;
@@ -85,9 +89,12 @@ diff --git a/dist/index.js b/dist/index.js
        case "thread/name/updated":
          if (isStaleAutomaticTitleEcho(this.sessionState, normalizeSessionTitle(notification.params.threadName))) {
            this.sessionState.titleGen?.observeRename();
-@@ -35958,8 +35979,7 @@
+@@ -35956,10 +35979,9 @@ ${params.turnId}`;
+         ) : this.createContextCompactedEvent();
+       case "item/reasoning/summaryTextDelta":
          this.completeRetryIncidentOnTurnProgress();
-         return this.createReasoningDeltaEvent(notification.params);
+-        return this.createReasoningDeltaEvent(notification.params);
++        return this.dockReasoningSummary(notification.params);
        case "item/reasoning/textDelta":
 -        this.completeRetryIncidentOnTurnProgress();
 -        return this.createReasoningDeltaEvent(notification.params);
@@ -95,7 +102,7 @@ diff --git a/dist/index.js b/dist/index.js
        case "item/reasoning/summaryPartAdded":
          this.completeRetryIncidentOnTurnProgress();
          return this.createReasoningSectionBreakEvent(notification.params);
-@@ -36198,7 +36218,10 @@
+@@ -36198,7 +36220,10 @@ ${event.details}` : event.summary;
          return this.renderer.render(this.subagents.legacyCollaborationCompleted(event.item));
        case "agentMessage":
          this.rememberAgentMessagePhase(event.item);
@@ -107,7 +114,7 @@ diff --git a/dist/index.js b/dist/index.js
        case "plan":
          return await this.createCompletedPlanEvent(event.item);
        case "exitedReviewMode":
-@@ -36224,7 +36247,7 @@
+@@ -36224,7 +36249,7 @@ ${event.details}` : event.summary;
      this.itemStreams.agentMessagePhases.set(item.id, item.phase);
    }
    createCompletedReasoningEvent(item) {
@@ -116,12 +123,30 @@ diff --git a/dist/index.js b/dist/index.js
      const text = parts.filter((part) => part.length > 0).join("\n\n");
      if (text.length === 0) {
        return null;
-@@ -36462,6 +36485,22 @@
-       data.additionalDetails = error62.additionalDetails;
+@@ -36463,6 +36488,41 @@ ${event.details}` : event.summary;
      }
      return data;
-+  }
+   }
 +  // ACP already carries tool inputs/results. Only missing native identity and facts are added here.
++  // Only the explicitly public summary source reaches this method; never textDelta/content.
++  dockReasoningSummary(params) {
++    const { threadId, turnId, itemId, summaryIndex, delta } = params;
++    if (threadId !== this.sessionState.sessionId || typeof turnId !== "string" || typeof itemId !== "string" ||
++        !Number.isSafeInteger(summaryIndex) || summaryIndex < 0 || summaryIndex >= 32 || typeof delta !== "string") return null;
++    const summaries = this.dockSummaries ??= new Map();
++    const key = JSON.stringify([turnId, itemId]);
++    let parts = summaries.get(key);
++    if (!parts) {
++      if (summaries.size >= 128) summaries.delete(summaries.keys().next().value);
++      parts = [];
++      summaries.set(key, parts);
++    }
++    const remaining = 16000 - parts.join("\n\n").length;
++    if (remaining <= 0) return null;
++    parts[summaryIndex] = (parts[summaryIndex] ?? "") + delta.slice(0, remaining);
++    return this.dockEvent({ kind: "item", threadId, turnId, stage: "updated",
++      item: { id: itemId, type: "reasoning", summary: parts.join("\n\n").slice(0, 16000) } });
++  }
 +  dockItemDetails(item) {
 +    if (!["commandExecution", "mcpToolCall", "dynamicToolCall", "webSearch", "fileChange", "reasoning"].includes(item.type)) return null;
 +    const result = { id: item.id, type: item.type };
@@ -136,10 +161,11 @@ diff --git a/dist/index.js b/dist/index.js
 +  }
 +  dockEvent(event) {
 +    return { sessionUpdate: "session_info_update", _meta: { "harness-dock": { version: 1, event } } };
-   }
++  }
    handleTokenUsageUpdated(params) {
      this.sessionState.lastTokenUsage = toTokenCount(params.tokenUsage.last);
-@@ -37242,7 +37281,16 @@
+     this.sessionState.totalTokenUsage = toTokenCount(params.tokenUsage.total);
+@@ -37242,7 +37302,16 @@ function buildMcpPermissionRequest(sessionId, params, context, nextStandaloneToo
      correlatedCallId,
      nextStandaloneToolCallId
    ));
@@ -157,7 +183,7 @@ diff --git a/dist/index.js b/dist/index.js
    return {
      request: {
        sessionId,
-@@ -40333,7 +40381,9 @@
+@@ -40333,7 +40402,9 @@ var CodexAcpClient = class _CodexAcpClient {
      if (!cwd) {
        return;
      }
@@ -168,7 +194,7 @@ diff --git a/dist/index.js b/dist/index.js
      if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
        await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
        this.skillExtraRoots = skillExtraRoots;
-@@ -40422,7 +40472,7 @@
+@@ -40422,7 +40493,7 @@ var CodexAcpClient = class _CodexAcpClient {
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
        sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
@@ -177,7 +203,7 @@ diff --git a/dist/index.js b/dist/index.js
        effort,
        model: modelId.model,
        serviceTier,
-@@ -48071,6 +48121,57 @@
+@@ -48071,6 +48142,57 @@ var CodexAcpServer = class {
      if (appServer) await appServer;
      return { trusted: await this.runWithProcessCheck(() => trustCodexHooks(this.codexAcpClient.appServerClient, cwd, hooks)) };
    }
@@ -235,7 +261,7 @@ diff --git a/dist/index.js b/dist/index.js
    async extMethod(method, params) {
      const methodRequest = { method, params };
      if (!isExtMethodRequest(methodRequest)) {
-@@ -52087,7 +52188,7 @@
+@@ -52087,7 +52209,7 @@ function createAcpAgentRouter(createAgent) {
        }
      });
    };

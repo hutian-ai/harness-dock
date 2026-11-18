@@ -65,6 +65,7 @@ import {
   legacyOperationRecovery,
   type LegacyLockStatus,
 } from "./operation-owner.ts";
+import { idlePowerStatus } from "./device-power.ts";
 
 const localPath = z
   .string()
@@ -88,6 +89,7 @@ const request = z.strictObject({
     "start",
     "stop",
     "autostart",
+    "keep-awake",
     "doctor",
     "test",
     "test-status",
@@ -415,6 +417,7 @@ type PanelStatusResult = Awaited<ReturnType<typeof panelReleases>> & {
   nodeId?: string;
   daemonId?: string;
   providerActivity?: LocalStatus["providerActivity"];
+  power?: LocalStatus["power"];
   overview?: LocalStatus["overview"];
   providerDetailsSupported?: boolean;
   providerDetails?: LocalStatus["providerDetails"];
@@ -538,6 +541,7 @@ export async function panelStatus(
     cwd: config.cwd,
     nodeId: config.nodeId,
     providerActivity: status?.providerActivity,
+    power: status ? status.power : await idlePowerStatus(config.stateDir),
     providerDetailsSupported: status?.providerDetailsSupported === true,
     providerDetails: status?.providerDetails,
     daemonId: status?.daemonId,
@@ -667,6 +671,17 @@ async function runNativePanelOperation(
   }
   if (options.operation === "status")
     return panelStatus(path, home, bundle, options.refreshProviders ?? true);
+  if (options.operation === "keep-awake") {
+    if (options.enabled === undefined) throw new Error("invalid_panel_request");
+    const config = await privateConfig(path);
+    const current = await control(config, "status");
+    if (!current) throw new Error("device_not_running");
+    if (!current.power?.supported)
+      throw new Error("power_management_unsupported");
+    if (!(await control(config, "power", { enabled: options.enabled })))
+      throw new Error("device_not_running");
+    return panelStatus(path, home, bundle, false);
+  }
   if (
     options.operation === "prepare-legacy-lock-recovery" ||
     options.operation === "recover-legacy-lock"
@@ -1305,6 +1320,8 @@ export function panelError(error: unknown): string {
     "self_test_id_conflict",
     "device_not_running",
     "log_not_found",
+    "power_management_unsupported",
+    "power_settings_unavailable",
     "invalid_config_file_permissions",
     "windows_private_path_unavailable",
     "windows_pipe_acl_unavailable",
@@ -1348,6 +1365,15 @@ export function panelError(error: unknown): string {
     "admission_recovery_unsupported",
     "admission_recovery_restart_required",
     "admission_recovery_changed",
+  ])
+    if (
+      message === `local_control_rejected:409:${code}` ||
+      message === `local_control_rejected:500:${code}`
+    )
+      return code;
+  for (const code of [
+    "power_management_unsupported",
+    "power_settings_unavailable",
   ])
     if (
       message === `local_control_rejected:409:${code}` ||

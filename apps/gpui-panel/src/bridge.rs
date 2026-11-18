@@ -240,6 +240,8 @@ pub fn message(code: &str) -> &'static str {
         }
         "self_test_id_conflict" => "已有待确认的测试记录，请先核对原记录，不会重发。",
         "device_not_running" => "设备后台尚未启动。",
+        "power_management_unsupported" => "当前后台尚不支持保持唤醒，请检查系统支持范围和后台版本。",
+        "power_settings_unavailable" => "保持唤醒设置未能保存，请查看本机日志后重试。",
         "device_not_installed" => {
             "这是源码或自定义安装的设备，请使用原入口维护，或显式使用此应用管理。"
         }

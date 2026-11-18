@@ -29,6 +29,7 @@ try {
       "install-dir": { type: "string" },
       node: { type: "string" },
       disable: { type: "boolean" },
+      enable: { type: "boolean" },
       scope: { type: "string" },
       "recovery-id": { type: "string" },
       version: { type: "boolean" },
@@ -51,6 +52,9 @@ try {
     );
     console.log(
       "harness-dock-daemon prepare-admission-recovery [config.json]\nharness-dock-daemon resume-admission [config.json] --recovery-id <checkpoint UUID>\nRecovery preserves unknown outcomes. Resume requires verified host restart; it never replays or releases the original task.",
+    );
+    console.log(
+      "harness-dock-daemon keep-awake [config.json] [--enable|--disable]\nmacOS: prevent automatic sleep while the daemon runs, including idle time. Default enabled; display sleep and screen lock remain available. Changes require the running daemon and persist across restarts. Without flags, show the current power state.",
     );
     console.log(
       "harness-dock-daemon prepare-legacy-lock-recovery [config.json] --scope connection|installation\nharness-dock-daemon recover-legacy-lock [config.json] --scope connection|installation --recovery-id <checkpoint UUID>\nLegacy lock recovery targets only the desktop selected binding, requires a verified host restart and archives the unchanged lock.",
@@ -135,6 +139,7 @@ try {
         "upgrade",
         "rollback",
         "autostart",
+        "keep-awake",
         "prepare-admission-recovery",
         "resume-admission",
         "prepare-legacy-lock-recovery",
@@ -239,6 +244,19 @@ try {
         );
         if (!result) throw new Error("device_not_running");
         console.log(JSON.stringify(result, null, 2));
+      } else if (command === "keep-awake") {
+        if (values.enable && values.disable)
+          throw new Error("choose --enable or --disable");
+        const result = await control(
+          config,
+          values.enable || values.disable ? "power" : "status",
+          values.enable || values.disable
+            ? { enabled: !values.disable }
+            : undefined,
+        );
+        if (!result) throw new Error("device_not_running");
+        if (!result.power) throw new Error("power_management_unsupported");
+        console.log(JSON.stringify(result.power, null, 2));
       } else if (command === "status" || command === "stop") {
         const result = await control(config, command);
         const installation =

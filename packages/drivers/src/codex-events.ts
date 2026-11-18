@@ -30,7 +30,7 @@ export type CodexEvent =
       | { kind: "turn_started" }
       | {
           kind: "item";
-          stage: "started" | "completed";
+          stage: "started" | "updated" | "completed";
           item: Record<string, unknown>;
         }
       | { kind: "diff"; diff: string | null }
@@ -71,8 +71,11 @@ function dockProviderEvent(
   if (event.kind === "turn_started") return { ...base, kind: event.kind };
   if (
     event.kind === "item" &&
-    (event.stage === "started" || event.stage === "completed") &&
+    (event.stage === "started" ||
+      event.stage === "completed" ||
+      event.stage === "updated") &&
     isRecord(event.item) &&
+    (event.stage !== "updated" || event.item.type === "reasoning") &&
     typeof event.item.id === "string" &&
     typeof event.item.type === "string" &&
     [

@@ -16,6 +16,7 @@ import type { AdmissionRecoveryStatus } from "./device-store.ts";
 import type { ProviderProxyStatus } from "./provider-proxy.ts";
 import type { ProviderDetails } from "./provider-details.ts";
 import type { DeviceOverview } from "./device-overview.ts";
+import type { DevicePowerStatus } from "./device-power.ts";
 
 export interface SelfTestRequest {
   id: string;
@@ -38,6 +39,7 @@ export interface LocalStatus {
   activeRunIds?: string[];
   unresolvedRunIds?: string[];
   connectionError?: string;
+  power?: DevicePowerStatus;
   admissionRecovery?: AdmissionRecoveryStatus;
   selfTest?: SelfTestSnapshot;
   selfTests?: SelfTestSnapshot[];
@@ -96,6 +98,17 @@ const responseProvider = (value: unknown): SelfTestProvider | undefined =>
     : value === "codex" || value === "dsh" || value === "zcode"
       ? value
       : undefined;
+function powerRequest(value: unknown): { enabled: boolean } {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Object.keys(value).length !== 1 ||
+    !("enabled" in value) ||
+    typeof value.enabled !== "boolean"
+  )
+    throw new Error("invalid_local_control_request");
+  return { enabled: value.enabled };
+}
 
 /** Shared bounded body reader for authenticated local commands. */
 function readControlBody(
@@ -139,6 +152,7 @@ export async function serveControl(
     resume(id: string): Promise<unknown>;
   },
   refreshProviderDetails?: () => Promise<void>,
+  setPowerEnabled?: (enabled: boolean) => Promise<void>,
 ) {
   if (process.platform === "win32")
     await (
@@ -181,7 +195,42 @@ export async function serveControl(
     res.setHeader("Content-Type", "application/json");
     if (req.method === "GET" && req.url === "/status")
       res.end(JSON.stringify(status()));
-    else if (
+    else if (req.method === "POST" && req.url === "/power") {
+      if (!setPowerEnabled) {
+        res
+          .writeHead(409)
+          .end(JSON.stringify({ error: "power_management_unsupported" }));
+        return;
+      }
+      readControlBody(req, res, "invalid_local_control_request", (body) => {
+        let input: { enabled: boolean };
+        try {
+          if (req.headers["content-type"] !== "application/json")
+            throw new Error("invalid_local_control_request");
+          input = powerRequest(JSON.parse(body.toString("utf8")));
+        } catch {
+          res
+            .writeHead(400)
+            .end(JSON.stringify({ error: "invalid_local_control_request" }));
+          return;
+        }
+        void setPowerEnabled(input.enabled).then(
+          () => res.end(JSON.stringify(status())),
+          (error) => {
+            const code =
+              error instanceof Error &&
+              ["power_management_unsupported", "device_stopping"].includes(
+                error.message,
+              )
+                ? error.message
+                : "power_settings_unavailable";
+            res
+              .writeHead(code === "power_settings_unavailable" ? 500 : 409)
+              .end(JSON.stringify({ error: code }));
+          },
+        );
+      });
+    } else if (
       req.method === "POST" &&
       (req.url === "/self-test" || req.url === "/self-test-status")
     ) {
@@ -335,7 +384,15 @@ export async function serveControl(
         })
         .then(
           () => {
-            res.end(JSON.stringify({ ...snapshot, stopped: true }));
+            res.end(
+              JSON.stringify({
+                ...snapshot,
+                ...(snapshot.power
+                  ? { power: { ...snapshot.power, active: false } }
+                  : {}),
+                stopped: true,
+              }),
+            );
             server.close();
           },
           (error) => {
@@ -391,8 +448,9 @@ export async function control(
     | "self-test"
     | "self-test-status"
     | "prepare-admission-recovery"
-    | "resume-admission",
-  params?: SelfTestRequest,
+    | "resume-admission"
+    | "power",
+  params?: SelfTestRequest | { enabled: boolean },
 ): Promise<(LocalStatus & { stopped?: boolean }) | null> {
   const testRequest = method === "self-test" || method === "self-test-status";
   const readOnly = method === "status" || method === "self-test-status";
@@ -400,6 +458,7 @@ export async function control(
   // Legacy Codex daemons accept only { id }; only a named non-default request extends the wire body.
   const recovery =
     method === "resume-admission" ? recoveryRequest(params) : undefined;
+  const power = method === "power" ? powerRequest(params) : undefined;
   const input = test
     ? JSON.stringify({
         id: test.id,
@@ -407,8 +466,10 @@ export async function control(
       })
     : recovery
       ? JSON.stringify({ id: recovery.id })
-      : undefined;
-  if (!testRequest && !recovery && params !== undefined)
+      : power
+        ? JSON.stringify(power)
+        : undefined;
+  if (!testRequest && !recovery && !power && params !== undefined)
     throw new Error("invalid_local_control_request");
   if (process.platform === "win32")
     await (

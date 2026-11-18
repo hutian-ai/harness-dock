@@ -153,6 +153,44 @@ impl Panel {
             }))
     }
     fn settings_preferences(&self, cx: &mut Context<Self>) -> GroupBox {
+        let power = &self.state["power"];
+        let power_unavailable = if !cfg!(target_os = "macos") {
+            Some("当前系统暂未支持保持唤醒。")
+        } else if self.stale {
+            Some("状态待更新，刷新后可设置。")
+        } else if !yes(&self.state, "running") {
+            Some("启动后台服务后可设置。")
+        } else if !yes(power, "supported") {
+            Some("当前后台版本尚不支持，请更新后台。")
+        } else {
+            None
+        };
+        let power_description = power_unavailable.unwrap_or_else(|| {
+            if power["error"].is_string() {
+                if text(power, "error") == "power_settings_unavailable" {
+                    "本机设置读取失败，请查看日志；尚未保持唤醒。"
+                } else {
+                    "保持唤醒尚未生效，后台正在重试。"
+                }
+            } else if yes(power, "active") {
+                "已生效，空闲待命时也保持唤醒；仍可锁屏和关屏。"
+            } else if yes(power, "enabled") {
+                "正在确认保持唤醒状态。"
+            } else {
+                "已关闭，电脑按系统设置睡眠，睡眠期间无法执行任务。"
+            }
+        });
+        let power_control = Switch::new("keep-awake")
+            .checked(yes(power, "enabled"))
+            .accessibility_label("后台运行时保持电脑唤醒")
+            .disabled(power_unavailable.is_some() || self.busy || self.interaction_pending || self.connect_unconfirmed)
+            .on_change(cx.listener(|this, enabled, _, cx| {
+                if this.stale || this.busy || this.interaction_pending || this.connect_unconfirmed
+                    || !yes(&this.state, "running") || !yes(&this.state["power"], "supported") {
+                    return;
+                }
+                this.request("keep-awake", json!({ "enabled": *enabled }), Reply::State, None, cx);
+            }));
         let unavailable = if cfg!(windows) {
             Some("Windows 尚未提供自动启动。")
         } else if self.stale {
@@ -223,6 +261,14 @@ impl Panel {
                             })
                             .items_center()
                             .child(h_flex().min_h(px(32.)).justify_end().child(control)),
+                    )
+                    .child(
+                        Field::new()
+                            .label_fn(move |_, cx| {
+                                preference_label("后台保持唤醒", power_description, cx)
+                            })
+                            .items_center()
+                            .child(h_flex().min_h(px(32.)).justify_end().child(power_control)),
                     ),
             )
     }
